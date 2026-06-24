@@ -1,0 +1,14 @@
+# Ignore environment and data
+.env
+*.csv
+*.parquet
+*.db
+__pycache__/
+.vscode/
+.pyc
+
+# Ignore the virtual environment
+venv/
+
+# Ignore environment variables/secrets
+.env
