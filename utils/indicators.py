@@ -1,5 +1,6 @@
 import numpy as np
 from numpy.lib.stride_tricks import sliding_window_view
+import pandas as pd
 
 def calculate_zscore(data, window=None):
     """
@@ -54,30 +55,92 @@ def get_wilders_rsi(delta, window=14):
         
     rs = avg_gain / (avg_loss + 1e-10)
     return 100 - (100 / (1 + rs))
-def get_market_kinematics(price_data, ma_window=50, rsi_window=2):
+
+import numpy as np
+
+def calculate_atr(high, low, close, window=14):
     """
-    Computes MA, MA Slope (1st deriv), MA Acceleration (2nd deriv), and RSI.
-    Returns: (ma, slope, acceleration, rsi)
+    Calculates ATR matching the Pine Script ta.rma logic.
+    """
+    # 1. Calculate True Range
+    prev_close = np.roll(close, 1)
+    prev_close[0] = close[0] # Handle first element
+    
+    tr1 = high - low
+    tr2 = np.abs(high - prev_close)
+    tr3 = np.abs(low - prev_close)
+    
+    true_range = np.maximum(tr1, np.maximum(tr2, tr3))
+    
+    # 2. Wilder's Smoothing (RMA)
+    atr = np.zeros_like(true_range)
+    atr[window-1] = np.mean(true_range[:window]) # Initial SMA
+    
+    for i in range(window, len(true_range)):
+        atr[i] = (atr[i-1] * (window - 1) + true_range[i]) / window
+        
+    return atr
+
+def get_market_kinematics(price_data, atr_data, ma_window=50, lookback=9, rsi_window=2):
+    """
+    Computes indicators matching the provided Pine Script logic.
     """
     price = np.asanyarray(price_data, dtype=float)
+    atr = np.asanyarray(atr_data, dtype=float)
     
-    # 1. Moving Average (Simple)
-    # Using 'valid' means the output is shorter by (ma_window - 1)
+    # 1. Moving Average (SMA for example, use ta-lib or custom EMA for others)
     ma = np.convolve(price, np.ones(ma_window)/ma_window, mode='valid')
     
-    # 2. MA Slope (Velocity) & Acceleration
-    slope = np.diff(ma)
-    acceleration = np.diff(slope)
+    # 2. MA Slope (Velocity) 
+    # Logic: (MA[t] - MA[t - lookback]) / ATR[t]
+    # We slice MA to align with the lookback window
+    ma_slope = (ma[lookback:] - ma[:-lookback]) / atr[lookback + ma_window - 1:]
     
-    # 3. RSI Calculation
+    # 3. Acceleration (Change in Slope)
+    # This is the 1st derivative of the slope
+    acceleration = np.diff(ma_slope)
+    
+    # 4. RSI (using the corrected RSI function)
     delta = np.diff(price)
- 
-    rsi = get_wilders_rsi(delta)
+    rsi = get_wilders_rsi(delta, rsi_window)
     
-    # Align lengths:
-    # Since diff() reduces length by 1, and convolution reduces by (window-1)
-    # acceleration is 2 shorter than ma, RSI is 1 shorter than price.
-    # To keep this clean, truncate everything to the shortest common length:
-    min_len = len(acceleration)
-    return ma[-min_len:], slope[-min_len:], acceleration, rsi[-min_len:]
+    # Alignment: Acceleration is 1 shorter than Slope
+    # Truncate all to the shortest length
+    ma_final = ma[lookback + 1:] # Align with slope
+    slope_final = ma_slope[1:]   # Align with acceleration
+    
+    return ma_final, slope_final, acceleration, rsi[-(len(acceleration)):]
 
+def analyze_regime_speed(df):
+    results = []
+    i = 0
+    while i < len(df) - 20:
+        # Long Entry: RSI < 30
+        if df.iloc[i]['rsi'] < 30:
+            # Categorize the regime
+            slope_dir = "Slope_UP" if df.iloc[i]['ma_slope'] > 0 else "Slope_DOWN"
+            force_dir = "Force_POS" if df.iloc[i]['acc'] > 0 else "Force_NEG"
+            
+            # Find recovery speed
+            for bars in range(1, 21):
+                if df.iloc[i + bars]['rsi'] >= 50:
+                    results.append({
+                        'bars_to_neutral': bars,
+                        'regime': f"Long_{slope_dir}_{force_dir}"
+                    })
+                    break
+        
+        # Short Entry: RSI > 70
+        elif df.iloc[i]['rsi'] > 70:
+            slope_dir = "Slope_UP" if df.iloc[i]['ma_slope'] > 0 else "Slope_DOWN"
+            force_dir = "Force_POS" if df.iloc[i]['acc'] > 0 else "Force_NEG"
+            
+            for bars in range(1, 21):
+                if df.iloc[i + bars]['rsi'] <= 50:
+                    results.append({
+                        'bars_to_neutral': bars,
+                        'regime': f"Short_{slope_dir}_{force_dir}"
+                    })
+                    break
+        i += 1
+    return pd.DataFrame(results)
