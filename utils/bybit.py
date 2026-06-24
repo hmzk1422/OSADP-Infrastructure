@@ -28,6 +28,7 @@ Dependencies:
 
 from pybit.unified_trading import HTTP
 import pandas as pd
+import time
 
 class BybitConnector:
     """
@@ -45,40 +46,53 @@ class BybitConnector:
         self.api_key = api_key
         self.api_secret = api_secret
 
-    def get_ohlcv(self, symbol: str, interval: str, limit: int = 200) -> pd.DataFrame:
-        """
-        Fetches OHLCV data and returns it as a cleaned pandas DataFrame.
-        
-        Args:
-            symbol: Trading pair (e.g., 'BTCUSDT')
-            interval: Timeframe ('1', '3', '5', '15', '30', '60', etc.)
-            limit: Number of candles (max 200)
-        """
-        response = self.session.get_kline(
-            category="linear",
-            symbol=symbol,
-            interval=interval,
-            limit=limit
-        )
-        
-        if response['retCode'] != 0:
-            raise ConnectionError(f"Bybit API Error: {response['retMsg']}")
-            
-            
-        data = response['result']['list']
-        columns = ['timestamp', 'open', 'high', 'low', 'close', 'volume', 'turnover']
+    def get_ohlcv(self, symbol: str, interval: str, total_limit: int = 5000) -> pd.DataFrame:
+        all_data = []
+        # Bybit API limit per request
+        batch_size = 1000 
+        # Use the earliest timestamp found as the end_time for the next batch
+        end_time = None 
 
-        df = pd.DataFrame(data, columns=columns)
+        while len(all_data) < total_limit:
+            # Determine how many candles to fetch in this batch
+            remaining = total_limit - len(all_data)
+            current_limit = min(remaining, batch_size)
+            
+            response = self.session.get_kline(
+                category="linear",
+                symbol=symbol,
+                interval=interval,
+                limit=current_limit,
+                end=end_time
+            )
+            
+            if response['retCode'] != 0:
+                raise ConnectionError(f"Bybit API Error: {response['retMsg']}")
+                
+            batch = response['result']['list']
+            if not batch:
+                break
+                
+            all_data.extend(batch)
+            
+            # Update end_time to the timestamp of the oldest candle received 
+            # (The API returns data in descending order)
+            end_time = int(batch[-1][0])
+            
+            # Avoid hitting rate limits
+            time.sleep(0.1) 
+
+        # Construct DataFrame
+        columns = ['timestamp', 'open', 'high', 'low', 'close', 'volume', 'turnover']
+        df = pd.DataFrame(all_data, columns=columns)
         
-        # Convert to numeric and set chronological order
+        # Process the data
+        df = df.drop_duplicates(subset=['timestamp'])
         df = df.iloc[::-1].reset_index(drop=True)
-        df['timestamp'] = pd.to_numeric(df['timestamp'])
+        df['timestamp'] = pd.to_datetime(pd.to_numeric(df['timestamp']), unit='ms')
         df[['open', 'high', 'low', 'close', 'volume']] = df[['open', 'high', 'low', 'close', 'volume']].astype(float)
         
-        # Now this will work because it's a clean integer
-        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-        
-        return df
+        return df.head(total_limit)
 
     def get_all_tickers(self, category: str = "linear") -> list:
         """
