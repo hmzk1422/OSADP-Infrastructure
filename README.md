@@ -1,1 +1,2 @@
-# intraday-momentum-composite
+# Intraday-Momentum-Composite
+systematic framework for capturing short-term alpha in high-volatility crypto-asset markets. By constructing a synthetic, equal-weighted intraday index, we neutralize idiosyncratic risk while isolating systemic momentum. We hypothesize that the persistence of price action is functionally linked to the second derivative of price (MA Acceleration). By identifying regimes where MA acceleration remains $\text{acc} > 0$ (long) or $\text{acc} < 0$ (short), we optimize entry points for RSI-based mean reversion (snapback) strategies, effectively simulating the structural drift of traditional equity indices within a high-frequency digital asset context.
