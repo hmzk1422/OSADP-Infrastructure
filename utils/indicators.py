@@ -37,9 +37,10 @@ import numpy as np
 from numpy.lib.stride_tricks import sliding_window_view
 import pandas as pd
 
+
 """
 ------------------------------------------------
-Trading Indicators
+PRICE INDICATORS
 ------------------------------------------------
 """
 
@@ -198,8 +199,11 @@ def analyze_regime_speed(df):
         i += 1
     return pd.DataFrame(results)
 
+
 """
 ------------------------------------------------
-Machine Learning Features
+ORDERFLOW INDICATORS
 ------------------------------------------------
 """
+def calculate_cvd(agg_buyer, agg_seller):
+    return pd.Series(agg_buyer - agg_seller).cumsum()

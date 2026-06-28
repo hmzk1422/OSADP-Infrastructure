@@ -1,0 +1,8 @@
+so to simplify
+- make a python file dedicated to list down variables we want to test, the target variable we want to test.
+- create a function that takes these variables and create combination of variables (division, multiplication, etc). then normalize. if there are 50 variables there would be 2550 variables total we have to go through. let assume 10k
+- after we normalize everything, our true test would be lasso regression, lightGBM (for non linear) or tree importance test. it will aggressively shrink useless variables to 0
+- lastly we use VIF to further optimize the surviving features. we find which one is truly good
+- then we run it in a ML regression one more time. rank which features are most important then we list it. then we manually filter it.
+
+the walk forward cross validation should then start from the lasso stage where we shrink useless variables? where we use for example 500 sample training. 500 sample do. 500 sample training. 500 sample do. then we see which variables persist the most is that right? the second ML regression is the same?
