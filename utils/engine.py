@@ -59,3 +59,40 @@ def plot_pnl_history(pnl_history):
     plt.legend()
     plt.grid(True, alpha=0.3)
     plt.show()
+
+def plot_two(primary_data, secondary_data_1, secondary_data_2=None, 
+             primary_label="Primary Metric", secondary_label_1="Indicator 1", 
+             secondary_label_2="Indicator 2", title="Historical Analysis"):
+    """
+    Plots a primary metric (e.g., PnL) on the top panel and up to two 
+    secondary metrics (e.g., RSI and its SMA) on the bottom panel, sharing the same X-axis.
+    """
+    # Create a figure with 2 subplots sharing the same X-axis
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8), sharex=True)
+    
+    # ==========================================
+    # Panel 1: Primary Metric (e.g., PnL, Portfolio Value)
+    # ==========================================
+    ax1.plot(primary_data, label=primary_label, color='blue', linewidth=1.2)
+    ax1.set_title(title, fontsize=14, fontweight='bold')
+    ax1.set_ylabel(primary_label, fontsize=11)
+    ax1.axhline(0, color='red', linestyle='--', linewidth=0.8) # Baseline reference
+    ax1.legend(loc="upper left")
+    ax1.grid(True, alpha=0.3)
+    
+    # ==========================================
+    # Panel 2: Secondary Metrics (e.g., Indicators, Macro Data)
+    # ==========================================
+    ax2.plot(secondary_data_1, label=secondary_label_1, color='purple', linewidth=1)
+    
+    # Optional second curve on the bottom panel (like your SMA)
+    if secondary_data_2 is not None:
+        ax2.plot(secondary_data_2, label=secondary_label_2, color='orange', linewidth=1.2)
+        
+    ax2.set_xlabel("Time Index", fontsize=11)
+    ax2.set_ylabel("Value / Scale", fontsize=11)
+    ax2.legend(loc="upper left")
+    ax2.grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    plt.show()

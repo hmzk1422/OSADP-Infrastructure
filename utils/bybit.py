@@ -46,10 +46,10 @@ class BybitConnector:
         self.api_key = api_key
         self.api_secret = api_secret
 
-    def get_ohlcv(self, symbol: str, interval: str, total_limit: int = 5000) -> pd.DataFrame:
+    def get_ohlcv(self, symbol: str, interval: str, total_limit: int = 500) -> pd.DataFrame:
         all_data = []
         # Bybit API limit per request
-        batch_size = 1000 
+        batch_size = total_limit
         # Use the earliest timestamp found as the end_time for the next batch
         end_time = None 
 

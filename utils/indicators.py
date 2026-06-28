@@ -81,6 +81,18 @@ def calculate_atr(high, low, close, window=14):
         
     return atr
 
+def sma(price_data, ma_window):
+    price = np.asanyarray(price_data, dtype=float)
+    
+    # 1. Use mode='valid' to get the clean mathematical convolution
+    ma_valid = np.convolve(price, np.ones(ma_window) / ma_window, mode='valid')
+    
+    # 2. Create an array of NaNs for the starting bars that don't have a full window
+    padding = np.full(ma_window - 1, np.nan)
+    
+    # 3. Stack the padding at the front so the most recent data stays at the end
+    return np.concatenate([padding, ma_valid])
+
 def get_market_kinematics(price_data, atr_data, ma_window=50, lookback=9, rsi_window=2):
     """
     Computes indicators matching the provided Pine Script logic.
@@ -89,7 +101,7 @@ def get_market_kinematics(price_data, atr_data, ma_window=50, lookback=9, rsi_wi
     atr = np.asanyarray(atr_data, dtype=float)
     
     # 1. Moving Average (SMA for example, use ta-lib or custom EMA for others)
-    ma = np.convolve(price, np.ones(ma_window)/ma_window, mode='valid')
+    ma = np.convolve(price, np.ones(ma_window) / ma_window, mode='valid')
     
     # 2. MA Slope (Velocity) 
     # Logic: (MA[t] - MA[t - lookback]) / ATR[t]
