@@ -49,7 +49,7 @@ def run_historical_strategy(betas, price_a, price_b, window=50):
 
 # --- Plotting Tools ---
 
-def plot_pnl_history(pnl_history):
+def plot_one(pnl_history):
     plt.figure(figsize=(10, 6))
     plt.plot(pnl_history, label="Strategy PnL", color='blue', linewidth=1)
     plt.title("Historical Strategy PnL")
