@@ -1,6 +1,47 @@
+"""
+Technical Indicators and ML Feature Engineering
+
+This module provides a suite of technical indicators and mathematical 
+transformations to normalize and prepare raw market data for machine 
+learning models.
+
+Role:
+    - Provides a library of signal processing and statistical indicators.
+    - Normalizes raw price data (OHLC) and predictive data (OF, Liquidation, etc) into feature sets for ML training.
+    - Implements custom kinematics calculations to analyze market momentum.
+
+Key Responsibilities:
+    - Feature Calculation: Volume spread analysis, TA, Liquidation, Orderflow imbalance, etc
+    - Market Analysis: Measures price velocity and acceleration relative to volatility.
+    - Regime Identification: Categorizes market states based on signal strength 
+      and recovery speed.
+    - Data Preparation: Facilitates the extraction of predictive features 
+      from raw ticker arrays.
+
+Usage:
+    import numpy as np
+    from indicators import calculate_zscore, get_market_kinematics
+    
+    # Calculate rolling Z-Score for normalized pricing
+    z_scores = calculate_zscore(price_data, window=20)
+    
+    # Extract kinematic features for ML input
+    ma, slope, acc, rsi = get_market_kinematics(price, atr, ma_window=50)
+
+Dependencies:
+    - numpy: For optimized numerical computation and windowing operations.
+    - pandas: For structured data manipulation and regime analysis.
+"""
+
 import numpy as np
 from numpy.lib.stride_tricks import sliding_window_view
 import pandas as pd
+
+"""
+------------------------------------------------
+Trading Indicators
+------------------------------------------------
+"""
 
 def calculate_zscore(data, window=None):
     """
@@ -156,3 +197,9 @@ def analyze_regime_speed(df):
                     break
         i += 1
     return pd.DataFrame(results)
+
+"""
+------------------------------------------------
+Machine Learning Features
+------------------------------------------------
+"""

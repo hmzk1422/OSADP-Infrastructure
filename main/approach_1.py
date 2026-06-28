@@ -1,13 +1,16 @@
 from utils.bybit import BybitConnector
 from utils.engine import *
+import asyncio
+import sys
 
 def run():
-    # Now you can use the class
-    client = BybitConnector(api_key="abc", api_secret="abc", testnet=False)
-    price_a = client.get_ohlcv("BTCUSDT", "1")
-    price_b = client.get_ohlcv("ETHUSDT", "1")
+    # aiodns (used by aiohttp/ccxt.pro) is incompatible with Windows'
+    # default ProactorEventLoop. SelectorEventLoop resolves this.
+    if sys.platform == 'win32':
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-    plot_pnl_history(price_a)
+    client = BybitConnector(api_key="abc", api_secret="abc", testnet=False)
+    asyncio.run(client.get_live_orderflow("BTCUSDT"))
 
 if __name__ == "__main__":
     run()
