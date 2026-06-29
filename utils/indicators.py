@@ -101,26 +101,24 @@ def get_wilders_rsi(delta, window=14):
 import numpy as np
 
 def calculate_atr(high, low, close, window=14):
-    """
-    Calculates ATR matching the Pine Script ta.rma logic.
-    """
-    # 1. Calculate True Range
+    # Convert to numpy so integer indexing works regardless of pandas index type
+    high  = np.asarray(high,  dtype=float)
+    low   = np.asarray(low,   dtype=float)
+    close = np.asarray(close, dtype=float)
+
     prev_close = np.roll(close, 1)
-    prev_close[0] = close[0] # Handle first element
-    
+    prev_close[0] = close[0]  # now safe — close is a plain numpy array
+
     tr1 = high - low
     tr2 = np.abs(high - prev_close)
-    tr3 = np.abs(low - prev_close)
-    
+    tr3 = np.abs(low  - prev_close)
     true_range = np.maximum(tr1, np.maximum(tr2, tr3))
-    
-    # 2. Wilder's Smoothing (RMA)
+
     atr = np.zeros_like(true_range)
-    atr[window-1] = np.mean(true_range[:window]) # Initial SMA
-    
+    atr[window - 1] = np.mean(true_range[:window])
     for i in range(window, len(true_range)):
-        atr[i] = (atr[i-1] * (window - 1) + true_range[i]) / window
-        
+        atr[i] = (atr[i - 1] * (window - 1) + true_range[i]) / window
+
     return atr
 
 def sma(price_data, ma_window):
@@ -199,7 +197,13 @@ def analyze_regime_speed(df):
         i += 1
     return pd.DataFrame(results)
 
+def volatility_ratio(high, low, close, atr1_window=4, atr2_window=14):
+    atr1 = calculate_atr(high, low, close, atr1_window)
+    atr2 = calculate_atr(high, low, close, atr2_window)
 
+    # Replace 0s with nan before dividing — np.where works on numpy arrays
+    atr2_safe = np.where(atr2 == 0, np.nan, atr2)
+    return atr1 / atr2_safe
 """
 ------------------------------------------------
 ORDERFLOW INDICATORS
