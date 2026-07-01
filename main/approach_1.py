@@ -9,7 +9,7 @@ def run():
     if sys.platform == 'win32':
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-    client = BybitConnector(api_key="abc", api_secret="abc", testnet=False)
+    client = BybitConnector(api_key="...", api_secret="...", testnet=False)
     asyncio.run(client.get_live_orderflow("BTCUSDT"))
 
 if __name__ == "__main__":

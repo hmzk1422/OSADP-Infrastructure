@@ -47,6 +47,7 @@ class BybitConnector:
         # Initialize the unified Bybit exchange instance in CCXT
         options = {
             'enableRateLimit': True,
+            'options': {'fetchCurrencies': False},  # never needed for this connector's use case
         }
         
         # If keys are missing or placeholders, skip fetching currency data that requires authentication
@@ -62,6 +63,12 @@ class BybitConnector:
         
         if testnet:
             self.exchange.set_sandbox_mode(True)
+
+        self.exchange.options['adjustForTimeDifference'] = True
+        try:
+            self.exchange.load_time_difference()
+        except ccxt.BaseError as e:
+            print(f"Warning: could not sync time with exchange: {e}") 
 
     def get_ohlcv(self, symbol: str, interval: str, total_limit: int = 1000) -> pd.DataFrame:
         """
@@ -215,6 +222,28 @@ class BybitConnector:
             )
         finally:
             await exchange.close()
+
+    def get_funding_rate(self, symbol: str, since: int = None, limit: int = 1000) -> pd.DataFrame:
+        try:
+            data = self.exchange.fetch_funding_rate_history(symbol, since=since, limit=limit)
+        except ccxt.BaseError as e:
+            raise ConnectionError(f"CCXT Funding Rate History Error: {e}")
+        if not data:
+            return pd.DataFrame()
+        df = pd.DataFrame(data)
+        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+        return df
+
+    def get_open_interest(self, symbol: str, timeframe: str = '1h', since: int = None, limit: int = 1000) -> pd.DataFrame:
+        try:
+            data = self.exchange.fetch_open_interest_history(symbol, timeframe=timeframe, since=since, limit=limit)
+        except ccxt.BaseError as e:
+            raise ConnectionError(f"CCXT Open Interest History Error: {e}")
+        if not data:
+            return pd.DataFrame()
+        df = pd.DataFrame(data)
+        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+        return df
 
     def get_all_tickers(self, category: str = "linear") -> list:
         """
