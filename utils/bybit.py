@@ -250,7 +250,7 @@ class BybitConnector:
         Returns a list of all active CCXT unified symbol names.
         """
         try:
-            # CCXT loads and filters market types natively
+            # CCXT loads and filters market type natively
             markets = self.exchange.load_markets()
         except ccxt.BaseError as e:
             raise ConnectionError(f"CCXT / Bybit API Error: {e}")
