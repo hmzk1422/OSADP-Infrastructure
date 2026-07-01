@@ -70,7 +70,7 @@ class BybitConnector:
         except ccxt.BaseError as e:
             print(f"Warning: could not sync time with exchange: {e}") 
 
-    def get_ohlcv(self, symbol: str, interval: str, total_limit: int = 1000) -> pd.DataFrame:
+    def get_ohlcv(self, symbol: str, interval: str, total_limit: int = 10000) -> pd.DataFrame:
         """
         Fetches historical OHLCV data and returns a cleaned pandas DataFrame.
         Note: Symbol must use standard CCXT syntax (e.g., 'BTC/USDT:USDT' for linear swaps)
