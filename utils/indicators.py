@@ -101,20 +101,25 @@ def get_wilders_rsi(delta, window=14):
 import numpy as np
 
 def calculate_atr(high, low, close, window=14):
-    # Convert to numpy so integer indexing works regardless of pandas index type
     high  = np.asarray(high,  dtype=float)
     low   = np.asarray(low,   dtype=float)
     close = np.asarray(close, dtype=float)
 
     prev_close = np.roll(close, 1)
-    prev_close[0] = close[0]  # now safe — close is a plain numpy array
+    prev_close[0] = close[0]
 
     tr1 = high - low
     tr2 = np.abs(high - prev_close)
     tr3 = np.abs(low  - prev_close)
     true_range = np.maximum(tr1, np.maximum(tr2, tr3))
 
-    atr = np.zeros_like(true_range)
+    # Forward-fill NaN true-range values BEFORE they enter the recursion,
+    # so a bad/missing bar just carries forward the last known range
+    # instead of poisoning every value after it.
+    tr_series = pd.Series(true_range).ffill().bfill()
+    true_range = tr_series.to_numpy()
+
+    atr = np.full_like(true_range, np.nan)
     atr[window - 1] = np.mean(true_range[:window])
     for i in range(window, len(true_range)):
         atr[i] = (atr[i - 1] * (window - 1) + true_range[i]) / window
@@ -202,8 +207,7 @@ def volatility_ratio(high, low, close, atr1_window=4, atr2_window=14):
     atr2 = calculate_atr(high, low, close, atr2_window)
 
     # Replace 0s with nan before dividing — np.where works on numpy arrays
-    atr2_safe = np.where(atr2 == 0, np.nan, atr2)
-    return atr1 / atr2_safe
+    return atr1 / (atr2 + 1e-9)
 """
 ------------------------------------------------
 ORDERFLOW INDICATORS
