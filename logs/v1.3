@@ -1,0 +1,6 @@
+Trying to solve machine learning problems via time-to-event is difficult.
+- Risk out. Spend less time on solving approach_2 (renamed to ml-time) and spend more time on solving approach_3 (renamed to ml_state)
+- It is a possibility that no variables in the market has any information relating to streak_duration (confirmed by mutual information test + permutation importance). While variables might temporarily have strong information relating
+to streak_duration, they should be dismissed as nothing more than a coincidence. RSI-SMA-DIST is the only feature that seemed to have some fundamental connection to streak_duration but has very weak connection (MI=0.10 average)
+- Consider the possibility of integrating approach_1 with approach_2 together. If the hypothesis in approach_1 that streak_duration is autocorrelated is true (where ARIMA could predict direction of streak_duration at 71% accuracy,
+still untested for stability or overfitting), then predicting streak_duration might be possible but expect instability and low precision.
