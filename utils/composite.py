@@ -109,27 +109,27 @@ def build_membership_matrix(screened_data, aligned_index, period=7,
 
 
 def _apply_hysteresis(state, confirm_bars):
-    """Only flip the held state once the raw signal has agreed for
-    `confirm_bars` consecutive bars. Prevents 1-bar noise from triggering
-    an add/drop."""
-    vals = state.to_numpy()
-    out = np.empty(len(vals), dtype=bool)
-    held = vals[0]
-    run_val = vals[0]
-    run_len = 1
-    out[0] = held
-    for i in range(1, len(vals)):
-        v = vals[i]
-        if v == run_val:
-            run_len += 1
-        else:
-            run_val = v
-            run_len = 1
-        if run_len >= confirm_bars:
-            held = run_val
-        out[i] = held
-    return pd.Series(out, index=state.index)
-
+    """Vectorized hysteresis using rolling windows and forward-filling."""
+    if confirm_bars <= 1:
+        return state
+        
+    # 1. Convert boolean to 1/0 and calculate rolling sum
+    rolling_sum = state.astype(int).rolling(window=confirm_bars).sum()
+    
+    # 2. Create an empty Series to hold our definitive "trigger" points
+    triggers = pd.Series(index=state.index, dtype=object)
+    
+    # 3. Trigger True when the last N bars were all True
+    triggers[rolling_sum == confirm_bars] = True
+    
+    # 4. Trigger False when the last N bars were all False
+    triggers[rolling_sum == 0] = False
+    
+    # 5. Forward-fill the triggers to maintain state during noisy/mixed periods.
+    # The initial un-triggered period defaults to the very first raw state.
+    out = triggers.ffill().fillna(state.iloc[0]).astype(bool)
+    
+    return out
 
 # ---------------------------------------------------------------------------
 # 5. Build the composite. Membership decided at the CLOSE of bar t governs
@@ -169,7 +169,7 @@ def build_composite(screened_data, period=7, base_value=100.0,
 #    (the 200-length version) on the composite's own price series.
 # ---------------------------------------------------------------------------
 def test_composite_persistency(composite_df):
-    from screener import trend_persistency
+    from utils.screener import trend_persistency
     bias, rsi_sma_dist = trend_persistency(composite_df)
     return bias, rsi_sma_dist
 
@@ -179,15 +179,23 @@ def test_composite_persistency(composite_df):
 #    index changes. Useful for auditing turnover / sanity-checking the rule.
 # ---------------------------------------------------------------------------
 def membership_changes(membership):
-    diff = membership.astype(int).diff()
-    events = []
-    for ticker in membership.columns:
-        for t in diff.index[diff[ticker] == 1]:
-            events.append({"timestamp": t, "ticker": ticker, "event": "ADD"})
-        for t in diff.index[diff[ticker] == -1]:
-            events.append({"timestamp": t, "ticker": ticker, "event": "DROP"})
-    if not events:
+    """Vectorized extraction of ADD/DROP events."""
+    # diff() gives 1 for ADD, -1 for DROP, 0 for no change.
+    # stack() flattens the 2D matrix into a 1D MultiIndex Series (timestamp, ticker)
+    diff = membership.astype(int).diff().stack()
+    
+    # Keep only the rows where a change actually occurred
+    changes = diff[diff != 0]
+    
+    if changes.empty:
         return pd.DataFrame(columns=["timestamp", "ticker", "event"])
-    return pd.DataFrame(events).sort_values("timestamp").reset_index(drop=True)
-
+        
+    # Reset index turns the MultiIndex into standard columns
+    events_df = changes.reset_index()
+    events_df.columns = ["timestamp", "ticker", "event_code"]
+    
+    # Map the integers back to readable strings
+    events_df["event"] = np.where(events_df["event_code"] == 1, "ADD", "DROP")
+    
+    return events_df[["timestamp", "ticker", "event"]].sort_values("timestamp").reset_index(drop=True)
 

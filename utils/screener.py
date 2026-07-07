@@ -73,7 +73,7 @@ def screener(connector_input):
 
     # Use the connection to fetch all available tickers
     all_tickers = temp_conn.get_all_tickers()
-    linear_tickers = [t for t in all_tickers if "/USDT:USDT-" not in t]
+    linear_tickers = [t for t in all_tickers if "/USDT:USDT-" not in t and "/USDT:USDT" in t]
 
     print(
         f"Total tickers: {len(all_tickers)} | After filtering: {len(linear_tickers)}"
