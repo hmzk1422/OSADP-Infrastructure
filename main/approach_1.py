@@ -10,7 +10,7 @@ def run():
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
     client = BybitConnector(api_key="...", api_secret="...", testnet=False)
-    asyncio.run(client.get_live_orderflow("BEATUSDT"))
+    asyncio.run(client.get_live_orderflow("XAUTUSDT"))
 
 if __name__ == "__main__":
     run()
