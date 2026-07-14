@@ -14,30 +14,28 @@ import lightgbm as lgb
 from sklearn.metrics import precision_score, recall_score, classification_report
 import matplotlib.pyplot as plt
 
-from utils.engine import *
-
 # ============================================================================
 # CONFIG
 # ============================================================================
 LOOKAHEAD_SECONDS    = 240     # how far forward we walk the price path looking for a barrier touch
 BARRIER_MULTIPLIER   = 1.0     # profit/stop barrier = multiplier * horizon-scaled vol
-RSI_FILTER_COLUMN    = 'rsi_14'
+RSI_FILTER_COLUMN    = 'rsi_2'
 RSI_FILTER_THRESHOLD = 30
 EPS                  = 1e-9    # guards against division by zero
 BARRIER_CHUNK_SIZE   = 50_000  # rows processed per chunk in the vectorized barrier walk (memory control)
 
 # --- Chronological Validation Settings ---
-N_RANDOM_SAMPLES    = 20      # Number of sequential walk-forward folds to test
-TEST_BLOCK_SIZE     = 100   # Number of rows per test chunk
+N_RANDOM_SAMPLES    = 15      # Number of sequential walk-forward folds to test
+TEST_BLOCK_SIZE     = 10000   # Number of rows per test chunk
 EMBARGO_SECONDS      = LOOKAHEAD_SECONDS
 
-# --- 2-Class Binary Label Encoding (INVERTED FOR SHORT STRATEGY) ---
-# WIN  = Profit barrier (LOWER) touched FIRST, OR timeout occurred with price < entry
-# LOSS = Stop barrier (UPPER) touched FIRST, OR timeout occurred with price >= entry
-LABEL_SHORT    = 0
-LABEL_LONG     = 1
-CLASS_NAMES   = {LABEL_SHORT: 'LOSS', LABEL_LONG: 'WIN'}
-
+# --- 2-Class Binary Label Encoding ---
+# WIN  = Profit barrier touched FIRST, OR timeout occurred with price > entry
+# LOSS = Stop barrier touched FIRST, OR timeout occurred with price <= entry
+LABEL_LOSS    = 0
+LABEL_WIN     = 1
+CLASS_NAMES   = {LABEL_LOSS: 'LOSS', LABEL_WIN: 'WIN'}
+RR_RATIO      = 1.5
 
 # ============================================================================
 # STEP 1 — Per-session feature pipeline
@@ -130,49 +128,38 @@ def load_and_build_state_space(orderbook_path, trades_path, session_id):
 # ============================================================================
 # STEP 2 — Build combined state space from all sessions
 # ============================================================================
+df_state_space = load_and_build_state_space("./csv/XAUTUSDT_orderbook.csv", "./csv/XAUTUSDT_trades.csv", 0)
 
-session_0 = load_and_build_state_space(
-    "./csv/BTCUSDT_orderbook.csv", "./csv/BTCUSDT_trades.csv", session_id=0
-)
-session_1 = load_and_build_state_space(
-    "./csv/BTCUSDT_orderbook_2.csv", "./csv/BTCUSDT_trades_2.csv", session_id=1
-)
-session_2 = load_and_build_state_space(
-    "./csv/BTCUSDT_orderbook_3.csv", "./csv/BTCUSDT_trades_3.csv", session_id=1
-)
-
-df_state_space = pd.concat([session_0, session_1, session_2]).sort_index()
 
 # ============================================================================
-# STEP 3 — Barrier labeling (INVERTED FOR SHORT STRATEGY)
+# STEP 3 — Barrier labeling (sequential / path-dependent binary-barrier)
 # ============================================================================
-def _bidirectional_barrier(price, barrier_pct, lookahead, chunk_size=BARRIER_CHUNK_SIZE):
-    """
-    Calculates unified labels (0 for Short win, 1 for Long win) and the exact 
-    exit price for every row so we can calculate dynamic R-Multiples later.
-    """
+def _sequential_triple_barrier(price, profit_thresh, stop_thresh, lookahead, chunk_size=BARRIER_CHUNK_SIZE):
     price = np.asarray(price, dtype=float)
-    barrier_pct = np.asarray(barrier_pct, dtype=float)
+    profit_thresh = np.asarray(profit_thresh, dtype=float)
+    stop_thresh = np.asarray(stop_thresh, dtype=float)
     n = len(price)
 
-    label = np.full(n, -1, dtype=int)
-    exit_price_arr = np.full(n, np.nan)
+    label = np.full(n, LABEL_LOSS, dtype=int)
+    exit_offset = np.full(n, -1, dtype=int)
+    exit_ret = np.full(n, np.nan)
+    terminal_ret = np.full(n, np.nan)
     is_timeout = np.zeros(n, dtype=bool)
     valid = np.zeros(n, dtype=bool)
 
     usable_n = n - lookahead 
     if usable_n <= 0:
-        return label, exit_price_arr, is_timeout, valid
+        return label, exit_offset, exit_ret, terminal_ret, is_timeout, valid
 
     for c0 in range(0, usable_n, chunk_size):
         c1 = min(c0 + chunk_size, usable_n)
 
         p0 = price[c0:c1]
-        bp = barrier_pct[c0:c1] 
+        pt = profit_thresh[c0:c1]
+        st = stop_thresh[c0:c1]
 
-        # Symmetric absolute boundaries based on your volatility calculation
-        upper = p0 * (1.0 + bp)
-        lower = p0 * (1.0 - bp)
+        upper = p0 * (RR_RATIO + pt)
+        lower = p0 * (1.0 - st)
 
         window = sliding_window_view(price[c0 + 1: c1 + lookahead], lookahead) 
 
@@ -184,92 +171,115 @@ def _bidirectional_barrier(price, barrier_pct, lookahead, chunk_size=BARRIER_CHU
         first_upper = np.argmax(hit_upper, axis=1) 
         first_lower = np.argmax(hit_lower, axis=1) 
 
-        # Win conditions for BOTH directions
-        long_win = has_upper & (~has_lower | (first_upper < first_lower))
-        short_win = has_lower & (~has_upper | (first_lower < first_upper))
+        win_mask = has_upper & (~has_lower | (first_upper < first_lower))
+        loss_mask = has_lower & (~has_upper | (first_lower < first_upper))
         
-        # Timeouts resolved strictly by where price ended relative to entry
-        timeout_mask = ~(long_win | short_win)
-        timeout_long = timeout_mask & (window[:, -1] >= p0) 
-        timeout_short = timeout_mask & (window[:, -1] < p0)
+        # Determine timeouts and resolve them based on terminal price vs entry
+        timeout_mask = ~(win_mask | loss_mask)
+        timeout_win_mask = timeout_mask & (window[:, -1] > p0)
+        timeout_loss_mask = timeout_mask & (window[:, -1] <= p0)
 
-        # Assign Labels (1 = Market goes UP, 0 = Market goes DOWN)
-        lab = np.full(c1 - c0, -1, dtype=int)
-        lab[long_win | timeout_long] = LABEL_LONG
-        lab[short_win | timeout_short] = LABEL_SHORT
+        thresholds_ok = ~np.isnan(pt) & ~np.isnan(st)
 
-        # Find exact exit prices for R-Multiple math
+        lab = np.full(c1 - c0, LABEL_LOSS, dtype=int)
+        lab[win_mask | timeout_win_mask] = LABEL_WIN
+        lab[loss_mask | timeout_loss_mask] = LABEL_LOSS
+
         off = np.full(c1 - c0, lookahead - 1, dtype=int) 
-        off[long_win] = first_upper[long_win]
-        off[short_win] = first_lower[short_win]
-        
-        # Array of exact price we exited at (either barrier hit or timeout end)
-        exit_p = window[np.arange(c1 - c0), off]
+        off[win_mask] = first_upper[win_mask]
+        off[loss_mask] = first_lower[loss_mask]
+
+        exit_price = window[np.arange(c1 - c0), off]
 
         label[c0:c1] = lab
-        exit_price_arr[c0:c1] = exit_p
+        exit_offset[c0:c1] = off
+        exit_ret[c0:c1] = (exit_price - p0) / p0
+        terminal_ret[c0:c1] = (window[:, -1] - p0) / p0
         is_timeout[c0:c1] = timeout_mask
-        valid[c0:c1] = ~np.isnan(bp)
+        valid[c0:c1] = thresholds_ok
 
-    return label, exit_price_arr, is_timeout, valid
+    return label, exit_offset, exit_ret, terminal_ret, is_timeout, valid
+
 
 def add_barrier_labels(df, lookahead_seconds=LOOKAHEAD_SECONDS, barrier_mult=BARRIER_MULTIPLIER):
     labeled = []
     for _, g in df.groupby('session_id', sort=False):
         g = g.copy()
         ret_std_1s = g['price'].pct_change().rolling(window=100).std()
-        
-        # Single barrier percentage based on volatility (symmetric)
-        g['barrier_pct'] = ret_std_1s * np.sqrt(lookahead_seconds) * barrier_mult
+        horizon_std = ret_std_1s * np.sqrt(lookahead_seconds)
 
-        label, exit_price, is_timeout, valid = _bidirectional_barrier(
-            g['price'].values, g['barrier_pct'].values, lookahead_seconds
+        g['profit_barrier'] = horizon_std * barrier_mult
+        g['stop_barrier'] = horizon_std * barrier_mult
+
+        label, exit_offset, exit_ret, terminal_ret, is_timeout, valid = _sequential_triple_barrier(
+            g['price'].values, g['profit_barrier'].values, g['stop_barrier'].values, lookahead_seconds
         )
 
         g['target'] = label
-        g['exit_price'] = exit_price 
+        g['bars_to_exit'] = exit_offset      
+        g['exit_ret'] = exit_ret             
+        g['terminal_ret'] = terminal_ret     
         g['is_timeout'] = is_timeout
         g['_valid'] = valid
 
         g = g[g['_valid']].drop(columns=['_valid'])
+        g['target'] = g['target'].astype(int)
+
         labeled.append(g)
 
     return pd.concat(labeled)
 
-# Build features and subset to hunting zone
 df_state_space = add_barrier_labels(df_state_space)
-df_training_zone = df_state_space[df_state_space[RSI_FILTER_COLUMN] < RSI_FILTER_THRESHOLD].copy()
 
-# ============================================================================
-# REVISED STEP 4 — Dual R-Multiple Bookkeeping (Apply to Full Dataset)
-# ============================================================================
-barrier_price_dist = df_state_space['price'] * df_state_space['barrier_pct']
+label_counts = df_state_space['target'].map(CLASS_NAMES).value_counts()
+print(f"Label distribution (full dataset): {label_counts.to_dict()}")
 
-df_state_space['R_LONG'] = (df_state_space['exit_price'] - df_state_space['price']) / (barrier_price_dist + EPS)
-df_state_space['R_SHORT'] = (df_state_space['price'] - df_state_space['exit_price']) / (barrier_price_dist + EPS)
-
-df_state_space.loc[~df_state_space['is_timeout'], 'R_LONG'] = np.clip(df_state_space.loc[~df_state_space['is_timeout'], 'R_LONG'], -1.0, 1.0)
-df_state_space.loc[~df_state_space['is_timeout'], 'R_SHORT'] = np.clip(df_state_space.loc[~df_state_space['is_timeout'], 'R_SHORT'], -1.0, 1.0)
+df_training_zone = df_state_space[df_state_space[RSI_FILTER_COLUMN] < RSI_FILTER_THRESHOLD]
+print(f"Total rows in hunting zone: {len(df_training_zone)}")
+print(f"Label distribution (hunting zone): {df_training_zone['target'].map(CLASS_NAMES).value_counts().to_dict()}")
 
 
 # ============================================================================
-# REVISED STEP 5 — Features and Target Setup (Full Dataset)
+# STEP 4 — Features / target configuration
 # ============================================================================
-drop_cols = ['target', 'price', 'open', 'high', 'low', 'close', 'barrier_pct', 
-             'session_id', 'exit_price', 'is_timeout', 'R_LONG', 'R_SHORT']
-features = [c for c in df_state_space.columns if c not in drop_cols]
+drop_cols = ['target', 'price', 'open', 'high', 'low', 'close',
+             'profit_barrier', 'stop_barrier', 'session_id',
+             'bars_to_exit', 'exit_ret', 'terminal_ret', 'is_timeout']
+features = [c for c in df_training_zone.columns if c not in drop_cols]
 
-# Notice we use df_state_space here, NOT df_training_zone
-X = df_state_space[features]
-y = df_state_space['target']
+X = df_training_zone[features]
+y = df_training_zone['target']
+
+# ============================================================================
+# STEP 5 — Risk-Normalized Return (R-Multiple Bookkeeping)
+# ----------------------------------------------------------------------------
+# Accounts for timeouts by mapping barrier hits to +/- 1.0R and timeouts to
+# their exact fractional R (e.g. +0.4R or -0.2R) relative to the stop distance.
+# ============================================================================
+normalized_return = pd.Series(index=df_training_zone.index, dtype=float)
+
+is_timeout = df_training_zone['is_timeout']
+is_win = df_training_zone['target'] == LABEL_WIN
+is_loss = df_training_zone['target'] == LABEL_LOSS
+
+# Exact barrier hits resolve to exactly +1R or -1R
+normalized_return[is_win & ~is_timeout] = RR_RATIO
+normalized_return[is_loss & ~is_timeout] = -1.0
+
+# Timeouts resolve to their realized fractional R 
+normalized_return[is_timeout] = (
+    df_training_zone.loc[is_timeout, 'exit_ret'] /
+    (df_training_zone.loc[is_timeout, 'stop_barrier'] + EPS)
+)
 
 
 # ============================================================================
-# REVISED STEP 6 — Walk-Forward Execution
+# STEP 6 — Purged Chronological Walk-Forward Splitting
 # ============================================================================
-def PurgedTimeSeriesSplit(index, n_samples, block_size, horizon_seconds, embargo_seconds=0):
+def purged_chronological_splits(index, n_samples, block_size, horizon_seconds, embargo_seconds=0):
     n = len(index)
     horizon = pd.Timedelta(seconds=horizon_seconds)
+    embargo = pd.Timedelta(seconds=embargo_seconds)
     min_initial_train = int(n * 0.35)
     available_test_run = n - min_initial_train - block_size
 
@@ -286,150 +296,260 @@ def PurgedTimeSeriesSplit(index, n_samples, block_size, horizon_seconds, embargo
         possible_train_idx = np.arange(0, start_idx)
         train_times = index[possible_train_idx]
 
-        purge_mask = (train_times + horizon >= test_start_time)
+        purge_mask = (train_times + horizon + embargo >= test_start_time)
         train_idx = possible_train_idx[~purge_mask]
 
         n_purged = len(possible_train_idx) - len(train_idx)
         yield train_idx, test_idx, n_purged
 
-
-print(f"\n--- Starting Bidirectional Validation Folds ---")
-
-thresholds = np.arange(0.05, 0.40, 0.05)
-
-long_metrics = {t: {'trades': 0, 'wins': 0, 'r_returns': []} for t in thresholds}
-short_metrics = {t: {'trades': 0, 'wins': 0, 'r_returns': []} for t in thresholds}
-long_trade_log = {t: [] for t in thresholds}
-short_trade_log = {t: [] for t in thresholds}
-
-# (Replace 'PurgedTimeSeriesSplit' with the actual class name inside your utils.engine)
-splitter = PurgedTimeSeriesSplit(
-    index=X.index,                      # FIX 1: Pass the actual datetime index, not the whole DataFrame
-    n_samples=N_RANDOM_SAMPLES, 
-    block_size=TEST_BLOCK_SIZE,         # FIX 2: Corrected argument name to match the function definition
-    horizon_seconds=LOOKAHEAD_SECONDS,  # FIX 3: Added the missing required argument
+splitter = purged_chronological_splits(
+    X.index,
+    n_samples=N_RANDOM_SAMPLES,
+    block_size=TEST_BLOCK_SIZE,
+    horizon_seconds=LOOKAHEAD_SECONDS,
     embargo_seconds=EMBARGO_SECONDS
 )
 
-thresholds = np.arange(0.05, 0.40, 0.05)
+print(f"\n--- Starting {N_RANDOM_SAMPLES} Chronological Walk-Forward Validation Folds (Size: {TEST_BLOCK_SIZE}) ---")
+
+thresholds_to_track = np.arange(0.50, 0.96, 0.05)
+fold_metrics = {t: {'precisions': [], 'win_rates': [], 'rrs': [], 'trades': []} for t in thresholds_to_track}
+fold_importances = []
+trade_log = {t: [] for t in thresholds_to_track}       
+fold_detail_records = []                                
+
+class_labels_ordered = [LABEL_LOSS, LABEL_WIN]
+class_metrics_by_label = {lbl: {'precision': [], 'recall': []} for lbl in class_labels_ordered}
+class_metrics_records = []
+all_y_test_pooled = []
+all_y_pred_pooled = []
 
 for fold, (train_idx, test_idx, n_purged) in enumerate(splitter, start=1):
-    # 1. Split the raw, continuous data first
-    X_train_raw, X_test_raw = X.iloc[train_idx], X.iloc[test_idx]
-    y_train_raw, y_test_raw = y.iloc[train_idx], y.iloc[test_idx]
+    X_train, X_test = X.iloc[train_idx], X.iloc[test_idx]
+    y_train, y_test = y.iloc[train_idx], y.iloc[test_idx]
 
-    # 2. Apply the RSI filter ON THE SPLITS to create the "Hunting Zone"
-    train_mask = X_train_raw[RSI_FILTER_COLUMN] < RSI_FILTER_THRESHOLD
-    test_mask = X_test_raw[RSI_FILTER_COLUMN] < RSI_FILTER_THRESHOLD
-
-    X_train = X_train_raw[train_mask]
-    y_train = y_train_raw[train_mask]
-    X_test = X_test_raw[test_mask]
-    y_test = y_test_raw[test_mask]
-
-    # 3. Guard rails: skip if the filter wiped out the data for this specific fold
     if len(X_train) == 0 or y_train.nunique() < 2:
-        print(f"Fold {fold} Skipped: Insufficient data after RSI filter. Rows: {len(X_train)}, Classes: {y_train.nunique()}")
+        print(f"Fold {fold} | skipped — invalid training data distribution.")
         continue
 
-    # Train LightGBM
-    clf = lgb.LGBMClassifier(n_estimators=300, learning_rate=0.05, max_depth=5, 
-                             class_weight='balanced', random_state=42, n_jobs=-1, verbose=-1)
+    clf = lgb.LGBMClassifier(
+        n_estimators=300,
+        learning_rate=0.05,
+        max_depth=5,
+        num_leaves=31,
+        class_weight='balanced',
+        random_state=42,
+        n_jobs=-1,
+        verbose=-1
+    )
+    
+
     clf.fit(X_train, y_train)
 
-    long_idx = list(clf.classes_).index(LABEL_LONG)
-    short_idx = list(clf.classes_).index(LABEL_SHORT)
-    
-    # If the test set has zero rows after filtering, skip prediction
-    if len(X_test) == 0:
+    y_pred_argmax = clf.predict(X_test)
+    prec_per_class = precision_score(y_test, y_pred_argmax, labels=class_labels_ordered, average=None, zero_division=0)
+    rec_per_class = recall_score(y_test, y_pred_argmax, labels=class_labels_ordered, average=None, zero_division=0)
+
+    for lbl, p, r in zip(class_labels_ordered, prec_per_class, rec_per_class):
+        class_metrics_by_label[lbl]['precision'].append(p)
+        class_metrics_by_label[lbl]['recall'].append(r)
+        class_metrics_records.append({
+            'fold': fold,
+            'class': CLASS_NAMES[lbl],
+            'precision': p,
+            'recall': r,
+            'support': int((y_test == lbl).sum()),
+        })
+
+    all_y_test_pooled.append(y_test.values)
+    all_y_pred_pooled.append(y_pred_argmax)
+
+    if LABEL_WIN not in clf.classes_:
+        print(f"Fold {fold} | skipped threshold scoring — no WIN samples present in this fold's training data.")
         continue
 
-    p_long = clf.predict_proba(X_test)[:, long_idx]
-    p_short = clf.predict_proba(X_test)[:, short_idx]
+    win_idx = list(clf.classes_).index(LABEL_WIN)
+    y_proba = clf.predict_proba(X_test)[:, win_idx]
     
-    for t in thresholds:
-        # LONGS
-        long_signals = (p_long >= t)
-        if long_signals.sum() > 0:
-            traded_idx = X_test.index[long_signals]
-            actual_targets = y_test.loc[traded_idx]
-            actual_r = df_state_space.loc[traded_idx, 'R_LONG'] # Use full dataframe
-            
-            long_metrics[t]['trades'] += len(traded_idx)
-            long_metrics[t]['wins'] += (actual_targets == LABEL_LONG).sum()
-            long_metrics[t]['r_returns'].extend(actual_r.tolist())
-            long_trade_log[t].extend(zip(traded_idx, actual_r.values))
+    for t in thresholds_to_track:
+        preds = (y_proba >= t).astype(int)
+        prec = precision_score(y_test, preds, zero_division=0)
+        num_trades = int(preds.sum())
 
-        # SHORTS
-        short_signals = (p_short >= t)
-        if short_signals.sum() > 0:
-            traded_idx = X_test.index[short_signals]
-            actual_targets = y_test.loc[traded_idx]
-            actual_r = df_state_space.loc[traded_idx, 'R_SHORT'] # Use full dataframe
-            
-            short_metrics[t]['trades'] += len(traded_idx)
-            short_metrics[t]['wins'] += (actual_targets == LABEL_SHORT).sum()
-            short_metrics[t]['r_returns'].extend(actual_r.tolist())
-            short_trade_log[t].extend(zip(traded_idx, actual_r.values))
+        if num_trades > 0:
+            fold_metrics[t]['precisions'].append(prec)
 
-    print(f"Fold {fold} Complete | Mean P(Long): {p_long.mean():.4f} | Max P(Long): {p_long.max():.4f}")
+            traded_idx = X_test.index[preds == 1]
+            traded_targets = y_test.loc[traded_idx]
+            traded_returns = normalized_return.loc[traded_idx]
+
+            trade_log[t].extend(zip(traded_idx, traded_returns.values))
+
+            num_win = int((traded_targets == LABEL_WIN).sum())
+            num_loss = int((traded_targets == LABEL_LOSS).sum())
+
+            win_rate = num_win / (num_win + num_loss) if (num_win + num_loss) > 0 else np.nan
+
+            avg_win_ret = traded_returns[traded_targets == LABEL_WIN].mean() if num_win > 0 else np.nan
+            avg_loss_ret = traded_returns[traded_targets == LABEL_LOSS].mean() if num_loss > 0 else np.nan
+            rr = (avg_win_ret / abs(avg_loss_ret)) if (num_win > 0 and num_loss > 0 and avg_loss_ret != 0) else np.nan
+
+            fold_metrics[t]['win_rates'].append(win_rate)
+            fold_metrics[t]['rrs'].append(rr)
+
+            fold_detail_records.append({
+                'threshold': round(float(t), 2),
+                'fold': fold,
+                'trades': num_trades,
+                'wins': num_win,
+                'losses': num_loss,
+                'precision': prec,
+                'win_rate': win_rate,
+                'rr': rr,
+                'avg_return': traded_returns.mean(),
+            })
+
+        fold_metrics[t]['trades'].append(num_trades)
+
+    fold_importances.append(clf.feature_importances_)
+    print(f"Fold {fold:02d} | Train Rows: {len(X_train):<6} | Tested on forward {TEST_BLOCK_SIZE} rows. Purged: {n_purged}")
+
 
 # ============================================================================
-# STEP 7 — Generate the TWO SEPARATE REPORTS
+# STEP 8 — Model Class-Level Precision & Recall (argmax predictions)
 # ============================================================================
-def generate_report(metrics_dict, direction_name):
-    print(f"\n" + "="*80)
-    print(f" {direction_name.upper()} STRATEGY REPORT (Precision == Win Rate)")
-    print("="*80)
-    print(f"{'Confidence':<12} | {'Trades':<8} | {'Win Rate':<10} | {'Avg RR per Trade':<18} | {'Total PnL'}")
-    print("-" * 80)
+print("\n--- Model Binary Precision & Recall (argmax prediction) — Mean ± Std Across Folds ---")
+print("-" * 70)
+print(f"{'Class':<10} | {'Precision':<20} | {'Recall'}")
+print("-" * 70)
+for lbl in class_labels_ordered:
+    p_arr = np.array(class_metrics_by_label[lbl]['precision'])
+    r_arr = np.array(class_metrics_by_label[lbl]['recall'])
+    p_txt = f"{p_arr.mean():>6.2%} ± {p_arr.std():<6.2%}" if len(p_arr) else "n/a"
+    r_txt = f"{r_arr.mean():>6.2%} ± {r_arr.std():<6.2%}" if len(r_arr) else "n/a"
+    print(f"{CLASS_NAMES[lbl]:<10} | {p_txt:<20} | {r_txt}")
+print("-" * 70)
+
+if class_metrics_records:
+    class_metrics_df = pd.DataFrame(class_metrics_records)
+    class_metrics_df.to_csv('class_performance_detail.csv', index=False)
+    print("Saved full per-fold class precision/recall detail to class_performance_detail.csv")
+
+if all_y_test_pooled:
+    pooled_y_test = np.concatenate(all_y_test_pooled)
+    pooled_y_pred = np.concatenate(all_y_pred_pooled)
+    print("\n--- Pooled Out-of-Sample Classification Report (all folds combined) ---")
+    print(classification_report(
+        pooled_y_test, pooled_y_pred,
+        labels=class_labels_ordered,
+        target_names=[CLASS_NAMES[l] for l in class_labels_ordered],
+        zero_division=0
+    ))
+
+
+# ============================================================================
+# STEP 9 & 10 — Full Trade Performance Breakdown
+# ============================================================================
+print("\n--- Aggregate Trading Performance by P(WIN) Threshold (Mean ± Std Across Folds) ---")
+print("-" * 115)
+print(f"{'Threshold':<10} | {'Precision':<18} | {'Error Breakdown (Given trade fired)':<38} | {'Win Rate':<18} | {'RR':<14}")
+print("-" * 115)
+
+for t in thresholds_to_track:
+    prec_array = np.array(fold_metrics[t]['precisions'])
+    wr_array = np.array([w for w in fold_metrics[t]['win_rates'] if not np.isnan(w)])
+    rr_array = np.array([r for r in fold_metrics[t]['rrs'] if not np.isnan(r)])
     
-    for t in thresholds:
-        stats = metrics_dict[t]
-        trades = stats['trades']
-        if trades == 0:
-            print(f"P({direction_name}) >= {t:.2f} | {0:<8} | {'n/a':<10} | {'n/a':<18} | 0.00R")
-            continue
-            
-        win_rate = stats['wins'] / trades
-        r_arr = np.array(stats['r_returns'])
-        avg_r = r_arr.mean()
-        std_r = r_arr.std()
-        total_r = r_arr.sum()
+    total_wins = sum([r['wins'] for r in fold_detail_records if r['threshold'] == round(t, 2)])
+    total_losses = sum([r['losses'] for r in fold_detail_records if r['threshold'] == round(t, 2)])
+    total_trades = total_wins + total_losses
+
+    if len(prec_array) > 0 and total_trades > 0:
+        mean_prec, std_prec = np.mean(prec_array), np.std(prec_array)
         
-        print(f"P({direction_name}) >= {t:.2f} | {trades:<8} | {win_rate:>6.2%}   | {avg_r:>5.2f}R ± {std_r:<5.2f}R   | {total_r:+.2f}R")
+        p_win = total_wins / total_trades
+        p_loss = total_losses / total_trades
 
-# Output the separate reports
-generate_report(long_metrics, "Long")
-generate_report(short_metrics, "Short")
+        prec_txt = f"{mean_prec:>6.2%} ± {std_prec:<6.2%}"
+        error_txt = f"WIN: {p_win:.0%} | LOSS: {p_loss:.0%}"
+        wr_txt = f"{np.mean(wr_array):>6.2%} ± {np.std(wr_array):<6.2%}" if len(wr_array) > 0 else "n/a"
+        rr_txt = f"{np.mean(rr_array):>5.2f} ± {np.std(rr_array):<5.2f}" if len(rr_array) > 0 else "n/a"
+
+        print(f">= {t*100:>4.1f}%   | {prec_txt:<18} | {error_txt:<38} | {wr_txt:<18} | {rr_txt:<14}")
+    else:
+        print(f">= {t*100:>4.1f}%   | No trades fired in any test block.")
+
+print("-" * 115)
 
 # ============================================================================
-# STEP 8 — Combined PnL Charting
+# STEP 11 — Out-of-Sample PnL Chart & Trade Log Export
 # ============================================================================
-plt.figure(figsize=(15, 6))
+print("\n--- Saving Trade Logs to CSV ---")
 
-# Subplot 1: Long PnL
-plt.subplot(1, 2, 1)
-for i, t in enumerate(thresholds):
-    if len(long_trade_log[t]) > 0:
-        df_log = pd.DataFrame(long_trade_log[t], columns=['time', 'r']).sort_values('time')
-        plt.plot(df_log['time'], df_log['r'].cumsum(), label=f'>= {t:.2f}')
-plt.axhline(0, color='black', linestyle='--')
-plt.title('LONG Out-of-Sample PnL')
-plt.ylabel('Cumulative Return (R)')
-plt.legend()
+all_trades_list = []
 
-# Subplot 2: Short PnL
-plt.subplot(1, 2, 2)
-for i, t in enumerate(thresholds):
-    if len(short_trade_log[t]) > 0:
-        df_log = pd.DataFrame(short_trade_log[t], columns=['time', 'r']).sort_values('time')
-        plt.plot(df_log['time'], df_log['r'].cumsum(), label=f'>= {t:.2f}')
-plt.axhline(0, color='black', linestyle='--')
-plt.title('SHORT Out-of-Sample PnL')
-plt.legend()
+plt.figure(figsize=(14, 8))
+cmap = plt.get_cmap('viridis')
 
-plt.tight_layout()
-plt.savefig('bidirectional_pnl.png', dpi=150)
-print("\nSaved bidirectional dual-chart to bidirectional_pnl.png")
+for i, t in enumerate(thresholds_to_track):
+    if len(trade_log[t]) == 0:
+        continue
+
+    # Create DF for this threshold
+    log_df = pd.DataFrame(trade_log[t], columns=['datetime', 'ret']).sort_values('datetime')
+    log_df['threshold'] = round(t, 2)
+    log_df['cum_pnl'] = log_df['ret'].cumsum()
+    
+    # Collect for master export
+    all_trades_list.append(log_df)
+
+    # Plotting
+    color = cmap(i / max(len(thresholds_to_track) - 1, 1))
+    plt.plot(log_df['datetime'], log_df['cum_pnl'], label=f'>= {t:.2f}', color=color)
+
+# Save Master Trade Log
+if all_trades_list:
+    master_trade_df = pd.concat(all_trades_list)
+    master_trade_df.to_csv('walk_forward_trade_log.csv', index=False)
+    print("Full trade log saved to: walk_forward_trade_log.csv")
+
+plt.axhline(0, color='black', linewidth=0.8, linestyle='--')
+plt.title('Out-of-Sample Cumulative PnL — Binary Walk-Forward Test Folds')
+plt.legend(title='P(WIN) ≥', bbox_to_anchor=(1.02, 1), loc='upper left')
+plt.savefig('pnl_walkforward.png', dpi=150)
+plt.show()
+
+# ============================================================================
+# STEP 12 — Summary Report
+# ============================================================================
+print("\n" + "=" * 70)
+print("SUMMARY")
+print("=" * 70)
+print(f"Sequential (order-aware) binary barrier labels, full dataset: {label_counts.to_dict()}")
+print(f"Hunting zone ({RSI_FILTER_COLUMN} < {RSI_FILTER_THRESHOLD}) rows: {len(df_training_zone)}")
+
+for lbl in class_labels_ordered:
+    p_arr = np.array(class_metrics_by_label[lbl]['precision'])
+    if len(p_arr) > 0:
+        print(f"  {CLASS_NAMES[lbl]:<8} class precision (argmax): {p_arr.mean():.2%} ± {p_arr.std():.2%} across folds")
+
+best_rr_threshold, best_rr = None, -np.inf
+for t in thresholds_to_track:
+    rr_arr = np.array([r for r in fold_metrics[t]['rrs'] if not np.isnan(r)])
+    if len(rr_arr) > 0 and rr_arr.mean() > best_rr:
+        best_rr, best_rr_threshold = rr_arr.mean(), t
+
+if best_rr_threshold is not None:
+    print(f"Best mean out-of-sample RR across folds: {best_rr:.2f} at P(WIN) >= {best_rr_threshold:.2f}")
+
+for t in thresholds_to_track:
+    if len(trade_log[t]) > 0:
+        log_df = pd.DataFrame(trade_log[t], columns=['datetime', 'ret']).sort_values('datetime')
+        cum = log_df['ret'].cumsum().iloc[-1]
+        print(f"  P(WIN) >= {t:.2f}: {len(log_df)} trades, cumulative {cum:.2f}R out-of-sample")
+
+print("\nReminder: this run ignores fees, slippage, latency, and partial fills.")
+print("A positive cumulative R here is a necessary but not sufficient condition")
+print("for live profitability — re-run with realistic transaction costs before sizing capital.")
+print("=" * 70)
 
