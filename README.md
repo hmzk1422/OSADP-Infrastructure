@@ -5,4 +5,4 @@ Systematic framework for capturing short-term alpha in high-volatility crypto-as
 1. Investigating how RSI snapback speed has a very strong correlation with MA acceleration.
 2. Approaches to solving the 'momnentum decay' factor relating to MA acceleration
 3. Creathing synthetic asset - Intraday based S&P500 model where instead we are taking advantage of high momentum crypto
-4. Utilizing ML and PDE to solve for momentum decay problem
+4. Utilizing ML and PDE to solve for momentum decay issue
