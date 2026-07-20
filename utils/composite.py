@@ -198,4 +198,3 @@ def membership_changes(membership):
     events_df["event"] = np.where(events_df["event_code"] == 1, "ADD", "DROP")
     
     return events_df[["timestamp", "ticker", "event"]].sort_values("timestamp").reset_index(drop=True)
-
