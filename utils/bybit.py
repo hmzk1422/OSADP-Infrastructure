@@ -76,17 +76,22 @@ class BybitConnector:
         Note: Symbol must use standard CCXT syntax (e.g., 'BTC/USDT:USDT' for linear swaps)
         """
         all_data = []
-        batch_size = total_limit  # Bybit default pagination limit via CCXT
+        max_per_request = 200  # Bybit's max per fetch_ohlcv call
         
         # CCXT expects timeframes like '1m', '5m', '1h', '1d'
         # CCXT fetch_ohlcv pagination uses `since` timestamp in milliseconds
-        since = None 
+        since = None
         
-        # Calculate an approximate start timestamp if fetching a massive back history
-        # (Alternatively, let CCXT fetch backwards if supported, but loop forward is more stable)
+        # If fetching a large history, calculate approximate start timestamp
+        if total_limit > max_per_request:
+            # Approximate: total_limit minutes * 60 * 1000 ms
+            approx_ms = total_limit * 60 * 1000
+            import time as _time
+            since = int(_time.time() * 1000) - approx_ms
+        
         while len(all_data) < total_limit:
             remaining = total_limit - len(all_data)
-            current_limit = min(remaining, batch_size)
+            current_limit = min(remaining, max_per_request)
             
             try:
                 # CCXT automatically parses Bybit linear/spot/inverse structures based on the unified symbol
