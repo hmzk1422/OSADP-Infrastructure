@@ -76,25 +76,24 @@ class BybitConnector:
         Note: Symbol must use standard CCXT syntax (e.g., 'BTC/USDT:USDT' for linear swaps)
         """
         all_data = []
-        max_per_request = 200  # Bybit's max per fetch_ohlcv call
+        # Bybit v5 API supports up to 1000 candles per fetch for linear markets
+        max_per_request = 1000 
         
-        # CCXT expects timeframes like '1m', '5m', '1h', '1d'
-        # CCXT fetch_ohlcv pagination uses `since` timestamp in milliseconds
-        since = None
+        # 1. Dynamically calculate milliseconds per candle based on the requested interval
+        try:
+            timeframe_ms = self.exchange.parse_timeframe(interval) * 1000
+        except Exception:
+            raise ValueError(f"Invalid CCXT interval format: {interval}")
         
-        # If fetching a large history, calculate approximate start timestamp
-        if total_limit > max_per_request:
-            # Approximate: total_limit minutes * 60 * 1000 ms
-            approx_ms = total_limit * 60 * 1000
-            import time as _time
-            since = int(_time.time() * 1000) - approx_ms
+        # 2. Add a 5% buffer to account for missing candles (exchange maintenance, etc.)
+        buffer_limit = int(total_limit * 1.05)
+        since = self.exchange.milliseconds() - (buffer_limit * timeframe_ms)
         
-        while len(all_data) < total_limit:
-            remaining = total_limit - len(all_data)
+        while len(all_data) < buffer_limit:
+            remaining = buffer_limit - len(all_data)
             current_limit = min(remaining, max_per_request)
             
             try:
-                # CCXT automatically parses Bybit linear/spot/inverse structures based on the unified symbol
                 batch = self.exchange.fetch_ohlcv(
                     symbol=symbol, 
                     timeframe=interval, 
@@ -105,27 +104,29 @@ class BybitConnector:
                 raise ConnectionError(f"CCXT / Bybit API Error: {e}")
                 
             if not batch:
-                break
+                break  # Reached the current time or ran out of historical data
                 
             all_data.extend(batch)
             
-            # Update 'since' to 1 millisecond past the last received candle timestamp
-            # CCXT returns data in ascending chronological order
+            # 3. Update 'since' to 1 millisecond past the last received candle
             since = batch[-1][0] + 1
             
-            # Safety sleep buffer (in addition to enableRateLimit)
-            time.sleep(0.1)
+            # 4. Use CCXT's native rate limit mapping instead of a hardcoded sleep
+            time.sleep(self.exchange.rateLimit / 1000)
 
-        # CCXT unified OHLCV structure: [timestamp, open, high, low, close, volume]
         columns = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
         df = pd.DataFrame(all_data, columns=columns)
         
-        # Process and clean the data frame
+        # Clean and format
         df = df.drop_duplicates(subset=['timestamp'])
         df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
         df[['open', 'high', 'low', 'close', 'volume']] = df[['open', 'high', 'low', 'close', 'volume']].astype(float)
         
-        return df.head(total_limit)
+        # Sort chronologically to be safe
+        df = df.sort_values('timestamp')
+        
+        # 5. Return exactly the requested limit by slicing the tail (most recent data)
+        return df.tail(total_limit).reset_index(drop=True)
 
     def get_orderflow_historical(self, symbol: str, limit: int = 100) -> pd.DataFrame:
         """
