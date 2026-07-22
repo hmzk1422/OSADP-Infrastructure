@@ -100,7 +100,7 @@ class ModelManager:
         """Save model to disk."""
         if self.model is not None:
             try:
-                self.model.save_model(self.model_path)
+                self.model.booster_.save_model(self.model_path)
                 logger.info(f"Model saved to {self.model_path}")
             except Exception as e:
                 logger.error(f"Failed to save model: {e}")

@@ -12,15 +12,15 @@ API_KEY = "..."                   # Your real Bybit API key (read-only is fine f
 API_SECRET = "..."                # Your real Bybit API secret
 
 # --- Strategy Parameters (mirrors corrected_state.py) ---
-LOOKAHEAD_SECONDS    = 240       # 4-min barrier horizon
-BARRIER_MULTIPLIER   = 1.0       # Volatility-scaled barrier width
-RSI_FILTER_COLUMN    = 'rsi_14'
+LOOKAHEAD_SECONDS    = 300       # 4-min barrier horizon
+BARRIER_MULTIPLIER   = 2.0       # Volatility-scaled barrier width
+RSI_FILTER_COLUMN    = 'rsi_2'
 RSI_FILTER_THRESHOLD = 30        # Only trade when RSI(14) < oversold
-CONFIDENCE_THRESHOLD = 0.85      # P(LONG) must be >= this to fire a SHORT fade
+CONFIDENCE_THRESHOLD = 0.5      # P(LONG) must be >= this to fire a SHORT fade
 
 # --- Barrier & Position ---
-STOP_LOSS_BPS        = 30        # Fallback stop if barrier logic fails
-TAKE_PROFIT_BPS      = 30
+STOP_LOSS_BPS        = 5        # Fallback stop if barrier logic fails
+TAKE_PROFIT_BPS      = 5
 MAX_POSITION_USD     = 100       # Max notional per position
 MIN_ORDER_SIZE       = 0.001     # Minimum contract size
 
@@ -43,5 +43,5 @@ MODEL_PATH = "main/models/lgb_model.txt"
 
 # --- Execution ---
 DRY_RUN = True                    # Set False to place real orders!
-MAX_TRADES_PER_HOUR = 2
+MAX_TRADES_PER_HOUR = 30
 FEE_BPS = 0.055                   # Binance/Bybit taker fee ~0.055%
