@@ -531,9 +531,10 @@ class QuantSimulator:
         """
         Feed latest mid-price for position monitoring.
         Returns exit result if barriers are triggered, None otherwise.
+        Passes mid_price to check_exit() since it is a required argument.
         """
         self.position.update_tick(mid_price)
-        return self.position.check_exit()
+        return self.position.check_exit(current_mid=mid_price)
 
     def force_exit(self, reason: str = 'manual', exit_price: Optional[float] = None) -> Optional[Dict]:
         """
@@ -546,7 +547,7 @@ class QuantSimulator:
         if exit_price is None:
             exit_price = self.get_current_mid()
 
-        result = self.position.check_exit(exit_price)
+        result = self.position.check_exit(current_mid=exit_price)
         if result is None:
             # Barrier not hit, but we force exit
             result = self.position._exit(reason, exit_price, datetime.now())
