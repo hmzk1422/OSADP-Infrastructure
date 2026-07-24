@@ -68,5 +68,5 @@ MODEL_PATH = "main/models/lgb_model.txt"
 
 # --- Execution ---
 DRY_RUN = True                    # Set False to place real orders!
-MAX_TRADES_PER_HOUR = 30
-FEE_BPS = 0.055                   # Binance/Bybit taker fee ~0.055%
+MAX_TRADES_PER_HOUR = 300
+FEE_BPS = 0                   # Binance/Bybit taker fee ~0.055%

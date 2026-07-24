@@ -28,6 +28,16 @@ import warnings
 from datetime import datetime, timedelta
 from typing import Optional, Dict
 
+import ccxt
+import ccxt.pro as ccxtpro
+import aiohttp
+
+warnings.filterwarnings('ignore')
+
+from main.config import *
+from main.features import LiveFeatureEngine
+from main.execution import QuantSimulator
+
 # Suppress sklearn feature name warnings (numpy arrays don't have column names)
 warnings.filterwarnings('ignore', message='X does not have valid feature names')
 warnings.filterwarnings('ignore', category=UserWarning, module='sklearn')
@@ -126,11 +136,27 @@ class ModelManager:
     def predict_proba(self, X: np.ndarray) -> np.ndarray:
         if self.model is None:
             return np.array([[0.5, 0.5]])
+            
+        # Check if the model is a raw Booster (loaded from file)
+        if isinstance(self.model, lgb.Booster):
+            # Raw booster .predict() returns 1D array of positive class probabilities
+            preds = self.model.predict(X)
+            
+            # Reconstruct the 2D array [[P(Loss), P(Win)]] to match scikit-learn format
+            # np.vstack combines (1-preds) and preds, .T transposes it to the right shape
+            return np.vstack((1.0 - preds, preds)).T
+            
+        # If it's still an LGBMClassifier (right after live training)
         return self.model.predict_proba(X)
 
     def predict(self, X: np.ndarray) -> np.ndarray:
         if self.model is None:
             return np.array([0])
+            
+        if isinstance(self.model, lgb.Booster):
+            preds = self.model.predict(X)
+            return (preds > 0.5).astype(int)
+            
         return self.model.predict(X)
 
 
@@ -260,293 +286,113 @@ class HistoricalDataBuilder:
         return X, y, FEATURE_COLUMNS
 
 
+
 # ============================================================================
 # Main Strategy Executor
 # ============================================================================
 class StrategyExecutor:
-    """
-    The main orchestrator. Runs the live strategy loop at 1-SECOND resolution.
-
-    Flow (matches research/ml-state.ipynb exactly):
-        1. WebSocket streams → on_trade() / on_orderbook()
-        2. LiveFeatureEngine aggregates into 1-second micro bars
-        3. Every 1 second: _one_sec_tick() fires
-            a. compute_1s_feature_vector() (12 features)
-            b. RSI(2) filter: must be < 30
-            c. model.predict_proba()
-            d. If P(WIN) >= threshold → ENTER SHORT (fade strategy)
-        4. Position monitoring runs on EVERY trade tick
-        5. Exit on barrier hit or timeout (barriers from execution.py)
-    """
-
     def __init__(self, symbol: str = SYMBOL, dry_run: bool = DRY_RUN):
         self.symbol = symbol
         self.dry_run = dry_run
 
-        # Components
         self.feature_engine = LiveFeatureEngine()
         self.simulator = QuantSimulator()
         self.model_mgr = ModelManager()
 
-        # State
         self.running = False
         self.second_count = 0
-        self.last_logged_rsi_2 = 50.0
-        self.last_logged_p_win = 0.5
-
-        # For logging per-second decisions (throttled to avoid log spam)
         self.decision_log: list = []
 
-        # Rate limiting
-        self._last_trade_time: Optional[datetime] = None
-
-        logger.info(
-            f"StrategyExecutor initialized | Symbol: {symbol} | "
-            f"Dry-run: {dry_run} | Resolution: 1-second"
-        )
-
     async def initialize(self) -> bool:
-        """Initialize: load/train model + warm up feature engine."""
-        # 1. Model
         loaded = self.model_mgr.load()
         if not loaded and TRAIN_ON_STARTUP:
-            logger.info("No model found. Training on historical data...")
-            builder = HistoricalDataBuilder(self.symbol)
-            X, y, feature_cols = builder.build_training_set()
-            if X is not None and len(X) > 100:
-                self.model_mgr.train(X, y)
-                self.model_mgr.feature_columns = feature_cols
-            else:
-                logger.error("Insufficient training data. Cannot start.")
+            logger.info("No model found. Fetching historical data...")
+            try:
+                builder = HistoricalDataBuilder(self.symbol)
+                X, y, feature_cols = builder.build_training_set()
+                if X is not None and len(X) > 100:
+                    self.model_mgr.train(X, y)
+                    self.model_mgr.feature_columns = feature_cols
+                else:
+                    logger.error("Insufficient training data. Exiting.")
+                    return False
+            except Exception as e:
+                logger.error(f"Failed historical training initialization: {e}")
                 return False
-        elif loaded:
-            logger.info("Model loaded successfully.")
-        else:
-            logger.error("No model found and TRAIN_ON_STARTUP is False.")
-            return False
-
-        # 2. Warm up feature engine with recent historical data
-        logger.info("Warming up feature engine with historical data...")
-        connector = BybitConnector(api_key=API_KEY, api_secret=API_SECRET, testnet=TESTNET)
-        df_warmup = connector.get_ohlcv(self.symbol, '1m', total_limit=200)
-
-        if not df_warmup.empty:
-            for _, row in df_warmup.iterrows():
-                ts = int(row['timestamp'].timestamp() * 1000)
-                self.feature_engine.on_trade(ts, row['close'], row['volume'] / 2, 'buy')
-                self.feature_engine.on_trade(ts, row['close'], row['volume'] / 2, 'sell')
-                self.feature_engine.on_orderbook(
-                    ts, row['close'] * 0.999, 10.0, row['close'] * 1.001, 10.0
-                )
-            logger.info(f"Warmup complete: {self.bar_count if hasattr(self, 'bar_count') else 'N/A'} bars")
-
         return True
 
     async def on_trade(self, trade: Dict) -> None:
-        """Process a single trade from WebSocket."""
-        timestamp_ms = trade.get('timestamp', 0)
-        price = float(trade.get('price', 0))
-        amount = float(trade.get('amount', 0))
-        side = trade.get('side', 'buy')
+        try:
+            timestamp_ms = trade.get('timestamp', 0)
+            price = float(trade.get('price', 0))
+            amount = float(trade.get('amount', 0))
+            side = trade.get('side', 'buy')
 
-        self.feature_engine.on_trade(timestamp_ms, price, amount, side)
+            self.feature_engine.on_trade(timestamp_ms, price, amount, side)
 
-        # Update position monitoring on EVERY tick
-        if self.simulator.position.active:
-            exit_result = self.simulator.update_tick(price)
-            if exit_result:
-                self._log_trade(exit_result)
+            if self.simulator.position.active:
+                exit_result = self.simulator.update_tick(price)
+                if exit_result:
+                    self._log_trade(exit_result)
+        except Exception as e:
+            logger.error(f"Error processing trade event: {e}")
 
     async def on_orderbook(self, ob: Dict) -> None:
-        """Process an orderbook snapshot from WebSocket."""
-        timestamp_ms = ob.get('timestamp', 0)
-        best_bid = ob.get('bids', [[0, 0]])[0]
-        best_ask = ob.get('asks', [[0, 0]])[0]
-        self.feature_engine.on_orderbook(
-            timestamp_ms,
-            float(best_bid[0]),
-            float(best_bid[1]),
-            float(best_ask[0]),
-            float(best_ask[1]),
-        )
+        try:
+            timestamp_ms = ob.get('timestamp', 0)
+            best_bid = ob.get('bids', [[0, 0]])[0]
+            best_ask = ob.get('asks', [[0, 0]])[0]
+            self.feature_engine.on_orderbook(
+                timestamp_ms,
+                float(best_bid[0]),
+                float(best_bid[1]),
+                float(best_ask[0]),
+                float(best_ask[1]),
+            )
+        except Exception as e:
+            logger.error(f"Error processing orderbook event: {e}")
 
     async def _one_sec_tick(self) -> None:
-        """
-        Called EVERY SECOND by the 1-second clock.
-        This is the main strategy decision point — matching research
-        where model runs on every row of the 1-second state space.
-
-        TRANSPARENT ALGORITHM (matches research/ml-state.ipynb):
-        ┌─────────────────────────────────────────────────────────────┐
-        │  1. Compute 12 features from current 1-second bar          │
-        │  2. FILTER: rsi_2 < 30 (hunting zone, research line 580)   │
-        │  3. INFER: model.predict_proba(feature_vector)             │
-        │  4. DECIDE: if P(WIN) >= 0.50 → ENTER SHORT (fade)        │
-        │            else → HOLD (no trade this second)              │
-        └─────────────────────────────────────────────────────────────┘
-        """
-        # ──[1] Compute 12-feature vector for this second ──
-        features = self.feature_engine.compute_1s_feature_vector()
-        if not features:
-            return
-
-        self.second_count += 1
-        current_price = features.get('close', 0)
-        rsi_2_val = features.get('rsi_2', 100)
-        rsi_14_val = features.get('rsi_14', 100)
-
-        # Extract all 12 features for transparency
-        feature_cols = FEATURE_COLUMNS
-        feature_values = {col: features.get(col, 0.0) for col in feature_cols}
-
-        # ──[2] Model inference ──
-        feature_vector = self.feature_engine.extract_feature_vector(features)
-        proba = self.model_mgr.predict_proba(feature_vector)[0]
-        p_win = proba[1]
-        p_loss = proba[0]
-
-        # Build decision record (only stored when action changes, logged every time)
-        decision = {
-            'time': datetime.now().isoformat(),
-            'sec': self.second_count,
-            'close': current_price,
-            'rsi_2': rsi_2_val,
-            'rsi_14': rsi_14_val,
-            'p_win': float(p_win),
-            'p_loss': float(p_loss),
-            'in_position': self.simulator.position.active,
-            'features': feature_values,
-        }
-
-        # ──[3] RSI Filter: rsi_2 < 30 (matches research line 580) ──
-        if rsi_2_val >= RSI_FILTER_THRESHOLD:
-            # Log every 60 seconds (once per minute) when in SKIP state to avoid spam
-            if self.second_count % 60 == 0:
-                logger.info(
-                    f"[SEC {self.second_count}] SKIP | RSI(2)={rsi_2_val:.1f} >= {RSI_FILTER_THRESHOLD} | "
-                    f"Close={current_price:.2f} | P(WIN)={p_win:.3f}"
-                )
-            decision['action'] = 'SKIP (rsi_2 too high)'
-            self._store_decision(decision)
-            return
-
-        # ──[4] Check if already in position ──
-        if self.simulator.position.active:
-            if self.second_count % 60 == 0:
-                logger.info(
-                    f"[SEC {self.second_count}] IN POSITION | RSI(2)={rsi_2_val:.1f} | "
-                    f"P(WIN)={p_win:.3f} | Close={current_price:.2f}"
-                )
-            decision['action'] = 'IN_POSITION'
-            self._store_decision(decision)
-            return
-
-        # ──[5] Check rate limit ──
-        if not self.simulator.can_trade():
-            if self.second_count % 60 == 0:
-                logger.info(
-                    f"[SEC {self.second_count}] SKIP (rate limit) | Trades/hour used"
-                )
-            decision['action'] = 'SKIP (rate limit)'
-            self._store_decision(decision)
-            return
-
-        # ──[6] TRADE DECISION ──
-        # Research: P(WIN) high → price likely goes UP → we FADE → SHORT
-        # This matches research INVERT_RETURNS=True
-        if p_win >= CONFIDENCE_THRESHOLD:
-            # ──[6a] Calculate position size ──
-            qty = self.simulator.calculate_quantity(current_price)
-            if qty < MIN_ORDER_SIZE:
-                decision['action'] = f'SKIP (qty too small: {qty:.6f})'
-                self._store_decision(decision)
+        """Shielded 1-second clock tick logic."""
+        try:
+            features = self.feature_engine.compute_1s_feature_vector()
+            if not features:
                 return
 
-            # ──[6b] ENTER SHORT ──
-            receipt = self.simulator.enter_short(current_price, qty)
-            if receipt is not None:
-                decision['action'] = 'ENTER SHORT'
-                decision['qty'] = qty
-                decision['fill_price'] = receipt['fill_price']
-                decision['slippage_bps'] = receipt['slippage_bps']
-                decision['stop_barrier'] = receipt['stop_barrier']
-                decision['profit_barrier'] = receipt['profit_barrier']
-                decision['barrier_pct'] = receipt['barrier_pct']
+            self.second_count += 1
+            current_price = features.get('close', 0)
+            rsi_2_val = features.get('rsi_2', 100)
 
-                # ALWAYS log trade entry (critical event)
-                logger.info(
-                    f"[TRADE ENTER] Sec {self.second_count} | "
-                    f"RSI(2)={rsi_2_val:.1f} | "
-                    f"P(WIN)={p_win:.3f} >= {CONFIDENCE_THRESHOLD} | "
-                    f"→ ENTER SHORT @ {receipt['fill_price']:.2f} | "
-                    f"qty={qty:.4f} | slippage={receipt['slippage_bps']:.2f}bps"
-                )
-                # Log all 12 feature values that triggered the trade
-                logger.info(
-                    f"[TRADE FEATURES] Sec {self.second_count} | "
-                    + " | ".join(f"{k}={v:.4f}" for k, v in feature_values.items())
-                )
-            else:
-                decision['action'] = 'FAILED (entry rejected)'
-        else:
-            # HOLD: model doesn't see the pattern
-            # Log every 10 seconds when in hunting zone but no trade
-            if self.second_count % 10 == 0:
-                logger.info(
-                    f"[SEC {self.second_count}] HOLD | RSI(2)={rsi_2_val:.1f} | "
-                    f"P(WIN)={p_win:.3f} < {CONFIDENCE_THRESHOLD} | "
-                    f"Close={current_price:.2f}"
-                )
+            feature_vector = self.feature_engine.extract_feature_vector(features)
+            proba = self.model_mgr.predict_proba(feature_vector)[0]
+            p_win = proba[1]
 
-            decision['action'] = 'HOLD'
-            self._store_decision(decision)
+            if rsi_2_val >= RSI_FILTER_THRESHOLD:
+                return
 
-    def _store_decision(self, decision: Dict) -> None:
-        """Store decision in rolling log (keep last 1000 for summary)."""
-        self.decision_log.append(decision)
-        if len(self.decision_log) > 1000:
-            self.decision_log.pop(0)
+            if self.simulator.position.active or not self.simulator.can_trade():
+                return
+
+            if p_win >= CONFIDENCE_THRESHOLD:
+                qty = self.simulator.calculate_quantity(current_price)
+                if qty < MIN_ORDER_SIZE:
+                    return
+
+                receipt = self.simulator.enter_short(current_price, qty)
+                if receipt is not None:
+                    logger.info(f"[ENTER SHORT] Sec {self.second_count} @ {receipt['fill_price']:.2f}")
+
+        except Exception as e:
+            logger.error(f"Unhandled error in 1-sec tick loop: {e}")
 
     def _log_trade(self, trade_result: Dict) -> None:
-        """Log a completed trade with win/loss outcome."""
-        reason = trade_result.get('reason', 'unknown')
-        net_pnl_pct = trade_result.get('net_pnl_pct', 0.0)
-        net_pnl_usd = trade_result.get('net_pnl_usd', 0.0)
-        gross_pnl_pct = trade_result.get('gross_pnl_pct', 0.0)
-        r_multiple = trade_result.get('r_multiple', 0.0)
-        entry_price = trade_result.get('entry_price', 0.0)
-        exit_price = trade_result.get('exit_price', 0.0)
-        duration = trade_result.get('duration_seconds', 0)
-
-        # Determine win/loss
-        outcome = "WIN" if net_pnl_usd > 0 else "LOSS"
-
-        logger.info(
-            f"[TRADE EXIT] {outcome} | {reason:12s} | "
-            f"Entry: {entry_price:.2f} → Exit: {exit_price:.2f} | "
-            f"Gross: {gross_pnl_pct*100:+.3f}% | "
-            f"Net: {net_pnl_pct*100:+.3f}% | "
-            f"${net_pnl_usd:+.2f} | "
-            f"R: {r_multiple:+.4f} | "
-            f"Duration: {duration:.0f}s"
-        )
-
-        # Save to trade log file
-        log_file = 'main/logs/trades.jsonl'
-        with open(log_file, 'a') as f:
-            f.write(json.dumps({
-                **trade_result,
-                'outcome': outcome,
-                'entry_time': str(trade_result.get('entry_time', '')),
-                'exit_time': str(trade_result.get('exit_time', '')),
-            }) + '\n')
+        logger.info(f"[TRADE EXIT] PnL: ${trade_result.get('net_pnl_usd', 0):+.2f}")
 
     async def _create_exchange(self):
-        """Create a new ccxt.pro exchange instance."""
-        import ccxt.pro as ccxtpro
-        import aiohttp
+        """Build exchange connection with TCP connector and timeouts."""
         exchange = ccxtpro.bybit({
             'enableRateLimit': True,
+            'timeout': 10000,
             'options': {
                 'defaultType': 'linear',
                 'adjustForTimeDifference': True,
@@ -554,52 +400,32 @@ class StrategyExecutor:
         })
         if TESTNET:
             exchange.set_sandbox_mode(True)
-        connector = aiohttp.TCPConnector(resolver=aiohttp.ThreadedResolver())
+
+        connector = aiohttp.TCPConnector(resolver=aiohttp.ThreadedResolver(), keepalive_timeout=30)
         exchange.session = aiohttp.ClientSession(connector=connector)
         await exchange.load_markets()
         return exchange
 
     async def _one_sec_clock(self):
-        """
-        Background task: fires _one_sec_tick() EVERY SECOND on the wall clock.
-        This is the heartbeat that drives inference at 1-second resolution.
-        """
+        """Isolated background clock process."""
         while self.running:
-            now = datetime.now()
-            # Sleep until next exact second
-            next_sec = now.replace(microsecond=0) + timedelta(seconds=1)
-            sleep_sec = (next_sec - now).total_seconds()
-            if sleep_sec > 0:
-                await asyncio.sleep(sleep_sec)
+            try:
+                now = datetime.now()
+                next_sec = now.replace(microsecond=0) + timedelta(seconds=1)
+                sleep_sec = (next_sec - now).total_seconds()
+                if sleep_sec > 0:
+                    await asyncio.sleep(sleep_sec)
 
-            if not self.running:
+                if self.running:
+                    await self._one_sec_tick()
+            except asyncio.CancelledError:
                 break
-
-            await self._one_sec_tick()
-
-    async def _data_watchdog(self):
-        """Monitor data freshness every 120 seconds."""
-        last_second_count = self.second_count
-        stale_warnings = 0
-        while self.running:
-            await asyncio.sleep(120)
-            if not self.running:
-                break
-            if self.second_count == last_second_count and self.second_count > 0:
-                stale_warnings += 1
-                logger.warning(
-                    f"WATCHDOG: No new seconds for 120s (total: {self.second_count}). "
-                    f"Stream may be stalled. Warning #{stale_warnings}"
-                )
-            else:
-                stale_warnings = 0
-            last_second_count = self.second_count
+            except Exception as e:
+                logger.error(f"Error in clock timer: {e}")
+                await asyncio.sleep(1)
 
     async def _stream_loop(self, exchange):
-        """
-        Core streaming loop: watches trades + orderbook.
-        Returns True if reconnect needed, False on normal exit.
-        """
+        """Stream watcher with automatic exception detection for Wi-Fi drops."""
         last_data_time = datetime.now()
 
         while self.running:
@@ -610,7 +436,7 @@ class StrategyExecutor:
                 done, pending = await asyncio.wait(
                     [trades_task, ob_task],
                     return_when=asyncio.FIRST_COMPLETED,
-                    timeout=30,
+                    timeout=20,  # 20-second timeout to detect silent network drops
                 )
 
                 for task in pending:
@@ -621,19 +447,15 @@ class StrategyExecutor:
                         pass
 
                 if not done:
+                    # Timeout triggered - check if network is stall
                     elapsed = (datetime.now() - last_data_time).total_seconds()
-                    if elapsed > 60:
-                        logger.warning(f"No data for {elapsed:.0f}s. Reconnecting...")
+                    if elapsed > 30:
+                        logger.warning(f"No stream data received for {elapsed:.0f}s. Reconnecting network...")
                         return True
                     continue
 
                 for task in done:
-                    try:
-                        result = task.result()
-                    except Exception as e:
-                        logger.error(f"Stream task error: {e}")
-                        continue
-
+                    result = task.result()
                     if task == trades_task:
                         for trade in result:
                             await self.on_trade(trade)
@@ -641,23 +463,22 @@ class StrategyExecutor:
                     elif task == ob_task:
                         await self.on_orderbook(result)
 
+            except (ccxt.NetworkError, ccxt.ExchangeNotAvailable, aiohttp.ClientError, OSError, asyncio.TimeoutError) as e:
+                logger.warning(f"Network / Disconnection detected in stream loop: {e}")
+                return True
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error(f"Stream error: {e}", exc_info=True)
-                await asyncio.sleep(5)
+                logger.error(f"Stream error: {e}")
+                await asyncio.sleep(2)
                 return True
 
         return False
 
     async def run_forever(self) -> None:
-        """
-        Main loop: connect to WebSocket streams and process data.
-        Uses ccxt.pro for real-time data with automatic reconnection.
-        """
+        """Main loop featuring exponential backoff reconnects."""
         self.running = True
 
-        # Handle graceful shutdown
         loop = asyncio.get_event_loop()
         for sig in (signal.SIGINT, signal.SIGTERM):
             try:
@@ -665,53 +486,42 @@ class StrategyExecutor:
             except NotImplementedError:
                 pass
 
-        # Start 1-second clock (fires inference every second)
         one_sec_clock_task = asyncio.create_task(self._one_sec_clock())
 
-        # Start data watchdog
-        watchdog_task = asyncio.create_task(self._data_watchdog())
+        backoff_sec = 2
+        max_backoff_sec = 60
 
-        # Main reconnection loop
-        max_retries = 1000
-        retry_count = 0
-        exchange = None
-
-        while self.running and retry_count < max_retries:
+        while self.running:
+            exchange = None
             try:
+                logger.info(f"Connecting to exchange WebSocket stream for {self.symbol}...")
+                exchange = await self._create_exchange()
+                
+                # Reset backoff on successful connection
+                backoff_sec = 2
+                logger.info("Stream connected successfully. Listening to market data...")
+
+                should_reconnect = await self._stream_loop(exchange)
+
+                if not should_reconnect or not self.running:
+                    break
+
+            except (ccxt.NetworkError, aiohttp.ClientError, OSError, asyncio.TimeoutError) as e:
+                logger.warning(f"Network error during connection setup: {e}")
+            except Exception as e:
+                logger.error(f"Unexpected error in main run loop: {e}", exc_info=True)
+            finally:
                 if exchange is not None:
                     try:
                         await exchange.close()
                     except Exception:
                         pass
 
-                exchange = await self._create_exchange()
-                logger.info(f"Connected to Bybit. Starting live stream for {self.symbol}...")
-
-                should_reconnect = await self._stream_loop(exchange)
-
-                if should_reconnect and self.running:
-                    retry_count += 1
-                    wait = min(5 * retry_count, 60)
-                    logger.info(f"Reconnecting in {wait}s (attempt {retry_count}/{max_retries})...")
-                    await asyncio.sleep(wait)
-                else:
-                    break
-
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.error(f"Fatal stream error: {e}", exc_info=True)
-                retry_count += 1
-                wait = min(5 * retry_count, 60)
-                logger.info(f"Reconnecting in {wait}s (attempt {retry_count}/{max_retries})...")
-                await asyncio.sleep(wait)
-
-        # Cleanup
-        if exchange is not None:
-            try:
-                await exchange.close()
-            except Exception:
-                pass
+            if self.running:
+                logger.info(f"Retrying connection in {backoff_sec} seconds...")
+                await asyncio.sleep(backoff_sec)
+                # Exponential backoff formula
+                backoff_sec = min(backoff_sec * 2, max_backoff_sec)
 
         one_sec_clock_task.cancel()
         try:
@@ -719,20 +529,13 @@ class StrategyExecutor:
         except (asyncio.CancelledError, Exception):
             pass
 
-        watchdog_task.cancel()
-        try:
-            await watchdog_task
-        except (asyncio.CancelledError, Exception):
-            pass
-
         self.running = False
 
     async def shutdown(self) -> None:
-        """Graceful shutdown."""
-        logger.info("Shutting down...")
+        logger.info("Shutting down executor cleanly...")
         self.running = False
         self.simulator.close()
-        self.print_summary()
+        self.simulator.print_summary()
 
     def print_summary(self) -> None:
         """Print execution summary."""
