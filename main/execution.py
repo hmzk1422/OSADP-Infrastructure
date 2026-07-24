@@ -30,11 +30,15 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, List, Tuple
 import numpy as np
 
+# Matplotlib setup for server/headless environments
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import ccxt
 from main.config import *
-
 
 logger = logging.getLogger("execution")
 
@@ -365,9 +369,17 @@ class PositionTracker:
         # Clipped to [-1, 1] for barrier-touch exits as in research
         # ================================================
         bp = self.barrier_pct if self.barrier_pct > 1e-9 else 0.003
-        self.r_multiple = self.gross_pnl_pct / bp
+        
+        # 1. Calculate Gross R and clip to [-1, 1] for barrier touches
+        gross_r = self.gross_pnl_pct / bp
         if not self.is_timeout:
-            self.r_multiple = float(np.clip(self.r_multiple, -1.0, 1.0))
+            gross_r = float(np.clip(gross_r, -1.0, 1.0))
+            
+        # 2. Calculate the fee cost in terms of R-units
+        fee_in_r = total_fee_pct / bp
+        
+        # 3. Final Net R-Multiple
+        self.r_multiple = gross_r - fee_in_r
 
         result = {
             'side': 'short',
@@ -403,73 +415,49 @@ class PositionTracker:
 
         return result
 
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 
 # ============================================================================
 # QuantSimulator — Professional Dry-Run Engine
 # ============================================================================
 class QuantSimulator:
     """
-    Professional paper-trading / dry-run execution engine.
-
-    ARCHITECTURE:
-        - Connects to REAL Bybit API for live market data (ticker, orderbook)
-        - NEVER places a real order (this is the whole point)
-        - All fills simulated via PositionTracker + SlippageModel
-        - Professional PnL accounting with R-Multiple (matching research)
-        - Trade journaled to JSONL for later analysis
-
-    USAGE:
-        simulator = QuantSimulator()
-        simulator.enter_short(mid_price=60000.0, quantity=0.0017)
-        simulator.update_tick(60050.0)
-        result = simulator.check_exit()  # or force exit
-        simulator.print_summary()
-
-    NOTE: This does NOT connect to WebSocket feeds itself.
-    The caller (StrategyExecutor in executor.py) feeds real market data
-    into this module for realistic fill simulation.
+    Professional paper-trading / dry-run execution engine with automated PnL charting
+    and resilience against network interruptions.
     """
 
-    def __init__(self, api_key: str = API_KEY, api_secret: str = API_SECRET,
-                 quick_init: bool = False):
-        """
-        Args:
-            quick_init: If True, skip exchange connection (for tests).
-                        If False, connects to real Bybit API for market data.
-        """
+    def __init__(self, api_key: str = API_KEY, api_secret: str = API_SECRET, quick_init: bool = False):
         self.exchange = None
         self._quick_init = quick_init
 
         if not quick_init:
-            # Initialize CCXT for data only — NEVER for order placement
             exchange_config = {
                 'apiKey': '',
                 'secret': '',
                 'enableRateLimit': True,
+                'timeout': 10000,  # 10s timeout to prevent hanging on network drops
                 'options': {
                     'defaultType': 'linear',
                     'adjustForTimeDifference': True,
                 },
             }
             self.exchange = ccxt.bybit(exchange_config)
-            # Explicitly NO sandbox — we read market data from production API
 
             try:
                 self.exchange.load_markets()
                 logger.info("QuantSimulator: Connected to real Bybit API for market data.")
             except Exception as e:
-                logger.warning(f"QuantSimulator: Could not load markets: {e}")
+                logger.warning(f"QuantSimulator: Could not load markets initially ({e}). Will retry on demand.")
         else:
             logger.info("QuantSimulator: Quick init (no exchange connection).")
 
-        # Slippage model
+        from main.execution import SlippageModel, PositionTracker
         self.slippage_model = SlippageModel()
-
-        # Position tracker (with slippage model attached)
         self.position = PositionTracker()
         self.position.attach_slippage(self.slippage_model)
 
-        # Trade journal
         self.trades: List[Dict] = []
         self.total_gross_pnl: float = 0.0
         self.total_net_pnl: float = 0.0
@@ -478,77 +466,88 @@ class QuantSimulator:
         self.winning_trades: int = 0
         self.losing_trades: int = 0
 
-        # Rate limiting
         self._recent_entries: List[datetime] = []
-
-        # Journal file
         self._journal_file = 'main/logs/trade_journal.jsonl'
         os.makedirs(os.path.dirname(self._journal_file), exist_ok=True)
 
-    def update_orderbook(self, bids: list, asks: list) -> None:
-        """Feed real-time orderbook into slippage model."""
-        self.slippage_model.update_book(bids, asks)
+    def get_current_mid(self) -> float:
+        """Fetch current mid-price safely with network exception handling."""
+        if self.exchange is None:
+            return self.position.entry_mid if self.position.entry_mid > 0 else 0.0
 
-    def get_spread_bps(self) -> float:
-        """Current market spread from orderbook."""
-        return self.slippage_model.get_spread_bps()
-
-    def can_trade(self) -> bool:
-        """Rate limit check: max MAX_TRADES_PER_HOUR trades per hour."""
-        now = datetime.now()
-        self._recent_entries = [t for t in self._recent_entries
-                                if now - t < timedelta(hours=1)]
-        return len(self._recent_entries) < MAX_TRADES_PER_HOUR and not self.position.active
+        try:
+            ticker = self.exchange.fetch_ticker(SYMBOL)
+            bid = float(ticker.get('bid', 0))
+            ask = float(ticker.get('ask', 0))
+            if bid > 0 and ask > 0:
+                return (bid + ask) / 2.0
+            return float(ticker.get('last', 0))
+        except (ccxt.NetworkError, ccxt.ExchangeNotAvailable, ccxt.RequestTimeout) as e:
+            logger.warning(f"Network error fetching ticker: {e}. Falling back to last cached price.")
+            return self.position.entry_mid if self.position.entry_mid > 0 else 0.0
+        except Exception as e:
+            logger.error(f"Unexpected error fetching ticker: {e}")
+            return self.position.entry_mid if self.position.entry_mid > 0 else 0.0
 
     def calculate_quantity(self, price: float, usdt_amount: float = MAX_POSITION_USD) -> float:
-        """Calculate contract quantity for fixed USDT notional."""
+        """Calculate contract quantity safely."""
+        if price <= 0:
+            return MIN_ORDER_SIZE
         qty = usdt_amount / price
-        # Quantize to exchange precision
         try:
-            market = self.exchange.market(SYMBOL)
+            market = self.exchange.market(SYMBOL) if self.exchange else {}
             prec = int(market.get('precision', {}).get('amount', 4))
             qty = round(qty, prec)
         except Exception:
             qty = round(qty, 4)
         return max(qty, MIN_ORDER_SIZE)
 
-    def enter_short(self, mid_price: float, quantity: float) -> Optional[Dict]:
-        """
-        Simulate a short entry with market microstructure.
+    def can_trade(self) -> bool:
+        now = datetime.now()
+        self._recent_entries = [t for t in self._recent_entries if now - t < timedelta(hours=1)]
+        return len(self._recent_entries) < MAX_TRADES_PER_HOUR and not self.position.active
 
-        Returns entry receipt if successful, None if rate-limited.
-        """
+    def enter_short(self, mid_price: float, quantity: float) -> Optional[Dict]:
         if not self.can_trade():
             logger.warning(f"Trade rejected: {len(self._recent_entries)}/{MAX_TRADES_PER_HOUR} in last hour")
             return None
 
         receipt = self.position.enter_short(mid_price, quantity)
         self._recent_entries.append(datetime.now())
-
         return receipt
 
     def update_tick(self, mid_price: float) -> Optional[Dict]:
-        """
-        Feed latest mid-price for position monitoring.
-        Returns exit result if barriers are triggered, None otherwise.
-        """
         self.position.update_tick(mid_price)
-        return self.position.check_exit()
+        result = self.position.check_exit(current_mid=mid_price)
+        
+        if result:
+            # Save to JSONL and update the internal trade lists
+            self._journal_trade(result)
+            self.trades.append(result)
+            self.total_gross_pnl += result['gross_pnl_usd']
+            self.total_net_pnl += result['net_pnl_usd']
+            self.total_fees += result['fees_paid']
+            self.total_r_multiple += result['r_multiple']
+            
+            if result['net_pnl_usd'] > 0:
+                self.winning_trades += 1
+            else:
+                self.losing_trades += 1
+                
+            # Auto-update chart on every natural trade exit
+            self.plot_pnl()
+            
+        return result
 
     def force_exit(self, reason: str = 'manual', exit_price: Optional[float] = None) -> Optional[Dict]:
-        """
-        Force-close the current position (e.g. on shutdown, emergency).
-        If exit_price is None, uses current mid from exchange.
-        """
         if not self.position.active:
             return None
 
         if exit_price is None:
             exit_price = self.get_current_mid()
 
-        result = self.position.check_exit(exit_price)
+        result = self.position.check_exit(current_mid=exit_price)
         if result is None:
-            # Barrier not hit, but we force exit
             result = self.position._exit(reason, exit_price, datetime.now())
 
         if result:
@@ -563,51 +562,65 @@ class QuantSimulator:
             else:
                 self.losing_trades += 1
 
+            # Auto-update chart on every trade exit
+            self.plot_pnl()
+
         return result
 
-    def get_current_mid(self) -> float:
-        """Fetch current mid-price from exchange."""
-        try:
-            ticker = self.exchange.fetch_ticker(SYMBOL)
-            bid = float(ticker.get('bid', 0))
-            ask = float(ticker.get('ask', 0))
-            if bid > 0 and ask > 0:
-                return (bid + ask) / 2.0
-            return float(ticker.get('last', 0))
-        except Exception:
-            return self.position.entry_mid if self.position.entry_mid > 0 else 0.0
-
     def _journal_trade(self, result: Dict) -> None:
-        """Write trade to JSONL journal."""
         try:
             with open(self._journal_file, 'a') as f:
                 f.write(json.dumps(result) + '\n')
         except Exception as e:
             logger.error(f"Failed to journal trade: {e}")
 
-    def get_status(self) -> Dict:
-        """Current simulator status."""
-        return {
-            'in_position': self.position.active,
-            'entry_price': self.position.entry_price,
-            'entry_mid': self.position.entry_mid,
-            'entry_time': str(self.position.entry_time) if self.position.entry_time else None,
-            'barrier_pct': self.position.barrier_pct,
-            'stop_barrier': self.position.stop_barrier,
-            'profit_barrier': self.position.profit_barrier,
-            'spread_bps': self.get_spread_bps(),
-            'total_trades': len(self.trades),
-            'winning_trades': self.winning_trades,
-            'losing_trades': self.losing_trades,
-            'total_gross_pnl_usd': self.total_gross_pnl,
-            'total_net_pnl_usd': self.total_net_pnl,
-            'total_fees_usd': self.total_fees,
-            'total_r_multiple': self.total_r_multiple,
-            'win_rate': self.winning_trades / len(self.trades) if self.trades else 0.0,
-        }
+    # =========================================================================
+    # PnL Charting Feature
+    # =========================================================================
+    def plot_pnl(self, save_path: str = "main/logs/pnl_chart.png") -> None:
+        """Generates and saves an equity curve chart for Net RR and Gross RR."""
+        if not self.trades:
+            logger.info("No completed trades to plot yet.")
+            return
+
+        try:
+            trade_numbers = list(range(1, len(self.trades) + 1))
+            
+            # Calculate R-Multiples on the fly from the saved percentages
+            net_r = [(t['net_pnl_pct'] / t['barrier_pct']) for t in self.trades]
+            gross_r = [(t['gross_pnl_pct'] / t['barrier_pct']) for t in self.trades]
+            
+            cum_net_r = np.cumsum(net_r)
+            cum_gross_r = np.cumsum(gross_r)
+
+            fig, ax = plt.subplots(figsize=(10, 5), dpi=150)
+            
+            # Plot Net and Gross RR
+            ax.plot(trade_numbers, cum_net_r, label="Net R-Multiple", color="#2ecc71", linewidth=2.5, marker='o', markersize=4)
+            ax.plot(trade_numbers, cum_gross_r, label="Gross R-Multiple", color="#3498db", linestyle="--", alpha=0.7)
+            ax.axhline(0, color="#7f8c8d", linestyle=":", alpha=0.7)
+
+            ax.set_title(f"Cumulative R-Multiple Performance ({SYMBOL})", fontsize=12, fontweight='bold')
+            ax.set_xlabel("Trade Count", fontsize=10)
+            ax.set_ylabel("Cumulative RR", fontsize=10)
+            ax.legend(loc="upper left")
+            ax.grid(True, linestyle="--", alpha=0.5)
+
+            # Highlight Final Score
+            final_rr = cum_net_r[-1]
+            color_text = "green" if final_rr >= 0 else "red"
+            ax.text(0.98, 0.05, f"Total Net RR: {final_rr:+.2f}R", transform=ax.transAxes,
+                    fontsize=10, fontweight='bold', color=color_text, ha='right',
+                    bbox=dict(boxstyle='round,pad=0.3', facecolor='white', edgecolor='gray', alpha=0.8))
+
+            plt.tight_layout()
+            plt.savefig(save_path)
+            plt.close(fig)
+            logger.info(f"PnL chart successfully generated in RR units: {save_path}")
+        except Exception as e:
+            logger.error(f"Error generating PnL chart: {e}")
 
     def print_summary(self) -> None:
-        """Print professional PnL summary."""
         s = self.get_status()
         print("\n" + "=" * 65)
         print(" QUANT SIMULATOR — PERFORMANCE SUMMARY")
@@ -619,22 +632,28 @@ class QuantSimulator:
         print(f"  Total Fees        : ${s['total_fees_usd']:.2f}")
         print(f"  Net PnL           : ${s['total_net_pnl_usd']:+.2f}")
         print(f"  Total R-Multiple  : {s['total_r_multiple']:+.4f}")
-        print(f"  Current Spread    : {s['spread_bps']:.2f} bps")
-        print(f"  In Position       : {s['in_position']}")
-        if s['in_position']:
-            print(f"    Entry        : {s['entry_price']:.2f}")
-            print(f"    Stop         : {s['stop_barrier']:.2f}")
-            print(f"    Profit       : {s['profit_barrier']:.2f}")
-            print(f"    Barrier      : {s['barrier_pct']*100:.3f}%")
         print("=" * 65)
-        print(f"  Journal: {self._journal_file}")
+        self.plot_pnl()
+
+    def get_status(self) -> Dict:
+        return {
+            'in_position': self.position.active,
+            'entry_price': self.position.entry_price,
+            'total_trades': len(self.trades),
+            'winning_trades': self.winning_trades,
+            'losing_trades': self.losing_trades,
+            'total_gross_pnl_usd': self.total_gross_pnl,
+            'total_net_pnl_usd': self.total_net_pnl,
+            'total_fees_usd': self.total_fees,
+            'total_r_multiple': self.total_r_multiple,
+            'win_rate': self.winning_trades / len(self.trades) if self.trades else 0.0,
+        }
 
     def close(self) -> None:
-        """Safe shutdown — close any open position."""
         if self.position.active:
             mid = self.get_current_mid()
             self.force_exit('shutdown', mid)
-
+        self.plot_pnl()
 def main():
     """Entry point for dry-run execution test."""
     # Basic logging setup if executed directly
