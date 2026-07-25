@@ -14,8 +14,8 @@ API_SECRET = "..."                # Your real Bybit API secret
 
 # --- Strategy Parameters (VERIFIED against research/ml-state.ipynb) ---
 # Cell "Config" block in ml-state.ipynb (binary version, line 458-476):
-LOOKAHEAD_SECONDS    = 300       # 5-min barrier horizon (research: 300s)
-BARRIER_MULTIPLIER   = 2.0       # Volatility-scaled barrier width (research test: 2.0)
+LOOKAHEAD_SECONDS    = 900       # 5-min barrier horizon (research: 300s)
+BARRIER_MULTIPLIER   = 6.0       # Volatility-scaled barrier width (research test: 2.0)
 RSI_FILTER_COLUMN    = 'rsi_2'   # Research uses rsi_2 for filter (NOT rsi_14)
 RSI_FILTER_THRESHOLD = 30        # Only trade when RSI(2) < 30 (research: rsi_2 < 30)
 CONFIDENCE_THRESHOLD = 0.5      # P(LONG) must be >= this to fire a SHORT fade
