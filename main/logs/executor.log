@@ -14765,3 +14765,14 @@ client_session: <aiohttp.client.ClientSession object at 0x000001E03D536010>
 2026-07-25 13:54:37,081 | executor | INFO | Model trained on 200 samples. Train accuracy: 0.7650
 2026-07-25 13:54:37,082 | execution | INFO | QuantSimulator: Quick init (no exchange connection).
 2026-07-25 13:54:50,396 | execution | INFO | QuantSimulator: Connected to real Bybit API for market data.
+2026-07-25 14:01:36,148 | executor | INFO | Model saved to main/models/lgb_model.txt
+2026-07-25 14:01:36,150 | executor | INFO | Model trained on 200 samples. Train accuracy: 0.7500
+2026-07-25 14:01:36,152 | execution | INFO | QuantSimulator: Quick init (no exchange connection).
+2026-07-25 14:01:50,314 | execution | INFO | QuantSimulator: Connected to real Bybit API for market data.
+2026-07-25 14:48:55,324 | execution | WARNING | QuantSimulator: Could not load markets initially (bybit GET https://api.bybit.com/v5/market/time). Will retry on demand.
+2026-07-25 14:48:55,412 | executor | INFO | Model loaded from main/models/lgb_model.txt
+2026-07-25 14:48:55,413 | executor | INFO | Connecting to exchange WebSocket stream for BTC/USDT:USDT...
+2026-07-25 14:48:55,439 | executor | INFO | Interrupted by user.
+2026-07-25 14:48:55,606 | ccxt.base.exchange | WARNING | bybit requires to release all resources with an explicit call to the .close() coroutine. If you are using the exchange instance with async coroutines, add `await exchange.close()` to your code into a place when you're done with the exchange and don't need the exchange instance anymore (at the end of your async coroutine).
+2026-07-25 14:48:55,608 | asyncio | ERROR | Unclosed client session
+client_session: <aiohttp.client.ClientSession object at 0x0000017F8A6A8D10>
