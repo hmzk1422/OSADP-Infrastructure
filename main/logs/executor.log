@@ -14759,3 +14759,9 @@ client_session: <aiohttp.client.ClientSession object at 0x000001A8AE29FB90>
 2026-07-24 08:51:55,789 | ccxt.base.exchange | WARNING | bybit requires to release all resources with an explicit call to the .close() coroutine. If you are using the exchange instance with async coroutines, add `await exchange.close()` to your code into a place when you're done with the exchange and don't need the exchange instance anymore (at the end of your async coroutine).
 2026-07-24 08:51:55,790 | asyncio | ERROR | Unclosed client session
 client_session: <aiohttp.client.ClientSession object at 0x000001E03D536010>
+2026-07-25 13:52:46,554 | executor | INFO | Model saved to main/models/lgb_model.txt
+2026-07-25 13:52:46,557 | executor | INFO | Model trained on 200 samples. Train accuracy: 0.7850
+2026-07-25 13:54:37,078 | executor | INFO | Model saved to main/models/lgb_model.txt
+2026-07-25 13:54:37,081 | executor | INFO | Model trained on 200 samples. Train accuracy: 0.7650
+2026-07-25 13:54:37,082 | execution | INFO | QuantSimulator: Quick init (no exchange connection).
+2026-07-25 13:54:50,396 | execution | INFO | QuantSimulator: Connected to real Bybit API for market data.

@@ -1,11 +1,11 @@
 """
 Live Strategy Executor — 1-Second Resolution
 ==============================================
-The core loop that ties everything together, matching research/ml-state.ipynb.
+The core loop that ties everything together, matching research/ml_state_optimized.py.
 
-Research Architecture (ml-state.ipynb):
+Research Architecture (ml_state_optimized.py):
     df_micro = df_trades.resample('1s')       → 1-second bars
-    df_macro = df_ob_1m (resample '1min')     → RSI, candle, orderflow
+    df_macro = df_ob_1m (resample '1min')     → RSI, MA slope, spread, etc.
     df_state_space = df_micro.join(df_macro, how='left').ffill()
     → model runs on EVERY 1-SECOND row ←
 
@@ -53,7 +53,7 @@ from main.features import LiveFeatureEngine
 from main.execution import QuantSimulator
 
 # --- Utils ---
-from utils.indicators import get_wilders_rsi, sma
+from utils.indicators import get_wilders_rsi, sma, calculate_zscore
 from utils.bybit import BybitConnector
 
 # --- ML ---
@@ -116,13 +116,23 @@ class ModelManager:
                 logger.error(f"Failed to save model: {e}")
 
     def train(self, X: np.ndarray, y: np.ndarray) -> None:
-        neg_pos_ratio = sum(y == 0) / max(sum(y == 1), 1)
+        """
+        Train model with parameters matching ml_state_optimized.py exactly.
+        
+        Research params (ml_state_optimized.py lines 612-624):
+            n_estimators=200, learning_rate=0.01, max_depth=3,
+            num_leaves=31, min_child_samples=20, subsample=0.8,
+            colsample_bytree=0.8, class_weight='balanced', random_state=42
+        """
         self.model = lgb.LGBMClassifier(
-            n_estimators=300,
-            learning_rate=0.05,
-            max_depth=5,
+            n_estimators=200,
+            learning_rate=0.01,
+            max_depth=3,
             num_leaves=31,
-            scale_pos_weight=neg_pos_ratio,
+            min_child_samples=20,
+            subsample=0.8,
+            colsample_bytree=0.8,
+            class_weight='balanced',
             random_state=42,
             n_jobs=-1,
             verbose=-1,
@@ -143,7 +153,6 @@ class ModelManager:
             preds = self.model.predict(X)
             
             # Reconstruct the 2D array [[P(Loss), P(Win)]] to match scikit-learn format
-            # np.vstack combines (1-preds) and preds, .T transposes it to the right shape
             return np.vstack((1.0 - preds, preds)).T
             
         # If it's still an LGBMClassifier (right after live training)
@@ -165,8 +174,11 @@ class ModelManager:
 # ============================================================================
 class HistoricalDataBuilder:
     """
-    Fetches historical 1-min OHLCV + orderflow data to build
-    a training dataset matching the research pipeline.
+    Fetches historical 1-min OHLCV data to build
+    a training dataset matching the ml_state_optimized.py pipeline.
+    
+    Computes the 7 optimized features:
+        spread_bps_z, ma_slope_5, rsi_x_ma, ma_accel, price_roc_3, rsi_2, sma_14
     """
 
     def __init__(self, symbol: str = SYMBOL):
@@ -186,46 +198,65 @@ class HistoricalDataBuilder:
         price = df_ohlcv['close'].values
         diffs = np.diff(price, prepend=price[0])
 
-        # RSI features
+        # ================================================================
+        # RSI features (ml_state_optimized.py lines 397-400)
+        # ================================================================
         rsi_2 = get_wilders_rsi(diffs, RSI_2_WINDOW)
         rsi_14 = get_wilders_rsi(diffs, RSI_14_WINDOW)
         sma_14_vals = sma(rsi_14, SMA_14_WINDOW)
 
-        # Micro features (approximate from 1-min data)
-        buy_vol = df_ohlcv['volume'] * 0.52
-        sell_vol = df_ohlcv['volume'] * 0.48
-        micro_OFI = (buy_vol - sell_vol) / 60.0
-        micro_CVD = micro_OFI.rolling(CVD_ROLLING).sum()
+        # ================================================================
+        # MA Slope (velocity) — ml_state_optimized.py lines 404-406
+        # ma_5 = np.convolve(close_arr, np.ones(5)/5, mode='same')
+        # ma_slope_5 = np.diff(ma_5)
+        # ================================================================
+        close_arr = price.astype(float)
+        ma_5 = np.convolve(close_arr, np.ones(MA_SLOPE_WINDOW) / MA_SLOPE_WINDOW, mode='same')
+        ma_5[:MA_SLOPE_WINDOW - 1] = np.nan
+        ma_slope_5 = _pad_front(np.diff(ma_5), len(df_ohlcv))
 
-        # Candle features
-        candle_range = (df_ohlcv['high'] - df_ohlcv['low']).replace(0, EPS)
-        candle_type = abs(df_ohlcv['close'] - df_ohlcv['open']) / candle_range
-        candle_size = candle_range / (candle_range.rolling(14).mean().replace(0, EPS))
+        # ================================================================
+        # MA Acceleration (2nd derivative) — ml_state_optimized.py lines 409-412
+        # ma_accel = np.diff(ma_slope)
+        # ================================================================
+        ma_slope_arr = ma_slope_5.copy()
+        ma_accel = _pad_front(np.diff(ma_slope_arr), len(df_ohlcv))
 
-        # Orderflow features
-        total_vol = df_ohlcv['volume'].replace(0, EPS)
-        largest_buyer = (buy_vol * 0.15) / total_vol * 100.0
-        largest_seller = (sell_vol * 0.15) / total_vol * 100.0
-        OFI_LOB = 100.0 * (total_vol * 0.04) / (total_vol + EPS)
-        OFI_AGG = 100.0 * (buy_vol - sell_vol) / (buy_vol + sell_vol + EPS)
-        CVD_raw = buy_vol - sell_vol
-        cvd_delta = CVD_raw.diff()
-        CVD_z = ((cvd_delta - cvd_delta.rolling(OFI_LOOKBACK).mean())
-                 / (cvd_delta.rolling(OFI_LOOKBACK).std() + EPS))
+        # ================================================================
+        # Price rate of change — ml_state_optimized.py line 415
+        # price_roc_3 = close.pct_change(3)
+        # ================================================================
+        price_series = df_ohlcv['close']
+        price_roc_3 = price_series.pct_change(PRICE_ROC_WINDOW_3)
 
+        # ================================================================
+        # DeepLOB: Spread in bps, z-scored — ml_state_optimized.py lines 430-431
+        # spread_bps_z = calculate_zscore(depth_1m['spread_bps'], window=10)
+        # ================================================================
+        # Approximate spread from OHLCV data (no orderbook in historical)
+        # Use high-low range as a proxy for spread volatility
+        spread_approx = (df_ohlcv['high'] - df_ohlcv['low']) / df_ohlcv['close'] * 10000.0
+        spread_bps_z = calculate_zscore(spread_approx.fillna(0).values, window=DEEPLOB_Z_WINDOW)
+
+        # ================================================================
+        # RSI × MA slope interaction — ml_state_optimized.py lines 437-439
+        # rsi_z = calculate_zscore(rsi_2, window=20)
+        # rsi_x_ma = rsi_z * ma_slope_5
+        # ================================================================
+        rsi_z = calculate_zscore(rsi_2, window=RSI_Z_WINDOW)
+        rsi_x_ma = rsi_z * ma_slope_5
+
+        # ================================================================
+        # Build feature DataFrame
+        # ================================================================
         df_features = pd.DataFrame({
-            'micro_OFI': micro_OFI,
-            'micro_CVD': micro_CVD,
+            'spread_bps_z': spread_bps_z,
+            'ma_slope_5': ma_slope_5,
+            'rsi_x_ma': rsi_x_ma,
+            'ma_accel': ma_accel,
+            'price_roc_3': price_roc_3,
             'rsi_2': _pad_front(rsi_2, len(df_ohlcv)),
-            'rsi_14': _pad_front(rsi_14, len(df_ohlcv)),
             'sma_14': _pad_front(sma_14_vals, len(df_ohlcv)),
-            'largest_buyer': largest_buyer,
-            'largest_seller': largest_seller,
-            'OFI_LOB': OFI_LOB,
-            'OFI_AGG': OFI_AGG,
-            'CVD_z': CVD_z,
-            'candle_type': candle_type,
-            'candle_size': candle_size,
             'close': price,
         }, index=df_ohlcv.index)
 
@@ -233,7 +264,9 @@ class HistoricalDataBuilder:
         if len(df_features) < 200:
             logger.warning(f"Only {len(df_features)} rows after feature computation.")
 
-        # Barrier labeling
+        # ================================================================
+        # Barrier labeling (matching ml_state_optimized.py add_barrier_labels)
+        # ================================================================
         ret_std_1m = df_features['close'].pct_change().rolling(window=BARRIER_VOL_WINDOW).std()
         horizon_std = ret_std_1m * np.sqrt(LOOKAHEAD_SECONDS)
         profit_barrier = horizon_std * BARRIER_MULTIPLIER
