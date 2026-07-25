@@ -1,26 +1,31 @@
 """
-Live Feature Pipeline (1-Second Resolution)
-=============================================
-Real-time feature computation mirroring the research pipeline in ml-state.ipynb.
+Live Feature Pipeline (1-Second Resolution) — Optimized Feature Set
+====================================================================
+Real-time feature computation mirroring the research pipeline in ml_state_optimized.py.
 
 Architecture (matches research exactly):
     1. Ingest raw trades → aggregate into 1-second micro bars
-    2. 1-minute macro features (RSI, candle, etc.) updated every 60 trades
-    3. Micro features (OFI, CVD) updated EVERY SECOND
-    4. Join micro + macro → full 12-feature vector
+    2. 1-minute macro features (RSI, MA slope, spread, etc.) updated every minute
+    3. Micro features (price_roc_3) updated EVERY SECOND
+    4. Join micro + macro → full 7-feature vector
     5. Run inference EVERY SECOND
 
-Research reference: ml-state.ipynb lines 80-142
-    df_micro = df_trades.resample('1s')       → price, micro_OFI, micro_CVD
-    df_macro = df_ob_1m (resample '1min')     → RSI, candle, OFI_LOB, etc.
-    df_state_space = df_micro.join(df_macro, how='left').ffill()
+Research reference: ml_state_optimized.py lines 386-439
+    Features (by PFI ranking):
+        spread_bps_z  (0.081) — DeepLOB spread z-score
+        ma_slope_5    (0.024) — MA velocity
+        rsi_x_ma      (0.006) — RSI × MA slope interaction
+        ma_accel      (0.005) — MA acceleration
+        price_roc_3   (0.005) — Price rate of change
+        rsi_2         (filter) — RSI(2)
+        sma_14        (context) — SMA of RSI(14)
 """
 
 import numpy as np
 import pandas as pd
 from collections import deque
 from typing import Dict, Optional
-from utils.indicators import get_wilders_rsi, sma, calculate_cvd
+from utils.indicators import get_wilders_rsi, sma, calculate_zscore
 
 import sys
 sys.path.append('.')
@@ -34,9 +39,10 @@ EPS = 1e-9
 class LiveFeatureEngine:
     """
     Streaming feature computation engine at 1-SECOND resolution.
+    Computes the 7 optimized features from ml_state_optimized.py.
 
     Each call to on_trade() updates micro-bar data per-second.
-    Calling compute_1s_feature_vector() produces the full 12-feature vector
+    Calling compute_1s_feature_vector() produces the full 7-feature vector
     for the current 1-second bar.
 
     Usage:
@@ -46,7 +52,7 @@ class LiveFeatureEngine:
 
         # EVERY SECOND (on the 1-second clock tick):
         features = engine.compute_1s_feature_vector()
-        # → dict with all 12 features, ready for model.predict_proba()
+        # → dict with all 7 features, ready for model.predict_proba()
     """
 
     def __init__(self):
@@ -60,9 +66,7 @@ class LiveFeatureEngine:
         self._second_sell_vol: float = 0.0
 
         # --- Rolling buffers for micro features (updated every second) ---
-        # 1-second micro OFI values (last 60 seconds)
-        self._ofi_buffer = RingBuffer(60)
-        # 1-second prices (for micro_CVD and price diffs)
+        # 1-second prices (for price_roc_3 and price diffs)
         self._price_buffer = RingBuffer(300)
 
         # --- 1-minute macro state (OHLC aggregates) ---
@@ -75,10 +79,6 @@ class LiveFeatureEngine:
         self._minute_volume: float = 0.0
         self._minute_largest_buy: float = 0.0
         self._minute_largest_sell: float = 0.0
-        self._minute_ob_bid_sum: float = 0.0
-        self._minute_ob_ask_sum: float = 0.0
-        self._minute_ob_bid_count: int = 0
-        self._minute_ob_ask_count: int = 0
 
         # --- Current orderbook snapshot (latest) ---
         self._last_bid_price: float = 0.0
@@ -90,22 +90,18 @@ class LiveFeatureEngine:
         # --- Computed 1-minute features (cached, updated on minute rollover) ---
         self._macro_features: Dict[str, float] = {
             'rsi_2': 50.0,
-            'rsi_14': 50.0,
             'sma_14': 50.0,
-            'largest_buyer': 0.0,
-            'largest_seller': 0.0,
-            'OFI_LOB': 0.0,
-            'OFI_AGG': 0.0,
-            'CVD_z': 0.0,
-            'candle_type': 0.5,
-            'candle_size': 1.0,
+            'ma_slope_5': 0.0,
+            'ma_accel': 0.0,
+            'spread_bps_z': 0.0,
+            'rsi_x_ma': 0.0,
         }
 
         # --- Buffers for macro feature computation ---
-        self._close_prices = RingBuffer(200)
-        self._price_diffs = RingBuffer(300)
-        self._cvd_deltas = RingBuffer(OFI_LOOKBACK)
-        self._candle_sizes = RingBuffer(14)
+        self._close_prices = RingBuffer(200)       # For MA slope, price_roc
+        self._price_diffs = RingBuffer(300)         # For RSI computation
+        self._rsi_2_buffer = RingBuffer(50)         # For rsi_z computation
+        self._spread_bps_buffer = RingBuffer(50)    # For spread_bps_z computation
 
         # Track which minute we're currently accumulating
         self._current_minute_key: Optional[int] = None
@@ -157,22 +153,15 @@ class LiveFeatureEngine:
         self._last_ask_amount = ask_amount
         self._last_mid_price = (bid_price + ask_price) / 2
 
-        self._minute_ob_bid_sum += bid_amount
-        self._minute_ob_ask_sum += ask_amount
-        self._minute_ob_bid_count += 1
-        self._minute_ob_ask_count += 1
-
     def _flush_second(self) -> None:
         """
         Called when a new second starts. Flushes the completed second's data
         into the rolling buffers.
         """
         close = self._second_close if self._second_close is not None else self._last_mid_price
-        net_OFI = self._second_buy_vol - self._second_sell_vol
 
         # Store price for diff computation
         self._price_buffer.append(close)
-        self._ofi_buffer.append(net_OFI)
 
         self._second_count += 1
 
@@ -193,7 +182,7 @@ class LiveFeatureEngine:
 
     def _compute_macro_features(self) -> None:
         """
-        Compute the 1-minute-resolution features (RSI, candle, orderflow).
+        Compute the 1-minute-resolution features matching ml_state_optimized.py.
         Called when the current minute rolls over.
 
         These are forward-filled until the next minute update — exactly
@@ -217,7 +206,9 @@ class LiveFeatureEngine:
         self._price_diffs.append(delta)
         self._close_prices.append(close)
 
-        # --- RSI features ---
+        # ================================================================
+        # RSI features (ml_state_optimized.py lines 397-400)
+        # ================================================================
         diffs = self._price_diffs.values
         rsi_2_arr = get_wilders_rsi(diffs, RSI_2_WINDOW) if len(diffs) >= RSI_2_WINDOW + 1 else np.array([np.nan])
         rsi_14_arr = get_wilders_rsi(diffs, RSI_14_WINDOW) if len(diffs) >= RSI_14_WINDOW + 1 else np.array([np.nan])
@@ -226,45 +217,78 @@ class LiveFeatureEngine:
         rsi_14_val = float(rsi_14_arr[-1]) if len(rsi_14_arr) > 0 else 50.0
         sma_14_val = float(np.nanmean(rsi_14_arr[-SMA_14_WINDOW:])) if len(rsi_14_arr) >= SMA_14_WINDOW else 50.0
 
-        # --- Candle features ---
-        candle_range = high - low if high > low else EPS
-        candle_type = abs(close - open_) / candle_range
-        self._candle_sizes.append(candle_range)
-        candle_size = candle_range / (self._candle_sizes.mean + EPS) if self._candle_sizes.full else 1.0
+        # Store rsi_2 for z-score computation
+        self._rsi_2_buffer.append(rsi_2_val)
 
-        # --- Aggregated trade features ---
-        total_vol = self._minute_volume if self._minute_volume > 0 else EPS
-        largest_buyer_pct = (self._minute_largest_buy * 100.0) / total_vol
-        largest_seller_pct = (self._minute_largest_sell * 100.0) / total_vol
+        # ================================================================
+        # MA Slope (velocity) — ml_state_optimized.py lines 404-406
+        # ma_5 = np.convolve(close_arr, np.ones(5)/5, mode='same')
+        # ma_slope_5 = np.diff(ma_5)
+        # ================================================================
+        close_arr = self._close_prices.values
+        if len(close_arr) >= MA_SLOPE_WINDOW + 1:
+            # Compute 5-period SMA
+            ma_5 = np.convolve(close_arr, np.ones(MA_SLOPE_WINDOW) / MA_SLOPE_WINDOW, mode='valid')
+            # MA slope = difference of MA
+            ma_slope_5 = float(np.diff(ma_5)[-1]) if len(ma_5) >= 2 else 0.0
+        else:
+            ma_slope_5 = 0.0
 
-        # --- Orderbook imbalance ---
-        ob_bid_avg = self._minute_ob_bid_sum / max(self._minute_ob_bid_count, 1)
-        ob_ask_avg = self._minute_ob_ask_sum / max(self._minute_ob_ask_count, 1)
-        OFI_LOB = 100.0 * (ob_bid_avg - ob_ask_avg) / (ob_bid_avg + ob_ask_avg + EPS)
+        # ================================================================
+        # MA Acceleration (2nd derivative) — ml_state_optimized.py lines 409-412
+        # ma_accel = np.diff(ma_slope)
+        # ================================================================
+        if len(close_arr) >= MA_SLOPE_WINDOW + 2:
+            ma_5 = np.convolve(close_arr, np.ones(MA_SLOPE_WINDOW) / MA_SLOPE_WINDOW, mode='valid')
+            ma_slope_arr = np.diff(ma_5)
+            ma_accel = float(np.diff(ma_slope_arr)[-1]) if len(ma_slope_arr) >= 2 else 0.0
+        else:
+            ma_accel = 0.0
 
-        # --- Aggregated trade imbalance ---
-        agg_buyer = self._minute_buy_vol
-        agg_seller = self._minute_sell_vol
-        OFI_AGG = 100.0 * (agg_buyer - agg_seller) / (agg_buyer + agg_seller + EPS)
+        # ================================================================
+        # DeepLOB: Spread in bps, z-scored — ml_state_optimized.py lines 430-431
+        # spread_bps_z = calculate_zscore(depth_1m['spread_bps'], window=10)
+        # ================================================================
+        if self._last_bid_price > 0 and self._last_ask_price > 0:
+            mid = (self._last_bid_price + self._last_ask_price) / 2
+            spread_bps = (self._last_ask_price - self._last_bid_price) / mid * 10000.0
+        else:
+            spread_bps = 0.0
 
-        # --- CVD Z-score ---
-        cvd_raw = agg_buyer - agg_seller
-        cvd_delta = cvd_raw - (self._cvd_deltas.values[-1] if self._cvd_deltas._count > 0 else cvd_raw)
-        self._cvd_deltas.append(cvd_delta)
-        CVD_z = (cvd_delta - self._cvd_deltas.mean) / (self._cvd_deltas.std + EPS) if self._cvd_deltas.full else 0.0
+        self._spread_bps_buffer.append(spread_bps)
+
+        # Rolling z-score of spread_bps (window=10)
+        spread_vals = self._spread_bps_buffer.values
+        if len(spread_vals) >= DEEPLOB_Z_WINDOW:
+            spread_mean = np.nanmean(spread_vals[-DEEPLOB_Z_WINDOW:])
+            spread_std = np.nanstd(spread_vals[-DEEPLOB_Z_WINDOW:])
+            spread_bps_z = (spread_bps - spread_mean) / (spread_std + EPS)
+        else:
+            spread_bps_z = 0.0
+
+        # ================================================================
+        # RSI × MA slope interaction — ml_state_optimized.py lines 437-439
+        # rsi_z = calculate_zscore(rsi_2, window=20)
+        # rsi_x_ma = rsi_z * ma_slope_5
+        # ================================================================
+        rsi_vals = self._rsi_2_buffer.values
+        if len(rsi_vals) >= RSI_Z_WINDOW:
+            rsi_mean = np.nanmean(rsi_vals[-RSI_Z_WINDOW:])
+            rsi_std = np.nanstd(rsi_vals[-RSI_Z_WINDOW:])
+            rsi_z = (rsi_2_val - rsi_mean) / (rsi_std + EPS)
+        else:
+            rsi_z = 0.0
+
+        rsi_x_ma = rsi_z * ma_slope_5
 
         # Store macro features (these will be forward-filled across 1s bars)
         self._macro_features = {
             'rsi_2': rsi_2_val,
-            'rsi_14': rsi_14_val,
             'sma_14': sma_14_val,
-            'largest_buyer': largest_buyer_pct,
-            'largest_seller': largest_seller_pct,
-            'OFI_LOB': OFI_LOB,
-            'OFI_AGG': OFI_AGG,
-            'CVD_z': CVD_z,
-            'candle_type': candle_type,
-            'candle_size': candle_size,
+            'ma_slope_5': ma_slope_5,
+            'ma_accel': ma_accel,
+            'spread_bps_z': spread_bps_z,
+            'rsi_x_ma': rsi_x_ma,
         }
 
         self._last_macro_update_minute = int((self._current_second or 0) // 60)
@@ -283,21 +307,16 @@ class LiveFeatureEngine:
         self._minute_volume = 0.0
         self._minute_largest_buy = 0.0
         self._minute_largest_sell = 0.0
-        self._minute_ob_bid_sum = 0.0
-        self._minute_ob_ask_sum = 0.0
-        self._minute_ob_bid_count = 0
-        self._minute_ob_ask_count = 0
 
     def compute_1s_feature_vector(self) -> Dict[str, float]:
         """
-        Compute the full 12-feature vector for the CURRENT 1-second bar.
+        Compute the full 7-feature vector for the CURRENT 1-second bar.
         Called every second (on the 1-second clock tick).
 
         Uses last known price if current second has no trades.
-        Micro features read from rolling buffers (may lag by 1 second).
         Macro features forward-filled from last minute update.
 
-        Returns dict with 12 features + 'close' price, or {} if no data at all.
+        Returns dict with 7 features + 'close' price, or {} if no data at all.
         """
         # Use current second's close, or fallback to last mid price, or macro close
         close = self._second_close
@@ -308,32 +327,29 @@ class LiveFeatureEngine:
         if close is None or close == 0.0:
             return {}  # No data at all yet
 
-        # --- Micro features (1-second resolution) ---
-        # micro_OFI = buy_vol - sell_vol for this second
-        micro_OFI = self._second_buy_vol - self._second_sell_vol
+        # ================================================================
+        # Micro features (updated every second)
+        # ================================================================
 
-        # micro_CVD = sum of last 10 seconds of micro_OFI (research: rolling(10).sum())
-        if self._ofi_buffer._count >= CVD_ROLLING:
-            micro_CVD = float(np.nansum(self._ofi_buffer.values[-CVD_ROLLING:]))
+        # price_roc_3 — ml_state_optimized.py line 415
+        # df_price_1m['price_roc_3'] = df_price_1m['close'].pct_change(3)
+        price_vals = self._price_buffer.values
+        if len(price_vals) >= PRICE_ROC_WINDOW_3 + 1:
+            price_roc_3 = (close - price_vals[-PRICE_ROC_WINDOW_3]) / (price_vals[-PRICE_ROC_WINDOW_3] + EPS)
         else:
-            micro_CVD = float(micro_OFI)
+            price_roc_3 = 0.0
 
-        # --- Build full feature vector ---
-        # Micro features (update every second)
-        # Macro features (forward-filled from last minute update, matching research .ffill())
+        # ================================================================
+        # Build full 7-feature vector (matching ml_state_optimized.py)
+        # ================================================================
         features = {
-            'micro_OFI': micro_OFI,
-            'micro_CVD': micro_CVD,
+            'spread_bps_z': self._macro_features.get('spread_bps_z', 0.0),
+            'ma_slope_5': self._macro_features.get('ma_slope_5', 0.0),
+            'rsi_x_ma': self._macro_features.get('rsi_x_ma', 0.0),
+            'ma_accel': self._macro_features.get('ma_accel', 0.0),
+            'price_roc_3': price_roc_3,
             'rsi_2': self._macro_features.get('rsi_2', 50.0),
-            'rsi_14': self._macro_features.get('rsi_14', 50.0),
             'sma_14': self._macro_features.get('sma_14', 50.0),
-            'largest_buyer': self._macro_features.get('largest_buyer', 0.0),
-            'largest_seller': self._macro_features.get('largest_seller', 0.0),
-            'OFI_LOB': self._macro_features.get('OFI_LOB', 0.0),
-            'OFI_AGG': self._macro_features.get('OFI_AGG', 0.0),
-            'CVD_z': self._macro_features.get('CVD_z', 0.0),
-            'candle_type': self._macro_features.get('candle_type', 0.5),
-            'candle_size': self._macro_features.get('candle_size', 1.0),
             'close': close,
         }
 
@@ -350,11 +366,13 @@ class LiveFeatureEngine:
             return FEATURE_COLUMNS
         except (ImportError, AttributeError):
             return [
-                'micro_OFI', 'micro_CVD',
-                'rsi_2', 'rsi_14', 'sma_14',
-                'largest_buyer', 'largest_seller',
-                'OFI_LOB', 'OFI_AGG', 'CVD_z',
-                'candle_type', 'candle_size',
+                'spread_bps_z',
+                'ma_slope_5',
+                'rsi_x_ma',
+                'ma_accel',
+                'price_roc_3',
+                'rsi_2',
+                'sma_14',
             ]
 
     def extract_feature_vector(self, features: Dict[str, float]) -> np.ndarray:
