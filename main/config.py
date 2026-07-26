@@ -17,7 +17,7 @@ LOOKAHEAD_SECONDS    = 600       # 10-min barrier horizon (research: 600s)
 BARRIER_MULTIPLIER   = 3.0       # Volatility-scaled barrier width (research: 3.0)
 RSI_FILTER_COLUMN    = 'rsi_2'   # Research uses rsi_2 for filter
 RSI_FILTER_THRESHOLD = 30        # Only trade when RSI(2) < 30
-CONFIDENCE_THRESHOLD = 0.85      # P(WIN) must be >= this to fire a trade
+CONFIDENCE_THRESHOLD = 0.5      # P(WIN) must be >= this to fire a trade
 # Research tests thresholds 0.50-0.95. Start at 0.50 for more trades.
 
 # --- Barrier & Position ---

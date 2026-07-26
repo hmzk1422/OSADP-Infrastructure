@@ -49,8 +49,15 @@ CLASS_NAMES   = {LABEL_LOSS: 'LOSS', LABEL_WIN: 'WIN'}
 RR_RATIO      = 1.0
 
 # --- Orderflow Feature Config ---
-VPIN_BUCKET_SIZE    = 500
-VPIN_WINDOW_BUCKETS = 50
+# FIX: VPIN_BUCKET_SIZE used to be a hardcoded 500 (BTC units, per RETAIL_THRESHOLD
+# below being denominated in BTC). That's ~$30-50M notional/bucket — on a short
+# sample this could mean fewer than min_periods buckets ever close, so VPIN stays
+# NaN for the whole run. Instead we target a fixed NUMBER of buckets per session
+# (50/session is the standard VPIN convention) and derive bucket size from each
+# session's actual traded volume, so it self-calibrates regardless of venue/liquidity.
+VPIN_TARGET_BUCKETS_PER_SESSION = 50
+VPIN_WINDOW_BUCKETS = 10   # smoothing window in buckets (was 50 - unreachable given only ~50 buckets/session exist)
+VPIN_MIN_PERIODS    = 5
 RETAIL_THRESHOLD    = 0.05
 
 
@@ -242,9 +249,16 @@ def compute_orderflow_features(df_trades, df_orderbook):
     # ================================================================
     # 4. VPIN
     # ================================================================
+    # FIX: bucket size is now derived from this session's actual total traded
+    # volume / VPIN_TARGET_BUCKETS_PER_SESSION, instead of a hardcoded constant
+    # that assumed a specific liquidity regime. This guarantees ~50 buckets close
+    # per session regardless of how much volume the CSV actually contains.
     trades_sorted = trades.sort_index()
+    total_session_volume = trades_sorted['amount'].sum()
+    vpin_bucket_size = max(total_session_volume / VPIN_TARGET_BUCKETS_PER_SESSION, EPS)
+
     cum_vol = trades_sorted['amount'].cumsum()
-    bucket_labels = (cum_vol / VPIN_BUCKET_SIZE).astype(int)
+    bucket_labels = (cum_vol / vpin_bucket_size).astype(int)
 
     vpin_buckets = trades_sorted.groupby(bucket_labels).agg({
         'buy_vol': 'sum',
@@ -253,7 +267,12 @@ def compute_orderflow_features(df_trades, df_orderbook):
     })
 
     vpin_buckets['vpin_raw'] = np.abs(vpin_buckets['buy_vol'] - vpin_buckets['sell_vol']) / (vpin_buckets['amount'] + EPS)
-    vpin_buckets['vpin_smoothed'] = vpin_buckets['vpin_raw'].rolling(VPIN_WINDOW_BUCKETS, min_periods=10).mean()
+    vpin_buckets['vpin_smoothed'] = vpin_buckets['vpin_raw'].rolling(VPIN_WINDOW_BUCKETS, min_periods=VPIN_MIN_PERIODS).mean()
+
+    n_buckets_closed = bucket_labels.nunique()
+    if n_buckets_closed < VPIN_MIN_PERIODS:
+        print(f"  [VPIN WARNING] Only {n_buckets_closed} buckets closed this session "
+              f"(need {VPIN_MIN_PERIODS}+) — VPIN will be NaN/sparse for this session.")
 
     bucket_end_times = trades_sorted.groupby(bucket_labels).apply(lambda g: g.index[-1])
     if isinstance(bucket_end_times, pd.Series):
@@ -399,15 +418,12 @@ def load_and_build_state_space(orderbook_path, trades_path, session_id):
     df_price_1m['rsi_14'] = _pad_front(rsi_14_raw, len(df_price_1m))
     df_price_1m['sma_14'] = _pad_front(sma(rsi_14_raw, 14), len(df_price_1m))
 
-    # MA Slope (velocity)
-    close_arr = df_price_1m['close'].values.astype(float)
-    ma_5 = np.convolve(close_arr, np.ones(5)/5, mode='same')
-    ma_5[:4] = np.nan
-    df_price_1m['ma_slope_5'] = _pad_front(np.diff(ma_5), len(df_price_1m))
+    # MA Slope (velocity) - strictly backward looking
+    ma_5 = df_price_1m['close'].rolling(window=5).mean()
+    df_price_1m['ma_slope_5'] = ma_5.diff().fillna(0)
 
     # MA acceleration (2nd derivative)
-    ma_slope = df_price_1m['ma_slope_5'].values
-    df_price_1m['ma_accel'] = _pad_front(np.diff(ma_slope), len(df_price_1m))
+    df_price_1m['ma_accel'] = df_price_1m['ma_slope_5'].diff().fillna(0)
     df_price_1m['ma_accel_regime'] = np.where(df_price_1m['ma_accel'] > 0, 1,
                                       np.where(df_price_1m['ma_accel'] < 0, -1, 0))
 
@@ -439,6 +455,45 @@ def load_and_build_state_space(orderbook_path, trades_path, session_id):
     df_price_1m['rsi_x_ma'] = rsi_z * df_price_1m['ma_slope_5']
 
     # ================================================================
+    # FIX: PREVIOUSLY-DEAD ORDERFLOW FEATURES
+    # ================================================================
+    # ofi_1m, ofi_diff, cvd_delta_1m, cvd_slope_5, vpin_1m, trade_size, and
+    # abs_ratio_raw were all computed by compute_orderflow_features() above but
+    # were never joined into df_price_1m — they were silently discarded, so the
+    # model never actually saw them despite the docstring/feature-importance
+    # comments describing them as inputs. Wiring them in here for real, using
+    # the same reindex-onto-df_ob_1m.index pattern already used for depth_1m.
+    # Their actual predictive value (PFI/SHAP) will show up honestly in Step 7
+    # on the next run instead of being assumed away.
+
+    # OFI: structural order flow imbalance (change in imbalance per minute)
+    df_price_1m['ofi_z'] = calculate_zscore(
+        ofi_diff.reindex(df_ob_1m.index).fillna(0), window=10)
+
+    # CVD: cumulative volume delta, level change and short-window slope
+    df_price_1m['cvd_delta_z'] = calculate_zscore(
+        cvd_delta_1m.reindex(df_ob_1m.index).fillna(0), window=10)
+    df_price_1m['cvd_slope_z'] = calculate_zscore(
+        cvd_slope_5.reindex(df_ob_1m.index).fillna(0), window=10)
+
+    # VPIN: informed-trading probability. Forward-filled (not zero-filled) on
+    # reindex, since VPIN is a volume-clock signal that should persist its last
+    # known estimate between bucket closes rather than snap to 0.
+    df_price_1m['vpin'] = vpin_1m.reindex(df_ob_1m.index).ffill().fillna(0)
+
+    # Absorption ratio: CVD delta normalized by price range (institutional absorption)
+    df_price_1m['absorption_z'] = calculate_zscore(
+        abs_ratio_raw.reindex(df_ob_1m.index).fillna(0), window=10)
+
+    # Trade sign autocorrelation: hidden institutional order-splitting signature
+    df_price_1m['tick_autocorr'] = tick_autocorr_1m.reindex(df_ob_1m.index).fillna(0)
+
+    # Retail vs institutional flow: ratio and divergence between size cohorts
+    df_price_1m['inst_ratio'] = trade_size['inst_ratio'].reindex(df_ob_1m.index).fillna(0)
+    df_price_1m['delta_divergence_z'] = calculate_zscore(
+        trade_size['delta_divergence'].reindex(df_ob_1m.index).fillna(0), window=10)
+
+    # ================================================================
     # JOIN MICRO (1s) WITH MACRO (1m)
     # ================================================================
     df_micro_shifted = df_micro.shift(1)
@@ -458,18 +513,19 @@ def load_and_build_state_space(orderbook_path, trades_path, session_id):
 # ============================================================================
 print("Loading sessions...")
 session_0 = load_and_build_state_space(
-    "./csv/BTCUSDT_orderbook.csv", "./csv/BTCUSDT_trades.csv", session_id=0
+    "./research/csv/BTCUSDT_orderbook.csv", "./research/csv/BTCUSDT_trades.csv", session_id=0
 )
 print(f"Session 0: {len(session_0)} rows")
 session_1 = load_and_build_state_space(
-    "./csv/BTCUSDT_orderbook_2.csv", "./csv/BTCUSDT_trades_2.csv", session_id=1
+    "./research/csv/BTCUSDT_orderbook_2.csv", "./research/csv/BTCUSDT_trades_2.csv", session_id=1
 )
 print(f"Session 1: {len(session_1)} rows")
 session_2 = load_and_build_state_space(
-    "./csv/BTCUSDT_orderbook_3.csv", "./csv/BTCUSDT_trades_3.csv", session_id=1
+    "./research/csv/BTCUSDT_orderbook_3.csv", "./research/csv/BTCUSDT_trades_3.csv", session_id=2
 )
 print(f"Session 2: {len(session_2)} rows")
 
+#df_state_space = load_and_build_state_space("./research/csv/XAUTUSDT_orderbook.csv", "./research/csv/XAUTUSDT_trades.csv", 0)
 df_state_space = pd.concat([session_0, session_1, session_2]).sort_index()
 print(f"Combined state space: {len(df_state_space)} rows")
 
@@ -496,7 +552,7 @@ drop_cols = ['target', 'price', 'open', 'high', 'low', 'close',
              # Exclude zero-PFI and negative-PFI features
              'buy_vol', 'sell_vol', 'micro_OFI', 'micro_CVD', 'volume',
              'spread_pct', 'rsi_14', 'rsi_roc_3', 'rsi_roc_5',
-             'ma_accel_regime', 'price_roc_5', 'depth_imbalance_z']
+             'ma_accel_regime', 'price_roc_5']
 features = [c for c in df_training_zone.columns if c not in drop_cols]
 
 X = df_training_zone[features]
@@ -558,6 +614,18 @@ def purged_chronological_splits(index, n_samples, block_size, horizon_seconds, e
 
     step_intervals = available_test_run // n_samples
 
+    # FIX: warn if test windows overlap in time. If step_intervals < block_size,
+    # consecutive folds re-test overlapping historical periods with different
+    # models — the same real-world trade opportunity can get scored (and logged)
+    # more than once across folds, which inflates the apparent trade count and
+    # breaks the independence assumption behind the win-rate/CVaR stats later.
+    if step_intervals < block_size:
+        overlap_pct = 100 * (1 - step_intervals / block_size)
+        print(f"[FOLD OVERLAP WARNING] step_intervals={step_intervals} < block_size={block_size} "
+              f"-> consecutive test folds overlap by ~{overlap_pct:.0f}% of their length. "
+              f"Trade counts/expectancy pooled across folds are NOT independent draws. "
+              f"Reduce n_samples or block_size, or get more data, to eliminate this.")
+
     for fold in range(n_samples):
         start_idx = min_initial_train + (fold * step_intervals)
         test_idx = np.arange(start_idx, start_idx + block_size)
@@ -583,7 +651,40 @@ splitter = purged_chronological_splits(
 
 print(f"\n--- Starting {N_RANDOM_SAMPLES} Walk-Forward Folds | Targeting: {target_name} | Inverting Trades: {INVERT_RETURNS} ---")
 
-thresholds_to_track = np.arange(0.50, 0.96, 0.05)
+# FIX: HYSTERESIS BUFFER for signal detection
+# The original edge-trigger (np.diff(preds, prepend=0) == 1) fires a "fresh"
+# signal every time y_proba crosses from below t to >= t. If y_proba is noisy
+# right around a given threshold (e.g. the model's output clusters near 0.85),
+# it can cross back and forth many times within what is really one continuous
+# elevated-probability period, and each crossing gets counted as a separate
+# trade. This produced the non-monotonic trade-count spike (58 trades at >=85%
+# vs. 27 at >=80% and 6 at >=90%) — a strong signature of flicker, not signal.
+# HYSTERESIS_BUFFER requires proba to drop meaningfully below the threshold
+# before a new signal is allowed to re-arm, collapsing flicker into one trade.
+# NOTE: 0.08 is a starting point, not a proven-correct constant — tested on
+# synthetic noise (std=0.02) where 0.03 only cut flicker by ~79% (66->14
+# spurious signals) while 0.08 fully collapsed it to the true count. Your
+# model's actual y_proba noise level may differ. Before trusting this on your
+# real data, plot a histogram of y_proba for the fold(s) that fed the >=85%
+# threshold and check its local volatility against this buffer.
+HYSTERESIS_BUFFER = 0.08
+
+def find_debounced_signals(y_proba, threshold, hysteresis=HYSTERESIS_BUFFER):
+    """Return indices of fresh threshold crossings, ignoring flicker.
+    Once armed and proba >= threshold, a signal fires and the detector disarms.
+    It only re-arms once proba drops below (threshold - hysteresis)."""
+    lower_bound = max(threshold - hysteresis, 0.0)
+    armed = True
+    out = []
+    for i, p in enumerate(y_proba):
+        if armed and p >= threshold:
+            out.append(i)
+            armed = False
+        elif not armed and p < lower_bound:
+            armed = True
+    return np.array(out, dtype=int)
+
+thresholds_to_track = np.arange(0.20, 0.96, 0.05)
 fold_metrics = {t: {'precisions': [], 'win_rates': [], 'rrs': [], 'trades': []} for t in thresholds_to_track}
 fold_importances = []
 trade_log = {t: [] for t in thresholds_to_track}
@@ -691,22 +792,28 @@ for fold, (train_idx, test_idx, n_purged) in enumerate(splitter, start=1):
     y_proba = clf.predict_proba(X_test)[:, target_idx]
 
     for t in thresholds_to_track:
-        preds = (y_proba >= t).astype(int)
+        # FIX: hysteresis-debounced signal detection (see find_debounced_signals
+        # above) replaces the plain edge-trigger, which was vulnerable to
+        # probability flicker producing spurious repeated "fresh" signals.
+        signal_indices = find_debounced_signals(y_proba, t, HYSTERESIS_BUFFER)
 
-        # Chronological Non-Overlapping Position Filter
-        signal_indices = np.where(preds == 1)[0]
+        # --- Chronological Non-Overlapping Position Filter ---
         non_overlapping_idx = []
-        next_available_time = pd.Timestamp.min
+        next_available_time = pd.Timestamp.min  
 
         for idx in signal_indices:
             actual_global_time = X_test.index[idx]
-
+            
+            # If this fresh signal happens while we are ALREADY in a trade, skip it
             if actual_global_time < next_available_time:
-                continue
-
+                continue 
+                
             non_overlapping_idx.append(actual_global_time)
-
+            
+            # Get the duration in seconds
             trade_duration_seconds = int(df_training_zone.loc[actual_global_time, 'bars_to_exit']) + 1
+            
+            # The next time we can trade is the current time + the trade duration
             next_available_time = actual_global_time + pd.Timedelta(seconds=trade_duration_seconds)
 
         num_trades = len(non_overlapping_idx)
@@ -907,16 +1014,14 @@ print("=" * 70)
 print(f"Sequential (order-aware) binary barrier labels, full dataset: {label_counts.to_dict()}")
 print(f"Hunting zone ({RSI_FILTER_COLUMN} < {RSI_FILTER_THRESHOLD}) rows: {len(df_training_zone)}")
 print(f"Trading Setup: Target {target_name} | Inverting Trade Direction: {INVERT_RETURNS}")
-print(f"Model: n_estimators=200, max_depth=5 (interaction splits enabled)")
-print(f"\nNew Feature Families:")
-print(f"  - OLS Divergence: cvd_price_divergence, price_cvd_divergence, rsi_cvd_divergence")
-print(f"  - DeepLOB: depth_imbalance_z, depth_roc_z, spread_bps_z")
-print(f"  - Microstructure Momentum: tick_autocorr_z")
-print(f"  - Interaction: rsi_x_cvd_div, rsi_x_ofi, rsi_x_ma_accel")
-print(f"  - Regime: ma_accel, ma_accel_regime, ma_slope_5")
-print(f"  - Rate-of-change: price_roc_3/5, rsi_roc_3/5")
-print(f"  - Short-window OFI: OFI_z_5, OFI_z_15, OFI_accel")
-print(f"  - Short-window CVD: CVD_delta_z_5/15, CVD_slope_z")
+print(f"Model: n_estimators=200, max_depth=3, learning_rate=0.01 (see clf definition above)")
+# FIX: this used to hand-list feature names that didn't actually exist anywhere
+# in the computation (cvd_price_divergence, OFI_z_5, rsi_x_cvd_div, etc. — none
+# were ever computed). Printing the real, live `features` list instead so this
+# summary can't drift out of sync with what the model is actually trained on again.
+print(f"\nActual Features Used ({len(features)} total):")
+for f in features:
+    print(f"  - {f}")
 
 for lbl in class_labels_ordered:
     p_arr = np.array(class_metrics_by_label[lbl]['precision'])
