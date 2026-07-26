@@ -414,6 +414,9 @@ class StrategyExecutor:
                 receipt = self.simulator.enter_short(current_price, qty)
                 if receipt is not None:
                     logger.info(f"[ENTER SHORT] Sec {self.second_count} @ {receipt['fill_price']:.2f}")
+            else:
+                # ADDED: This will print whenever the RSI is good, but the AI confidence is too weak.
+                logger.info(f"Signal ignored: RSI is good, but P(WIN) confidence ({p_win:.3f}) is below {CONFIDENCE_THRESHOLD}.")
 
         except Exception as e:
             logger.error(f"Unhandled error in 1-sec tick loop: {e}")
