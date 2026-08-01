@@ -95,6 +95,7 @@ class LiveFeatureEngine:
             'ma_accel': 0.0,
             'spread_bps_z': 0.0,
             'rsi_x_ma': 0.0,
+            'bar_vol_std': 0.0,
         }
 
         # --- Buffers for macro feature computation ---
@@ -102,6 +103,13 @@ class LiveFeatureEngine:
         self._price_diffs = RingBuffer(300)         # For RSI computation
         self._rsi_2_buffer = RingBuffer(50)         # For rsi_z computation
         self._spread_bps_buffer = RingBuffer(50)    # For spread_bps_z computation
+
+        # --- Aggregated-bar volatility (for barrier sizing, NOT an ML feature) ---
+        # Std-dev of bar-to-bar % returns, measured on the SAME TIMEFRAME_BARRIER
+        # aggregated candle that RSI(2) reads from, instead of approximating it
+        # from 1s-tick std x sqrt(horizon).
+        self._bar_vol_window = globals().get('BARRIER_VOL_BAR_WINDOW', 20)
+        self._bar_vol_std: float = 0.0
 
         # Track which minute we're currently accumulating
         self._current_minute_key: Optional[int] = None
@@ -165,11 +173,12 @@ class LiveFeatureEngine:
 
         self._second_count += 1
 
-        # Check if we need to compute new macro features (minute rollover)
-        minute_key = int(self._current_second // 60) if self._current_second else 0
-        if minute_key != self._last_macro_update_minute and self._minute_close is not None:
+        # Check if we need to compute new macro features (timeframe rollover)
+        # TIMEFRAME_BARRIER is already in seconds (300 = 5 minutes)
+        timeframe_key = int(self._current_second // TIMEFRAME_BARRIER) if self._current_second else 0
+        if timeframe_key != self._last_macro_update_minute and self._minute_close is not None:
             self._compute_macro_features()
-            # Reset minute accumulators for next minute
+            # Reset accumulators for next timeframe
             self._reset_minute()
 
         # Reset second
@@ -219,6 +228,20 @@ class LiveFeatureEngine:
 
         # Store rsi_2 for z-score computation
         self._rsi_2_buffer.append(rsi_2_val)
+
+        # ================================================================
+        # Aggregated-bar volatility for barrier sizing
+        # Std-dev of returns BETWEEN consecutive aggregated (TIMEFRAME_BARRIER)
+        # bar closes — same close series RSI(2) is built from — rather than a
+        # 1s-tick std x sqrt(horizon) approximation.
+        # ================================================================
+        bar_closes = self._close_prices.values
+        if len(bar_closes) >= 3:
+            bar_rets = np.diff(bar_closes) / (bar_closes[:-1] + EPS)
+            window = min(len(bar_rets), self._bar_vol_window)
+            self._bar_vol_std = float(np.nanstd(bar_rets[-window:])) if window >= 2 else 0.0
+        else:
+            self._bar_vol_std = 0.0
 
         # ================================================================
         # MA Slope (velocity) — ml_state_optimized.py lines 404-406
@@ -289,15 +312,17 @@ class LiveFeatureEngine:
             'ma_accel': ma_accel,
             'spread_bps_z': spread_bps_z,
             'rsi_x_ma': rsi_x_ma,
+            'bar_vol_std': self._bar_vol_std,  # NOT an ML feature — barrier sizing only
         }
 
-        self._last_macro_update_minute = int((self._current_second or 0) // 60)
+        # Update with TIMEFRAME_BARRIER-based timeframe key
+        self._last_macro_update_minute = int((self._current_second or 0) // TIMEFRAME_BARRIER)
         self._macro_features['_close'] = close
         self._macro_features['_high'] = high
         self._macro_features['_low'] = low
 
     def _reset_minute(self) -> None:
-        """Reset all per-minute accumulators."""
+        """Reset all per-timeframe accumulators."""
         self._minute_open = None
         self._minute_high = None
         self._minute_low = None
@@ -351,6 +376,8 @@ class LiveFeatureEngine:
             'rsi_2': self._macro_features.get('rsi_2', 50.0),
             'sma_14': self._macro_features.get('sma_14', 50.0),
             'close': close,
+            # Barrier-sizing only — NOT one of the 7 ML features (see get_feature_columns)
+            'bar_vol_std': self._macro_features.get('bar_vol_std', 0.0),
         }
 
         return features

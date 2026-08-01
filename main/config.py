@@ -13,18 +13,36 @@ API_KEY = "..."                   # Your real Bybit API key (read-only is fine f
 API_SECRET = "..."                # Your real Bybit API secret
 
 # --- Strategy Parameters (VERIFIED against research/ml_state_optimized.py) ---
-LOOKAHEAD_SECONDS    = 600       # 10-min barrier horizon (research: 600s)
-BARRIER_MULTIPLIER   = 3.0       # Volatility-scaled barrier width (research: 3.0)
+LOOKAHEAD_SECONDS    = 3000      # 10-min barrier horizon (research: 600s)
+BARRIER_MULTIPLIER   = 0.5       # Volatility-scaled barrier width (research: 3.0)
 RSI_FILTER_COLUMN    = 'rsi_2'   # Research uses rsi_2 for filter
 RSI_FILTER_THRESHOLD = 30        # Only trade when RSI(2) < 30
-CONFIDENCE_THRESHOLD = 0.5      # P(WIN) must be >= this to fire a trade
+CONFIDENCE_THRESHOLD = 0.5       # P(WIN) must be >= this to fire a trade
 # Research tests thresholds 0.50-0.95. Start at 0.50 for more trades.
+
+# --- Trade Direction ---
+# 'short' = fade (current behavior) — bet AGAINST the model's P(WIN) prediction
+# 'long'  = snapback — bet WITH the model's P(WIN) prediction (price bounces up)
+TRADE_DIRECTION = 'short'        # 'short' or 'long'
+
+# note for myself: based on result, inversing signal for macro asset dont work. only for small asset.
 
 # --- Barrier & Position ---
 STOP_LOSS_BPS        = 5        # Fallback stop if barrier logic fails
 TAKE_PROFIT_BPS      = 5
 MAX_POSITION_USD     = 100       # Max notional per position (~0.0017 BTC at $60k)
 MIN_ORDER_SIZE       = 0.001     # Minimum contract size
+RR_RATIO             = 1.5       # Risk:Reward ratio (2.0 = 1:2, profit target = 2x stop distance)
+
+# --- Volatility / Barrier-Size Filter ---
+# Reject entries when the volatility-scaled barrier is outside this range.
+# barrier_pct = ret_std * sqrt(LOOKAHEAD_SECONDS) * BARRIER_MULTIPLIER
+# MIN: reject if market is too dead (barrier too tight → no profit potential)
+# MAX: reject if market is too wild (barrier too wide → uncontrollable risk)
+# Set MIN=0.0 and MAX=1.0 to disable the filter entirely.
+MIN_BARRIER_PCT = 0.0001        # 0.01% — reject if barrier smaller than this
+MAX_BARRIER_PCT = 0.05          # 5%    — reject if barrier larger than this
+TIMEFRAME_BARRIER = 300         # In unit seconds (5 minutes)
 
 # --- Feature Windows (research ml_state_optimized.py) ---
 RSI_14_WINDOW      = 14

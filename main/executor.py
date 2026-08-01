@@ -25,6 +25,7 @@ import logging
 import json
 import signal
 import warnings
+import argparse
 from datetime import datetime, timedelta
 from typing import Optional, Dict
 
@@ -268,7 +269,7 @@ class HistoricalDataBuilder:
         # Barrier labeling (matching ml_state_optimized.py add_barrier_labels)
         # ================================================================
         ret_std_1m = df_features['close'].pct_change().rolling(window=BARRIER_VOL_WINDOW).std()
-        horizon_std = ret_std_1m * np.sqrt(LOOKAHEAD_SECONDS)
+        horizon_std = ret_std_1m * np.sqrt(TIMEFRAME_BARRIER)
         profit_barrier = horizon_std * BARRIER_MULTIPLIER
         stop_barrier = horizon_std * BARRIER_MULTIPLIER
         lookahead_bars = max(1, LOOKAHEAD_SECONDS // 60)
@@ -363,6 +364,11 @@ class StrategyExecutor:
 
             self.feature_engine.on_trade(timestamp_ms, price, amount, side)
 
+            # NOTE: volatility sampling moved to _one_sec_tick() so the barrier
+            # vol buffer stays a true 1-second series, matching the research
+            # pipeline's ret_std_1s. Do not sample it here — trades arrive at
+            # irregular, sub-second frequency.
+
             if self.simulator.position.active:
                 exit_result = self.simulator.update_tick(price)
                 if exit_result:
@@ -382,6 +388,7 @@ class StrategyExecutor:
                 float(best_ask[0]),
                 float(best_ask[1]),
             )
+            # NOTE: volatility sampling moved to _one_sec_tick() — see on_trade().
         except Exception as e:
             logger.error(f"Error processing orderbook event: {e}")
 
@@ -395,6 +402,19 @@ class StrategyExecutor:
             self.second_count += 1
             current_price = features.get('close', 0)
             rsi_2_val = features.get('rsi_2', 100)
+
+            # Sample the barrier-vol buffer once per second here (not from
+            # on_trade/on_orderbook) so _price_buffer is a true evenly-spaced
+            # 1-second series. This is now only a bootstrap fallback used
+            # before the first aggregated bar completes.
+            if current_price > 0:
+                self.simulator.update_volatility(current_price)
+
+            # Primary barrier-sizing input: std of returns between aggregated
+            # TIMEFRAME_BARRIER bar closes — same series RSI(2) reads from.
+            bar_vol_std = features.get('bar_vol_std', 0.0)
+            if bar_vol_std > 0:
+                self.simulator.update_bar_volatility(bar_vol_std)
 
             feature_vector = self.feature_engine.extract_feature_vector(features)
             proba = self.model_mgr.predict_proba(feature_vector)[0]
@@ -411,9 +431,16 @@ class StrategyExecutor:
                 if qty < MIN_ORDER_SIZE:
                     return
 
-                receipt = self.simulator.enter_short(current_price, qty)
-                if receipt is not None:
-                    logger.info(f"[ENTER SHORT] Sec {self.second_count} @ {receipt['fill_price']:.2f}")
+                # Direction switch: 'short' = fade (bet against P(WIN)),
+                # 'long' = snapback (bet with P(WIN))
+                if TRADE_DIRECTION == 'long':
+                    receipt = self.simulator.enter_long(current_price, qty)
+                    if receipt is not None:
+                        logger.info(f"[ENTER LONG] Sec {self.second_count} @ {receipt['fill_price']:.2f}")
+                else:
+                    receipt = self.simulator.enter_short(current_price, qty)
+                    if receipt is not None:
+                        logger.info(f"[ENTER SHORT] Sec {self.second_count} @ {receipt['fill_price']:.2f}")
             else:
                 # ADDED: This will print whenever the RSI is good, but the AI confidence is too weak.
                 logger.info(f"Signal ignored: RSI is good, but P(WIN) confidence ({p_win:.3f}) is below {CONFIDENCE_THRESHOLD}.")
@@ -439,7 +466,7 @@ class StrategyExecutor:
 
         connector = aiohttp.TCPConnector(resolver=aiohttp.ThreadedResolver(), keepalive_timeout=30)
         exchange.session = aiohttp.ClientSession(connector=connector)
-        await exchange.load_markets()
+        
         return exchange
 
     async def _one_sec_clock(self):
@@ -594,8 +621,46 @@ class StrategyExecutor:
 # ============================================================================
 # Entry Point
 # ============================================================================
+def parse_args():
+    """Parse command-line arguments for multi-setup execution."""
+    parser = argparse.ArgumentParser(
+        description="Intraday Momentum Composite — Live Executor",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python -m main.executor --symbol BTC/USDT:USDT --direction short
+  python -m main.executor --symbol ETH/USDT:USDT --direction long --confidence 0.85
+  python -m main.executor    (uses config.py defaults)
+        """,
+    )
+    parser.add_argument(
+        '--symbol', type=str, default=None,
+        help='Trading symbol (e.g. BTC/USDT:USDT). Default: from config.py',
+    )
+    parser.add_argument(
+        '--direction', type=str, default=None, choices=['short', 'long'],
+        help='Trade direction: short=fade, long=snapback. Default: from config.py',
+    )
+    parser.add_argument(
+        '--confidence', type=float, default=None,
+        help='P(WIN) threshold to fire a trade (0.0-1.0). Default: from config.py',
+    )
+    return parser.parse_args()
+
+
 async def main():
     """Main entry point."""
+    args = parse_args()
+
+    # Override config defaults with CLI args if provided
+    global SYMBOL, TRADE_DIRECTION, CONFIDENCE_THRESHOLD
+    if args.symbol is not None:
+        SYMBOL = args.symbol
+    if args.direction is not None:
+        TRADE_DIRECTION = args.direction
+    if args.confidence is not None:
+        CONFIDENCE_THRESHOLD = args.confidence
+
     print("="*70)
     print(" INTRADAY MOMENTUM COMPOSITE — LIVE EXECUTOR (1-SECOND RESOLUTION)")
     print("="*70)
@@ -603,8 +668,10 @@ async def main():
     print(f"Testnet   : {TESTNET}")
     print(f"Dry Run   : {DRY_RUN}")
     print(f"Model     : {MODEL_PATH}")
+    print(f"Direction : {TRADE_DIRECTION.upper()}")
     print(f"Threshold : P(WIN) >= {CONFIDENCE_THRESHOLD}")
     print(f"Filter    : RSI(2) < {RSI_FILTER_THRESHOLD}")
+    print(f"Vol Filter: {MIN_BARRIER_PCT:.4%} <= barrier <= {MAX_BARRIER_PCT:.4%}")
     print(f"Lookahead : {LOOKAHEAD_SECONDS}s")
     print(f"Barrier   : {BARRIER_MULTIPLIER}x vol")
     print("="*70)
