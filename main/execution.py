@@ -309,6 +309,7 @@ class PositionTracker:
                 return self._exit('stop_loss', self.stop_barrier, ts)
 
         if hit_stop:
+            # consider switching to high/low to account market order slippage.
             return self._exit('stop_loss', self.stop_barrier, ts)
         if hit_profit:
             return self._exit('take_profit', self.profit_barrier, ts)
@@ -371,9 +372,12 @@ class PositionTracker:
         bp = self.barrier_pct if self.barrier_pct > 1e-9 else 0.003
         
         # 1. Calculate Gross R and clip to [-1, 1] for barrier touches
-        gross_r = self.gross_pnl_pct / bp
+        base_gross_r = (self.entry_price - theoretical_exit) / self.entry_price / bp
         if not self.is_timeout:
-            gross_r = float(np.clip(gross_r, -1.0, 1.0))
+            base_gross_r = float(np.clip(base_gross_r, -1.0, 1.0))
+
+        slippage_r_penalty = (self.exit_slippage_bps / 10000.0) / bp
+        gross_r = base_gross_r - slippage_r_penalty
             
         # 2. Calculate the fee cost in terms of R-units
         fee_in_r = total_fee_pct / bp
@@ -471,22 +475,33 @@ class QuantSimulator:
         os.makedirs(os.path.dirname(self._journal_file), exist_ok=True)
 
     def get_current_mid(self) -> float:
-        """Fetch current mid-price safely with network exception handling."""
+        """Fetch orderbook, update slippage model, and return current mid-price."""
         if self.exchange is None:
             return self.position.entry_mid if self.position.entry_mid > 0 else 0.0
 
         try:
-            ticker = self.exchange.fetch_ticker(SYMBOL)
-            bid = float(ticker.get('bid', 0))
-            ask = float(ticker.get('ask', 0))
-            if bid > 0 and ask > 0:
-                return (bid + ask) / 2.0
-            return float(ticker.get('last', 0))
+            # 1. Fetch the top 10 levels of the orderbook instead of just the ticker
+            ob = self.exchange.fetch_order_book(SYMBOL, limit=10)
+            bids = ob.get('bids', [])
+            asks = ob.get('asks', [])
+
+            # 2. Feed this live liquidity data into your slippage model
+            self.slippage_model.update_book(bids, asks)
+
+            # 3. Calculate and return the mid-price from the top of the book
+            if bids and asks:
+                best_bid = float(bids[0][0])
+                best_ask = float(asks[0][0])
+                return (best_bid + best_ask) / 2.0
+            
+            # Fallback if orderbook is completely empty (extremely rare)
+            return self.position.entry_mid if self.position.entry_mid > 0 else 0.0
+
         except (ccxt.NetworkError, ccxt.ExchangeNotAvailable, ccxt.RequestTimeout) as e:
-            logger.warning(f"Network error fetching ticker: {e}. Falling back to last cached price.")
+            logger.warning(f"Network error fetching orderbook: {e}. Falling back to last cached price.")
             return self.position.entry_mid if self.position.entry_mid > 0 else 0.0
         except Exception as e:
-            logger.error(f"Unexpected error fetching ticker: {e}")
+            logger.error(f"Unexpected error fetching orderbook: {e}")
             return self.position.entry_mid if self.position.entry_mid > 0 else 0.0
 
     def calculate_quantity(self, price: float, usdt_amount: float = MAX_POSITION_USD) -> float:
