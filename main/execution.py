@@ -670,7 +670,7 @@ class QuantSimulator:
             logger.error(f"Failed to journal trade: {e}")
 
     def plot_pnl(self, save_path: str = "main/logs/pnl_chart.png") -> None:
-        """Generates and saves an equity curve chart for Net RR and Gross RR."""
+        """Generates and save an equity curve chart for Net RR and Gross RR."""
         if not self.trades:
             return
 
