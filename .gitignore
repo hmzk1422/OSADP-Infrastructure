@@ -14,3 +14,6 @@ venv/
 .env
 *.html
 *.png
+
+main/logs/executor.log
+main/logs/trade_journal.jsonl
