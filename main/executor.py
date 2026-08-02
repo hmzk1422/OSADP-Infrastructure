@@ -189,7 +189,7 @@ class HistoricalDataBuilder:
     def fetch_training_data(self, n_bars: int = N_HISTORICAL_BARS) -> pd.DataFrame:
         logger.info(f"Fetching {n_bars} bars of historical data for training...")
         df_ohlcv = self.connector.get_ohlcv(
-            symbol=self.symbol, interval='1m', total_limit=n_bars,
+            symbol=self.symbol, interval=f'{TIMEFRAME_BARRIER/60}m', total_limit=n_bars,
         )
         if df_ohlcv.empty:
             logger.error("No historical data fetched!")
@@ -333,11 +333,24 @@ class StrategyExecutor:
         self.simulator = QuantSimulator()
         self.model_mgr = ModelManager()
 
+        # --- Live dashboard (observational only — never touches order flow) ---
+        from main.dashboard import Dashboard
+        self.dashboard = Dashboard(symbol=self.symbol)
+
         self.running = False
         self.second_count = 0
         self.decision_log: list = []
 
     async def initialize(self) -> bool:
+        # --- Dashboard: start the web server before anything else so it's
+        # already reachable while historical data warms up ---
+        await self.dashboard.start()
+
+        # --- NEW CODE: Seed the buffers before doing anything else ---
+        logger.info("Warming up live feature engine with historical data...")
+        self.feature_engine.seed_historical_data(self.symbol, limit=150)
+        # -------------------------------------------------------------
+
         loaded = self.model_mgr.load()
         if not loaded and TRAIN_ON_STARTUP:
             logger.info("No model found. Fetching historical data...")
@@ -364,6 +377,9 @@ class StrategyExecutor:
 
             self.feature_engine.on_trade(timestamp_ms, price, amount, side)
 
+            if price > 0:
+                self.dashboard.push_tick(price, timestamp_ms)
+
             # NOTE: volatility sampling moved to _one_sec_tick() so the barrier
             # vol buffer stays a true 1-second series, matching the research
             # pipeline's ret_std_1s. Do not sample it here — trades arrive at
@@ -373,6 +389,8 @@ class StrategyExecutor:
                 exit_result = self.simulator.update_tick(price)
                 if exit_result:
                     self._log_trade(exit_result)
+                    self.dashboard.push_trade_exit(exit_result)
+                    self.dashboard.push_status(self._dashboard_status(price))
         except Exception as e:
             logger.error(f"Error processing trade event: {e}")
 
@@ -420,33 +438,88 @@ class StrategyExecutor:
             proba = self.model_mgr.predict_proba(feature_vector)[0]
             p_win = proba[1]
 
+            # Track what happened this tick so the dashboard's decision feed
+            # reflects the exact branch taken below (also feeds decision_log,
+            # which print_summary() already reads from).
+            action = 'WAIT'
+
             if rsi_2_val >= RSI_FILTER_THRESHOLD:
-                return
-
-            if self.simulator.position.active or not self.simulator.can_trade():
-                return
-
-            if p_win >= CONFIDENCE_THRESHOLD:
+                action = 'RSI_FILTERED'
+            elif self.simulator.position.active:
+                action = 'IN_POSITION'
+            elif not self.simulator.can_trade():
+                action = 'RATE_LIMITED'
+            elif p_win >= CONFIDENCE_THRESHOLD:
                 qty = self.simulator.calculate_quantity(current_price)
                 if qty < MIN_ORDER_SIZE:
-                    return
-
-                # Direction switch: 'short' = fade (bet against P(WIN)),
-                # 'long' = snapback (bet with P(WIN))
-                if TRADE_DIRECTION == 'long':
-                    receipt = self.simulator.enter_long(current_price, qty)
-                    if receipt is not None:
-                        logger.info(f"[ENTER LONG] Sec {self.second_count} @ {receipt['fill_price']:.2f}")
+                    action = 'QTY_TOO_SMALL'
                 else:
-                    receipt = self.simulator.enter_short(current_price, qty)
-                    if receipt is not None:
-                        logger.info(f"[ENTER SHORT] Sec {self.second_count} @ {receipt['fill_price']:.2f}")
+                    # Direction switch: 'short' = fade (bet against P(WIN)),
+                    # 'long' = snapback (bet with P(WIN))
+                    if TRADE_DIRECTION == 'long':
+                        receipt = self.simulator.enter_long(current_price, qty)
+                        if receipt is not None:
+                            action = 'ENTER_LONG'
+                            logger.info(f"[ENTER LONG] Sec {self.second_count} @ {receipt['fill_price']:.2f}")
+                            self.dashboard.push_trade_enter(receipt)
+                    else:
+                        receipt = self.simulator.enter_short(current_price, qty)
+                        if receipt is not None:
+                            action = 'ENTER_SHORT'
+                            logger.info(f"[ENTER SHORT] Sec {self.second_count} @ {receipt['fill_price']:.2f}")
+                            self.dashboard.push_trade_enter(receipt)
             else:
+                action = 'LOW_CONFIDENCE'
                 # ADDED: This will print whenever the RSI is good, but the AI confidence is too weak.
                 logger.info(f"Signal ignored: RSI is good, but P(WIN) confidence ({p_win:.3f}) is below {CONFIDENCE_THRESHOLD}.")
 
+            decision = {
+                'time': datetime.now().isoformat(),
+                'sec': self.second_count,
+                'close': current_price,
+                'rsi_2': rsi_2_val,
+                'p_win': float(p_win),
+                'action': action,
+            }
+            self.decision_log.append(decision)
+            self.dashboard.push_decision(decision)
+            self.dashboard.push_status(self._dashboard_status(current_price))
+
         except Exception as e:
             logger.error(f"Unhandled error in 1-sec tick loop: {e}")
+
+    def _dashboard_status(self, current_price: Optional[float] = None) -> Dict:
+        """QuantSimulator.get_status() extended with live position + mode
+        details the dashboard needs but the simulator doesn't track itself."""
+        status = self.simulator.get_status()
+        pos = self.simulator.position
+
+        unrealized_usd = 0.0
+        unrealized_pct = 0.0
+        elapsed_sec = 0.0
+        if pos.active and current_price:
+            if pos.side == 'short':
+                unrealized_pct = (pos.entry_price - current_price) / pos.entry_price
+            else:
+                unrealized_pct = (current_price - pos.entry_price) / pos.entry_price
+            unrealized_usd = unrealized_pct * pos.notional_usd
+            if pos.entry_time:
+                elapsed_sec = (datetime.now() - pos.entry_time).total_seconds()
+
+        status.update({
+            'side': pos.side,
+            'stop_barrier': pos.stop_barrier,
+            'profit_barrier': pos.profit_barrier,
+            'quantity': pos.quantity,
+            'notional_usd': pos.notional_usd,
+            'barrier_pct': pos.barrier_pct,
+            'unrealized_pnl_usd': unrealized_usd,
+            'unrealized_pnl_pct': unrealized_pct,
+            'elapsed_seconds': elapsed_sec,
+            'lookahead_seconds': LOOKAHEAD_SECONDS,
+            'mode': 'DRY-RUN — simulated fills, no live orders' if self.dry_run else 'LIVE',
+        })
+        return status
 
     def _log_trade(self, trade_result: Dict) -> None:
         logger.info(f"[TRADE EXIT] PnL: ${trade_result.get('net_pnl_usd', 0):+.2f}")
@@ -599,6 +672,7 @@ class StrategyExecutor:
         self.running = False
         self.simulator.close()
         self.simulator.print_summary()
+        await self.dashboard.stop()
 
     def print_summary(self) -> None:
         """Print execution summary."""

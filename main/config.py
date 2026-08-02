@@ -32,7 +32,7 @@ STOP_LOSS_BPS        = 5        # Fallback stop if barrier logic fails
 TAKE_PROFIT_BPS      = 5
 MAX_POSITION_USD     = 100       # Max notional per position (~0.0017 BTC at $60k)
 MIN_ORDER_SIZE       = 0.001     # Minimum contract size
-RR_RATIO             = 1.5       # Risk:Reward ratio (2.0 = 1:2, profit target = 2x stop distance)
+RR_RATIO             = 0.667       # Risk:Reward ratio (2.0 = 1:2, profit target = 2x stop distance)
 
 # --- Volatility / Barrier-Size Filter ---
 # Reject entries when the volatility-scaled barrier is outside this range.
@@ -40,7 +40,7 @@ RR_RATIO             = 1.5       # Risk:Reward ratio (2.0 = 1:2, profit target =
 # MIN: reject if market is too dead (barrier too tight → no profit potential)
 # MAX: reject if market is too wild (barrier too wide → uncontrollable risk)
 # Set MIN=0.0 and MAX=1.0 to disable the filter entirely.
-MIN_BARRIER_PCT = 0.0001        # 0.01% — reject if barrier smaller than this
+MIN_BARRIER_PCT = 0        # 0.01% — reject if barrier smaller than this
 MAX_BARRIER_PCT = 0.05          # 5%    — reject if barrier larger than this
 TIMEFRAME_BARRIER = 300         # In unit seconds (5 minutes)
 

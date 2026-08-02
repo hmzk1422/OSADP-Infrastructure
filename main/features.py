@@ -408,6 +408,53 @@ class LiveFeatureEngine:
         vec = np.array([features.get(c, 0.0) for c in cols], dtype=float)
         return vec.reshape(1, -1)
 
+    def seed_historical_data(self, symbol: str, limit: int = 150) -> None:
+        """
+        Fetches historical 1-minute closes to warm up the RSI and MA buffers,
+        preventing 'cold start' math errors on initialization.
+        """
+        import logging
+        from utils.bybit import BybitConnector
+        from main.config import API_KEY, API_SECRET, TESTNET
+        
+        logger = logging.getLogger("features")
+        # RSI(2)/bar_vol_std are computed on TIMEFRAME_BARRIER-aggregated bars
+        # (see _compute_macro_features). Seeding MUST use the same bar size,
+        # or the ring buffers get warmed up with mismatched-timeframe closes
+        # that then take up to 200 x TIMEFRAME_BARRIER seconds to fully flush.
+        interval_str = f"{max(1, TIMEFRAME_BARRIER // 60)}m"
+        logger.info(
+            f"Seeding macro buffers with {limit} historical {interval_str} bars "
+            f"for {symbol} (TIMEFRAME_BARRIER={TIMEFRAME_BARRIER}s)..."
+        )
+
+        connector = BybitConnector(api_key=API_KEY, api_secret=API_SECRET, testnet=TESTNET)
+        df_ohlcv = connector.get_ohlcv(symbol=symbol, interval=interval_str, total_limit=limit)
+        
+        if df_ohlcv.empty:
+            logger.error("Failed to fetch historical data for seeding! RSI may be inaccurate initially.")
+            return
+            
+        closes = df_ohlcv['close'].astype(float).values
+        
+        # Push historical data through the buffers exactly like live data
+        for close in closes:
+            if self._close_prices._count > 0:
+                prev_close = self._close_prices.values[-1]
+                delta = close - prev_close
+            else:
+                delta = 0.0
+                
+            self._close_prices.append(close)
+            self._price_diffs.append(delta)
+            
+        logger.info(f"Successfully seeded buffers. _close_prices count: {self._close_prices._count}")
+        
+        # Force a macro feature computation so the initial RSI is ready immediately
+        self._last_mid_price = closes[-1]
+        self._minute_close = closes[-1]
+        self._compute_macro_features()
+
 
 class RingBuffer:
     """
