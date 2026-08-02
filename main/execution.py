@@ -51,7 +51,11 @@ class SlippageModel:
     Realistic market-impact calibrated slippage for BTC/USDT perpetuals.
     """
 
-    def __init__(self, fallback_spread_bps: float = 1.5):
+    def __init__(self, fallback_spread_bps: float = 1.5, enabled: Optional[bool] = None):
+        # enabled=None -> defer to config.ENABLE_SLIPPAGE. Pass True/False
+        # explicitly to override the config default for a given instance
+        # (e.g. to run a no-slippage simulator side-by-side with a normal one).
+        self.enabled = ENABLE_SLIPPAGE if enabled is None else enabled
         self.fallback_half_spread = fallback_spread_bps / 2.0
         self._bids: List[Tuple[float, float]] = []
         self._asks: List[Tuple[float, float]] = []
@@ -88,10 +92,14 @@ class SlippageModel:
 
     def entry_slippage_bps(self, qty: float) -> float:
         """Slippage for short entry (sell = hit the bid)."""
+        if not self.enabled:
+            return 0.0
         return self._book_slippage(qty, self._bids, is_bid=True)
 
     def exit_slippage_bps(self, qty: float) -> float:
         """Slippage for short exit (buy = hit the ask)."""
+        if not self.enabled:
+            return 0.0
         return self._book_slippage(qty, self._asks, is_bid=False)
 
     def _get_mid(self) -> float:
@@ -262,7 +270,7 @@ class PositionTracker:
         if self._slippage is not None:
             self.entry_slippage_bps = self._slippage.entry_slippage_bps(quantity)
         else:
-            self.entry_slippage_bps = 0.75
+            self.entry_slippage_bps = 0.75 if ENABLE_SLIPPAGE else 0.0
 
         self.entry_price = mid_price * (1.0 - self.entry_slippage_bps / 10000.0)
         self.entry_mid = mid_price
@@ -313,7 +321,7 @@ class PositionTracker:
         if self._slippage is not None:
             self.entry_slippage_bps = self._slippage.exit_slippage_bps(quantity)
         else:
-            self.entry_slippage_bps = 0.75
+            self.entry_slippage_bps = 0.75 if ENABLE_SLIPPAGE else 0.0
 
         self.entry_price = mid_price * (1.0 + self.entry_slippage_bps / 10000.0)
         self.entry_mid = mid_price
@@ -418,13 +426,13 @@ class PositionTracker:
             if self._slippage is not None:
                 self.exit_slippage_bps = self._slippage.exit_slippage_bps(self.quantity)
             else:
-                self.exit_slippage_bps = 0.75
+                self.exit_slippage_bps = 0.75 if ENABLE_SLIPPAGE else 0.0
             self.exit_price = theoretical_exit * (1.0 + self.exit_slippage_bps / 10000.0)
         else:
             if self._slippage is not None:
                 self.exit_slippage_bps = self._slippage.entry_slippage_bps(self.quantity)
             else:
-                self.exit_slippage_bps = 0.75
+                self.exit_slippage_bps = 0.75 if ENABLE_SLIPPAGE else 0.0
             self.exit_price = theoretical_exit * (1.0 - self.exit_slippage_bps / 10000.0)
 
         # Gross PnL (before fees)
@@ -453,7 +461,7 @@ class PositionTracker:
         else:
             base_gross_r = (theoretical_exit - self.entry_price) / self.entry_price / bp
         if not self.is_timeout:
-            base_gross_r = float(np.clip(base_gross_r, -1.0, 1.0))
+            base_gross_r = float(np.clip(base_gross_r, -1.0, 1.0 * RR_RATIO))
 
         slippage_r_penalty = (self.exit_slippage_bps / 10000.0) / bp
         gross_r = base_gross_r - slippage_r_penalty
@@ -504,14 +512,18 @@ class QuantSimulator:
     Professional paper-trading / dry-run execution engine.
     """
 
-    def __init__(self, api_key: str = API_KEY, api_secret: str = API_SECRET, quick_init: bool = False):
+    def __init__(self, api_key: str = API_KEY, api_secret: str = API_SECRET, quick_init: bool = False,
+                 enable_slippage: Optional[bool] = None):
         self.exchange = None
         self._quick_init = quick_init
 
-        logger.info("QuantSimulator: Initialized (WebSocket-only mode).")
+        logger.info(
+            "QuantSimulator: Initialized (WebSocket-only mode)."
+            + ("" if enable_slippage is None else f" [slippage override: {enable_slippage}]")
+        )
 
         from main.execution import SlippageModel, PositionTracker
-        self.slippage_model = SlippageModel()
+        self.slippage_model = SlippageModel(enabled=enable_slippage)
         self.position = PositionTracker()
         self.position.attach_slippage(self.slippage_model)
 
