@@ -12,7 +12,6 @@ venv/
 
 # Ignore environment variables/secrets
 .env
-*.html
 *.png
 
 main/logs/executor.log
