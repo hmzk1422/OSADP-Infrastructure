@@ -187,9 +187,12 @@ class HistoricalDataBuilder:
         self.connector = BybitConnector(api_key=API_KEY, api_secret=API_SECRET, testnet=TESTNET)
 
     def fetch_training_data(self, n_bars: int = N_HISTORICAL_BARS) -> pd.DataFrame:
-        logger.info(f"Fetching {n_bars} bars of historical data for training...")
+        # e.g. TIMEFRAME_BARRIER=300 -> "5m". (Previously f'{TIMEFRAME_BARRIER/60}m'
+        # produced malformed strings like "5.0m" that exchanges don't recognize.)
+        interval_str = f"{max(1, TIMEFRAME_BARRIER // 60)}m"
+        logger.info(f"Fetching {n_bars} bars of historical data ({interval_str}) for training...")
         df_ohlcv = self.connector.get_ohlcv(
-            symbol=self.symbol, interval=f'{TIMEFRAME_BARRIER/60}m', total_limit=n_bars,
+            symbol=self.symbol, interval=interval_str, total_limit=n_bars,
         )
         if df_ohlcv.empty:
             logger.error("No historical data fetched!")
@@ -324,6 +327,7 @@ class HistoricalDataBuilder:
 # ============================================================================
 # Main Strategy Executor
 # ============================================================================
+
 class StrategyExecutor:
     def __init__(self, symbol: str = SYMBOL, dry_run: bool = DRY_RUN):
         self.symbol = symbol
@@ -345,6 +349,17 @@ class StrategyExecutor:
         # --- Dashboard: start the web server before anything else so it's
         # already reachable while historical data warms up ---
         await self.dashboard.start()
+
+        # Let the UI label the RSI/vol panel from the real config instead of
+        # hardcoding numbers that can drift out of sync with config.py.
+        self.dashboard.push_config({
+            "timeframe_barrier_seconds": TIMEFRAME_BARRIER,
+            "rsi_filter_threshold": RSI_FILTER_THRESHOLD,
+            "confidence_threshold": CONFIDENCE_THRESHOLD,
+            "lookahead_seconds": LOOKAHEAD_SECONDS,
+            "trade_direction": TRADE_DIRECTION,
+            "candle_seconds": self.dashboard.candle_seconds,
+        })
 
         # --- NEW CODE: Seed the buffers before doing anything else ---
         logger.info("Warming up live feature engine with historical data...")
@@ -460,12 +475,18 @@ class StrategyExecutor:
                         receipt = self.simulator.enter_long(current_price, qty)
                         if receipt is not None:
                             action = 'ENTER_LONG'
+                            # For dashboard display only — lets the UI show/verify
+                            # the exact RSI(2) and P(WIN) that fired this entry.
+                            receipt['rsi_2'] = rsi_2_val
+                            receipt['p_win'] = float(p_win)
                             logger.info(f"[ENTER LONG] Sec {self.second_count} @ {receipt['fill_price']:.2f}")
                             self.dashboard.push_trade_enter(receipt)
                     else:
                         receipt = self.simulator.enter_short(current_price, qty)
                         if receipt is not None:
                             action = 'ENTER_SHORT'
+                            receipt['rsi_2'] = rsi_2_val
+                            receipt['p_win'] = float(p_win)
                             logger.info(f"[ENTER SHORT] Sec {self.second_count} @ {receipt['fill_price']:.2f}")
                             self.dashboard.push_trade_enter(receipt)
             else:
@@ -478,6 +499,7 @@ class StrategyExecutor:
                 'sec': self.second_count,
                 'close': current_price,
                 'rsi_2': rsi_2_val,
+                'bar_vol_std': bar_vol_std,
                 'p_win': float(p_win),
                 'action': action,
             }
