@@ -77041,3 +77041,6 @@ ccxt.base.errors.RequestTimeout: bybit GET https://api.bybit.com/v5/market/instr
 2026-08-04 01:27:38,132 | execution | INFO | Vol barrier (aggregated 300s bars): 0.001212 × 0.5 = 0.000606 (0.0606%)
 2026-08-04 01:27:38,132 | execution | INFO | ENTER SHORT | Mid: 63791.90 | Fill: 63791.90 | Slippage: 0.00bps | Qty: 0.0016 | Stop: 63830.55 | Profit: 63766.12
 2026-08-04 01:27:38,132 | executor | INFO | [ENTER SHORT] Sec 113132 @ 63791.90
+2026-08-04 01:27:58,923 | execution | INFO | EXIT SHORT | stop_loss    | Entry: 63791.90 | Exit: 63830.55 | Gross: -0.061% | Fees: $0.0000 | Net: -0.061% | R: -1.0000 | $-0.06
+2026-08-04 01:27:59,116 | execution | INFO | PnL chart successfully generated in RR units: main/logs/pnl_chart.png
+2026-08-04 01:27:59,117 | executor | INFO | [TRADE EXIT] PnL: $-0.06
