@@ -194,6 +194,13 @@ def build_1s_orderflow_features(orderbook_path, trades_path):
     df = ob_1s.join(tr_1s, how='outer').sort_index()
     for c in ['obi', 'obi_change', 'bid_size_delta', 'ask_size_delta', 'spread', 'mid']:
         df[c] = df[c].ffill()
+    # FIX (bug 1): 'close' (last traded price) was previously left unfilled for
+    # seconds with zero trades -> NaN propagated through pct_change/shift ->
+    # dropna() in train_micro_ai silently deleted large numbers of rows around
+    # every quiet second, biasing the sample toward continuously-trading periods.
+    # Forward-fill it the same way as the book columns: "no trade this second"
+    # means the last traded price hasn't changed.
+    df['close'] = df['close'].ffill()
     df['cvd'] = df['cvd'].ffill().fillna(0)
     df = df.fillna({
         'volume': 0, 'buy_vol': 0, 'sell_vol': 0, 'n_trades': 0,
@@ -513,7 +520,15 @@ def run_cascade(df_macro, micro_oos, micro_target, macro_p):
 # STEP 8 — ABLATION: does the 1s AI feature help the macro model?
 # ============================================================================
 def run_ablation(df_macro, micro_oos):
-    micro_bar = micro_oos.resample(BAR_FREQ).mean().reindex(df_macro.index).ffill()
+    # FIX (bug 2): resample(BAR_FREQ).mean() labels each bin by its START, so
+    # micro_bar.loc[bar_ts] previously averaged 1s predictions from the bar's
+    # OWN future window [bar_ts, bar_ts + BAR_FREQ) -- the same window
+    # df_macro['target'] is realized over. That's look-ahead: the "with_micro"
+    # variant was partly reading a summary of the label's own window, not
+    # information available at decision time bar_ts. shift(1) lags the feature
+    # by one full bar so only the PRECEDING, already-closed bar's orderflow is
+    # used -- the most recent information genuinely known at bar_ts.
+    micro_bar = micro_oos.resample(BAR_FREQ).mean().shift(1).reindex(df_macro.index).ffill()
     base_features = macro_features_list(df_macro)
     X_base = df_macro[base_features]
     y = df_macro['target']
@@ -637,3 +652,7 @@ if __name__ == "__main__":
     print("DONE. Compare A vs B to see how much the macro filter improves")
     print("timing-cadence, and the ablation IC/R to see the feature value.")
     print("=" * 70)
+
+"""
+    
+"""
