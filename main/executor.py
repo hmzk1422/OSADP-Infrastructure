@@ -271,11 +271,36 @@ class HistoricalDataBuilder:
         # ================================================================
         # Barrier labeling (matching ml_state_optimized.py add_barrier_labels)
         # ================================================================
-        ret_std_1m = df_features['close'].pct_change().rolling(window=BARRIER_VOL_WINDOW).std()
-        horizon_std = ret_std_1m * np.sqrt(TIMEFRAME_BARRIER)
-        profit_barrier = horizon_std * BARRIER_MULTIPLIER
-        stop_barrier = horizon_std * BARRIER_MULTIPLIER
-        lookahead_bars = max(1, LOOKAHEAD_SECONDS // 60)
+        # FIX (research/live drift): this used the OLD formula that research
+        # explicitly deleted:
+        #     ret_std_1m = close.pct_change().rolling(BARRIER_VOL_WINDOW).std()  # ddof=1, 100 bars
+        #     horizon_std = ret_std_1m * np.sqrt(TIMEFRAME_BARRIER)              # sqrt(300) ~ 17.3x inflation
+        #     barrier = horizon_std * BARRIER_MULTIPLIER
+        # That produced ~17x wider training barriers than live exits use
+        # (PositionTracker.get_barrier_pct() primary path = _bar_vol_std *
+        # BARRIER_MULTIPLIER, NO sqrt), so the model learned WIN/LOSS definitions
+        # that never matched what the live engine actually trades against.
+        #
+        # Now matches research add_barrier_labels() EXACTLY:
+        #     bar_vol_std = std of bar-to-bar % returns over trailing
+        #                   BARRIER_VOL_BAR_WINDOW bars, ddof=0 (np.nanstd default)
+        #     stop_barrier  = bar_vol_std * BARRIER_MULTIPLIER
+        #     profit_barrier = bar_vol_std * BARRIER_MULTIPLIER * RR_RATIO
+        #                   (research _sequential_triple_barrier: upper = p0*(1+pt*RR_RATIO))
+        #     NO sqrt(horizon) scaling.
+        # Horizon: research looks forward LOOKAHEAD_SECONDS of 1-second rows.
+        # Here each row is a TIMEFRAME_BARRIER-second bar, so the equivalent
+        # number of bars is LOOKAHEAD_SECONDS // TIMEFRAME_BARRIER (3000//300=10).
+        bar_rets = df_features['close'].pct_change()
+        bar_vol_std = bar_rets.rolling(
+            window=BARRIER_VOL_BAR_WINDOW, min_periods=2
+        ).std(ddof=0)
+        # Bootstrap floor — matches research add_barrier_labels() and
+        # PositionTracker.get_barrier_pct()'s fallback (0.001 * BARRIER_MULTIPLIER).
+        bar_vol_std = bar_vol_std.where(bar_vol_std > 0, 0.001)
+        stop_barrier = bar_vol_std * BARRIER_MULTIPLIER
+        profit_barrier = stop_barrier * RR_RATIO
+        lookahead_bars = max(1, LOOKAHEAD_SECONDS // TIMEFRAME_BARRIER)
 
         labels = []
         for i in range(len(df_features) - lookahead_bars):
@@ -345,6 +370,28 @@ class StrategyExecutor:
         self.second_count = 0
         self.decision_log: list = []
 
+        # --- Signal debounce & re-entry lockout (matches research walk-forward) ---
+        # Research (ml_state_optimized.py) uses a hysteresis buffer to collapse
+        # probability flicker into one trade per elevated-probability period,
+        # and a non-overlapping position filter that blocks re-entry until the
+        # previous trade's barrier horizon has elapsed. Live previously used
+        # only a loose MAX_TRADES_PER_HOUR rate limit, which let it fire far
+        # more trades than research. These reproduce research's trade cadence.
+        #
+        # _signal_armed: hysteresis detector state. True = ready to fire a
+        #   fresh signal when P(WIN) >= CONFIDENCE_THRESHOLD. Once fired, it
+        #   disarms and only re-arms when P(WIN) drops below
+        #   (CONFIDENCE_THRESHOLD - HYSTERESIS_BUFFER).
+        # _lockout_until: datetime after which new entries are allowed. Set on
+        #   trade close to now + LOCKOUT_SECONDS (research uses the full
+        #   LOOKAHEAD_SECONDS barrier horizon).
+        self._signal_armed = True
+        self._lockout_until: Optional[datetime] = None
+        self._last_entry_time: Optional[datetime] = None
+        self._last_exit_time: Optional[datetime] = None
+        self._lockout_active = False
+        self._debounce_active = False
+
     async def initialize(self) -> bool:
         # --- Dashboard: start the web server before anything else so it's
         # already reachable while historical data warms up ---
@@ -406,6 +453,22 @@ class StrategyExecutor:
                     self._log_trade(exit_result)
                     self.dashboard.push_trade_exit(exit_result)
                     self.dashboard.push_status(self._dashboard_status(price))
+                    # --- Re-entry lockout (research non-overlap filter) ---
+                    # After a trade closes, block new entries for LOCKOUT_SECONDS
+                    # (defaults to the full LOOKAHEAD_SECONDS barrier horizon,
+                    # matching research's next_available_time logic). Also re-arm
+                    # the hysteresis detector so a fresh signal can fire once the
+                    # lockout expires.
+                    self._last_exit_time = datetime.now()
+                    if LOCKOUT_SECONDS > 0:
+                        self._lockout_until = self._last_exit_time + timedelta(seconds=LOCKOUT_SECONDS)
+                        self._lockout_active = True
+                        logger.info(
+                            f"[LOCKOUT] Re-entry blocked for {LOCKOUT_SECONDS}s "
+                            f"until {self._lockout_until.isoformat()}"
+                        )
+                    self._signal_armed = True
+                    self._debounce_active = False
         except Exception as e:
             logger.error(f"Error processing trade event: {e}")
 
@@ -424,6 +487,35 @@ class StrategyExecutor:
             # NOTE: volatility sampling moved to _one_sec_tick() — see on_trade().
         except Exception as e:
             logger.error(f"Error processing orderbook event: {e}")
+
+    def _in_lockout(self) -> bool:
+        """True if a re-entry lockout is currently active (research non-overlap filter)."""
+        if LOCKOUT_SECONDS <= 0 or self._lockout_until is None:
+            return False
+        return datetime.now() < self._lockout_until
+
+    def _update_signal_state(self, p_win: float) -> bool:
+        """
+        Hysteresis-debounced signal detector, matching research
+        ml_state_optimized.py find_debounced_signals().
+
+        Returns True if a FRESH signal should fire this tick, and updates the
+        armed/disarmed state. Once armed and p_win >= CONFIDENCE_THRESHOLD, a
+        signal fires and the detector disarms. It only re-arms once p_win drops
+        below (CONFIDENCE_THRESHOLD - HYSTERESIS_BUFFER), collapsing probability
+        flicker into one trade per elevated-probability period.
+        """
+        threshold = CONFIDENCE_THRESHOLD
+        lower_bound = max(threshold - HYSTERESIS_BUFFER, 0.0)
+
+        if self._signal_armed and p_win >= threshold:
+            self._signal_armed = False
+            self._debounce_active = True
+            return True
+        if not self._signal_armed and p_win < lower_bound:
+            self._signal_armed = True
+            self._debounce_active = False
+        return False
 
     async def _one_sec_tick(self) -> None:
         """Shielded 1-second clock tick logic."""
@@ -458,12 +550,33 @@ class StrategyExecutor:
             # which print_summary() already reads from).
             action = 'WAIT'
 
+            # Hysteresis-debounced fresh-signal detection (research cadence).
+            # This replaces the old loose MAX_TRADES_PER_HOUR rate limit.
+            #
+            # FIX (trade-count killer): the hysteresis state machine must ONLY
+            # run inside the hunting zone (RSI(2) < RSI_FILTER_THRESHOLD), exactly
+            # like research. In research (ml_state_optimized.py), find_debounced_signals()
+            # only ever scans rows that are already in the hunting zone, because
+            # X = df_training_zone[features] filters RSI(2) < 30 BEFORE the detector
+            # runs. Live previously called _update_signal_state() on EVERY 1-second
+            # tick regardless of RSI. That let the detector disarm while RSI(2) >= 30
+            # (P(WIN) >= threshold but the RSI filter then rejected the entry), and it
+            # only re-armed once P(WIN) dropped below (threshold - hysteresis). On a
+            # saturated model that never dips below 0.42, the detector stayed disarmed
+            # for the whole session -> ~0-1 trades. Gating the detector to the hunting
+            # zone mirrors research: it can only disarm when a trade could actually fire.
+            fresh_signal = False
+            if rsi_2_val < RSI_FILTER_THRESHOLD:
+                fresh_signal = self._update_signal_state(p_win)
+
             if rsi_2_val >= RSI_FILTER_THRESHOLD:
                 action = 'RSI_FILTERED'
             elif self.simulator.position.active:
                 action = 'IN_POSITION'
-            elif not self.simulator.can_trade():
-                action = 'RATE_LIMITED'
+            elif self._in_lockout():
+                action = 'LOCKOUT'
+            elif not fresh_signal:
+                action = 'DEBOUNCED'
             elif p_win >= CONFIDENCE_THRESHOLD:
                 qty = self.simulator.calculate_quantity(current_price)
                 if qty < MIN_ORDER_SIZE:
@@ -479,6 +592,7 @@ class StrategyExecutor:
                             # the exact RSI(2) and P(WIN) that fired this entry.
                             receipt['rsi_2'] = rsi_2_val
                             receipt['p_win'] = float(p_win)
+                            self._last_entry_time = datetime.now()
                             logger.info(f"[ENTER LONG] Sec {self.second_count} @ {receipt['fill_price']:.2f}")
                             self.dashboard.push_trade_enter(receipt)
                     else:
@@ -487,6 +601,7 @@ class StrategyExecutor:
                             action = 'ENTER_SHORT'
                             receipt['rsi_2'] = rsi_2_val
                             receipt['p_win'] = float(p_win)
+                            self._last_entry_time = datetime.now()
                             logger.info(f"[ENTER SHORT] Sec {self.second_count} @ {receipt['fill_price']:.2f}")
                             self.dashboard.push_trade_enter(receipt)
             else:
