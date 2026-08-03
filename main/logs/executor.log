@@ -76511,3 +76511,533 @@ ccxt.base.errors.RequestTimeout: bybit GET https://api.bybit.com/v5/market/time
 2026-08-04 00:16:29,138 | executor | INFO | Retrying connection in 2 seconds...
 2026-08-04 00:16:31,141 | executor | INFO | Connecting to exchange WebSocket stream for BTC/USDT:USDT...
 2026-08-04 00:16:31,149 | executor | INFO | Stream connected successfully. Listening to market data...
+2026-08-04 00:46:45,280 | ccxt.base.exchange | WARNING | bybit requires to release all resources with an explicit call to the .close() coroutine. If you are using the exchange instance with async coroutines, add `await exchange.close()` to your code into a place when you're done with the exchange and don't need the exchange instance anymore (at the end of your async coroutine).
+2026-08-04 00:46:45,287 | asyncio | ERROR | Unclosed client session
+client_session: <aiohttp.client.ClientSession object at 0x000001D5CCF4D6D0>
+2026-08-04 00:46:45,287 | asyncio | ERROR | Task exception was never retrieved
+future: <Task finished name='Task-1615262' coro=<bybit.watch_trades() done, defined at C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\pro\bybit.py:1009> exception=RequestTimeout('Connection timeout')>
+Traceback (most recent call last):
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\main\executor.py", line 731, in _stream_loop
+    result = task.result()
+             ^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\pro\bybit.py", line 837, in watch_order_book
+    return await self.watch_order_book_for_symbols([symbol], limit, params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\pro\bybit.py", line 880, in watch_order_book_for_symbols
+    orderbook = await self.watch_topics(url, messageHashes, topics, params)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\pro\bybit.py", line 2168, in watch_topics
+    return await self.watch_multiple(url, messageHashes, message, messageHashes)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ccxt.base.errors.RequestTimeout: Connection timeout
+2026-08-04 00:46:45,299 | ccxt.base.exchange | WARNING | bybit requires to release all resources with an explicit call to the .close() coroutine. If you are using the exchange instance with async coroutines, add `await exchange.close()` to your code into a place when you're done with the exchange and don't need the exchange instance anymore (at the end of your async coroutine).
+2026-08-04 00:46:45,299 | asyncio | ERROR | Unclosed client session
+client_session: <aiohttp.client.ClientSession object at 0x000001D5CE549050>
+2026-08-04 00:46:45,299 | ccxt.base.exchange | WARNING | bybit requires to release all resources with an explicit call to the .close() coroutine. If you are using the exchange instance with async coroutines, add `await exchange.close()` to your code into a place when you're done with the exchange and don't need the exchange instance anymore (at the end of your async coroutine).
+2026-08-04 00:46:45,299 | asyncio | ERROR | Unclosed client session
+client_session: <aiohttp.client.ClientSession object at 0x000001D5D17F95D0>
+2026-08-04 00:46:45,299 | ccxt.base.exchange | WARNING | bybit requires to release all resources with an explicit call to the .close() coroutine. If you are using the exchange instance with async coroutines, add `await exchange.close()` to your code into a place when you're done with the exchange and don't need the exchange instance anymore (at the end of your async coroutine).
+2026-08-04 00:46:45,300 | asyncio | ERROR | Unclosed client session
+client_session: <aiohttp.client.ClientSession object at 0x000001D5D15D70D0>
+2026-08-04 00:46:45,300 | asyncio | ERROR | Task exception was never retrieved
+future: <Task finished name='Task-1618288' coro=<bybit.watch_order_book() done, defined at C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\pro\bybit.py:826> exception=RateLimitExceeded('bybit GET https://api.bybit.com/v5/market/time 403 Forbidden {\n    error:The Amazon CloudFront distribution is configured to block access from your country\n}')>
+Traceback (most recent call last):
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\main\executor.py", line 731, in _stream_loop
+    result = task.result()
+             ^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\pro\bybit.py", line 1021, in watch_trades
+    return await self.watch_trades_for_symbols([symbol], since, limit, params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\pro\bybit.py", line 1035, in watch_trades_for_symbols
+    await self.load_markets()
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\base\exchange.py", line 375, in load_markets
+    raise e
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\base\exchange.py", line 367, in load_markets
+    result = await self.markets_loading
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\base\exchange.py", line 334, in load_markets_helper
+    markets = await self.fetch_markets(params)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\bybit.py", line 1773, in fetch_markets
+    await self.load_time_difference()
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\base\exchange.py", line 1883, in load_time_difference
+    serverTime = await self.fetch_time(params)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\bybit.py", line 1642, in fetch_time
+    response = await self.publicGetV5MarketTime(params)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\base\exchange.py", line 1041, in request
+    return await self.fetch2(path, api, method, params, headers, body, config)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\base\exchange.py", line 1035, in fetch2
+    raise e
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\base\exchange.py", line 1025, in fetch2
+    return await self.fetch(request['url'], request['method'], request['headers'], request['body'])
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\base\exchange.py", line 298, in fetch
+    self.handle_http_status_code(http_status_code, http_status_text, url, method, http_response)
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\base\exchange.py", line 2003, in handle_http_status_code
+    raise ErrorClass(self.id + ' ' + method + ' ' + url + ' ' + codeAsString + ' ' + reason + ' ' + body)
+ccxt.base.errors.RateLimitExceeded: bybit GET https://api.bybit.com/v5/market/time 403 Forbidden {
+    error:The Amazon CloudFront distribution is configured to block access from your country
+}
+2026-08-04 00:46:45,307 | ccxt.base.exchange | WARNING | bybit requires to release all resources with an explicit call to the .close() coroutine. If you are using the exchange instance with async coroutines, add `await exchange.close()` to your code into a place when you're done with the exchange and don't need the exchange instance anymore (at the end of your async coroutine).
+2026-08-04 00:46:45,307 | asyncio | ERROR | Unclosed client session
+client_session: <aiohttp.client.ClientSession object at 0x000001D5D1664790>
+2026-08-04 00:46:45,307 | asyncio | ERROR | Task exception was never retrieved
+future: <Task finished name='Task-1619444' coro=<bybit.watch_order_book() done, defined at C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\pro\bybit.py:826> exception=RateLimitExceeded('bybit GET https://api.bybit.com/v5/market/time 403 Forbidden {\n    error:The Amazon CloudFront distribution is configured to block access from your country\n}')>
+Traceback (most recent call last):
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\main\executor.py", line 731, in _stream_loop
+    result = task.result()
+             ^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\pro\bybit.py", line 1021, in watch_trades
+    return await self.watch_trades_for_symbols([symbol], since, limit, params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\pro\bybit.py", line 1035, in watch_trades_for_symbols
+    await self.load_markets()
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\base\exchange.py", line 375, in load_markets
+    raise e
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\base\exchange.py", line 367, in load_markets
+    result = await self.markets_loading
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\base\exchange.py", line 334, in load_markets_helper
+    markets = await self.fetch_markets(params)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\bybit.py", line 1773, in fetch_markets
+    await self.load_time_difference()
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\base\exchange.py", line 1883, in load_time_difference
+    serverTime = await self.fetch_time(params)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\bybit.py", line 1642, in fetch_time
+    response = await self.publicGetV5MarketTime(params)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\base\exchange.py", line 1041, in request
+    return await self.fetch2(path, api, method, params, headers, body, config)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\base\exchange.py", line 1035, in fetch2
+    raise e
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\base\exchange.py", line 1025, in fetch2
+    return await self.fetch(request['url'], request['method'], request['headers'], request['body'])
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\base\exchange.py", line 298, in fetch
+    self.handle_http_status_code(http_status_code, http_status_text, url, method, http_response)
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\base\exchange.py", line 2003, in handle_http_status_code
+    raise ErrorClass(self.id + ' ' + method + ' ' + url + ' ' + codeAsString + ' ' + reason + ' ' + body)
+ccxt.base.errors.RateLimitExceeded: bybit GET https://api.bybit.com/v5/market/time 403 Forbidden {
+    error:The Amazon CloudFront distribution is configured to block access from your country
+}
+2026-08-04 00:46:45,309 | ccxt.base.exchange | WARNING | bybit requires to release all resources with an explicit call to the .close() coroutine. If you are using the exchange instance with async coroutines, add `await exchange.close()` to your code into a place when you're done with the exchange and don't need the exchange instance anymore (at the end of your async coroutine).
+2026-08-04 00:46:45,309 | asyncio | ERROR | Unclosed client session
+client_session: <aiohttp.client.ClientSession object at 0x000001D5CDBB91D0>
+2026-08-04 00:46:45,309 | ccxt.base.exchange | WARNING | bybit requires to release all resources with an explicit call to the .close() coroutine. If you are using the exchange instance with async coroutines, add `await exchange.close()` to your code into a place when you're done with the exchange and don't need the exchange instance anymore (at the end of your async coroutine).
+2026-08-04 00:46:45,309 | asyncio | ERROR | Unclosed client session
+client_session: <aiohttp.client.ClientSession object at 0x000001D5D165A890>
+2026-08-04 00:46:45,309 | asyncio | ERROR | Task exception was never retrieved
+future: <Task finished name='Task-1621686' coro=<bybit.watch_trades() done, defined at C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\pro\bybit.py:1009> exception=RateLimitExceeded('bybit GET https://api.bybit.com/v5/market/time 403 Forbidden {\n    error:The Amazon CloudFront distribution is configured to block access from your country\n}')>
+Traceback (most recent call last):
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\main\executor.py", line 731, in _stream_loop
+    result = task.result()
+             ^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\pro\bybit.py", line 837, in watch_order_book
+    return await self.watch_order_book_for_symbols([symbol], limit, params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\pro\bybit.py", line 850, in watch_order_book_for_symbols
+    await self.load_markets()
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\base\exchange.py", line 375, in load_markets
+    raise e
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\base\exchange.py", line 367, in load_markets
+    result = await self.markets_loading
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^
+ccxt.base.errors.RateLimitExceeded: bybit GET https://api.bybit.com/v5/market/time 403 Forbidden {
+    error:The Amazon CloudFront distribution is configured to block access from your country
+}
+2026-08-04 00:46:45,310 | ccxt.base.exchange | WARNING | bybit requires to release all resources with an explicit call to the .close() coroutine. If you are using the exchange instance with async coroutines, add `await exchange.close()` to your code into a place when you're done with the exchange and don't need the exchange instance anymore (at the end of your async coroutine).
+2026-08-04 00:46:45,310 | asyncio | ERROR | Unclosed client session
+client_session: <aiohttp.client.ClientSession object at 0x000001D5CE2233D0>
+2026-08-04 00:46:45,311 | ccxt.base.exchange | WARNING | bybit requires to release all resources with an explicit call to the .close() coroutine. If you are using the exchange instance with async coroutines, add `await exchange.close()` to your code into a place when you're done with the exchange and don't need the exchange instance anymore (at the end of your async coroutine).
+2026-08-04 00:46:45,311 | asyncio | ERROR | Unclosed client session
+client_session: <aiohttp.client.ClientSession object at 0x000001D5CE5CE710>
+2026-08-04 00:46:45,311 | ccxt.base.exchange | WARNING | bybit requires to release all resources with an explicit call to the .close() coroutine. If you are using the exchange instance with async coroutines, add `await exchange.close()` to your code into a place when you're done with the exchange and don't need the exchange instance anymore (at the end of your async coroutine).
+2026-08-04 00:46:45,311 | asyncio | ERROR | Unclosed client session
+client_session: <aiohttp.client.ClientSession object at 0x000001D5D176A150>
+2026-08-04 00:46:45,311 | ccxt.base.exchange | WARNING | bybit requires to release all resources with an explicit call to the .close() coroutine. If you are using the exchange instance with async coroutines, add `await exchange.close()` to your code into a place when you're done with the exchange and don't need the exchange instance anymore (at the end of your async coroutine).
+2026-08-04 00:46:45,311 | asyncio | ERROR | Unclosed client session
+client_session: <aiohttp.client.ClientSession object at 0x000001D5CE518910>
+2026-08-04 00:46:45,311 | asyncio | ERROR | Task exception was never retrieved
+future: <Task finished name='Task-1626183' coro=<bybit.watch_trades() done, defined at C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\pro\bybit.py:1009> exception=RateLimitExceeded('bybit GET https://api.bybit.com/v5/market/time 403 Forbidden {\n    error:The Amazon CloudFront distribution is configured to block access from your country\n}')>
+Traceback (most recent call last):
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\main\executor.py", line 731, in _stream_loop
+    result = task.result()
+             ^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\pro\bybit.py", line 837, in watch_order_book
+    return await self.watch_order_book_for_symbols([symbol], limit, params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\pro\bybit.py", line 850, in watch_order_book_for_symbols
+    await self.load_markets()
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\base\exchange.py", line 375, in load_markets
+    raise e
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\base\exchange.py", line 367, in load_markets
+    result = await self.markets_loading
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^
+ccxt.base.errors.RateLimitExceeded: bybit GET https://api.bybit.com/v5/market/time 403 Forbidden {
+    error:The Amazon CloudFront distribution is configured to block access from your country
+}
+2026-08-04 00:46:45,312 | ccxt.base.exchange | WARNING | bybit requires to release all resources with an explicit call to the .close() coroutine. If you are using the exchange instance with async coroutines, add `await exchange.close()` to your code into a place when you're done with the exchange and don't need the exchange instance anymore (at the end of your async coroutine).
+2026-08-04 00:46:45,312 | asyncio | ERROR | Unclosed client session
+client_session: <aiohttp.client.ClientSession object at 0x000001D5CE4CD250>
+2026-08-04 00:46:45,312 | ccxt.base.exchange | WARNING | bybit requires to release all resources with an explicit call to the .close() coroutine. If you are using the exchange instance with async coroutines, add `await exchange.close()` to your code into a place when you're done with the exchange and don't need the exchange instance anymore (at the end of your async coroutine).
+2026-08-04 00:46:45,313 | asyncio | ERROR | Unclosed client session
+client_session: <aiohttp.client.ClientSession object at 0x000001D5CDB4F050>
+2026-08-04 00:46:45,313 | asyncio | ERROR | Task exception was never retrieved
+future: <Task finished name='Task-1628724' coro=<bybit.watch_order_book() done, defined at C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\pro\bybit.py:826> exception=RateLimitExceeded('bybit GET https://api.bybit.com/v5/market/time 403 Forbidden {\n    error:The Amazon CloudFront distribution is configured to block access from your country\n}')>
+Traceback (most recent call last):
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\main\executor.py", line 731, in _stream_loop
+    result = task.result()
+             ^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\pro\bybit.py", line 1021, in watch_trades
+    return await self.watch_trades_for_symbols([symbol], since, limit, params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\pro\bybit.py", line 1035, in watch_trades_for_symbols
+    await self.load_markets()
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\base\exchange.py", line 375, in load_markets
+    raise e
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\base\exchange.py", line 367, in load_markets
+    result = await self.markets_loading
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\base\exchange.py", line 334, in load_markets_helper
+    markets = await self.fetch_markets(params)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\bybit.py", line 1773, in fetch_markets
+    await self.load_time_difference()
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\base\exchange.py", line 1883, in load_time_difference
+    serverTime = await self.fetch_time(params)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\bybit.py", line 1642, in fetch_time
+    response = await self.publicGetV5MarketTime(params)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\base\exchange.py", line 1041, in request
+    return await self.fetch2(path, api, method, params, headers, body, config)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\base\exchange.py", line 1035, in fetch2
+    raise e
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\base\exchange.py", line 1025, in fetch2
+    return await self.fetch(request['url'], request['method'], request['headers'], request['body'])
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\base\exchange.py", line 298, in fetch
+    self.handle_http_status_code(http_status_code, http_status_text, url, method, http_response)
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\base\exchange.py", line 2003, in handle_http_status_code
+    raise ErrorClass(self.id + ' ' + method + ' ' + url + ' ' + codeAsString + ' ' + reason + ' ' + body)
+ccxt.base.errors.RateLimitExceeded: bybit GET https://api.bybit.com/v5/market/time 403 Forbidden {
+    error:The Amazon CloudFront distribution is configured to block access from your country
+}
+2026-08-04 00:46:45,314 | ccxt.base.exchange | WARNING | bybit requires to release all resources with an explicit call to the .close() coroutine. If you are using the exchange instance with async coroutines, add `await exchange.close()` to your code into a place when you're done with the exchange and don't need the exchange instance anymore (at the end of your async coroutine).
+2026-08-04 00:46:45,314 | asyncio | ERROR | Unclosed client session
+client_session: <aiohttp.client.ClientSession object at 0x000001D5D1741510>
+2026-08-04 00:46:45,314 | ccxt.base.exchange | WARNING | bybit requires to release all resources with an explicit call to the .close() coroutine. If you are using the exchange instance with async coroutines, add `await exchange.close()` to your code into a place when you're done with the exchange and don't need the exchange instance anymore (at the end of your async coroutine).
+2026-08-04 00:46:45,315 | asyncio | ERROR | Unclosed client session
+client_session: <aiohttp.client.ClientSession object at 0x000001D5D1728650>
+2026-08-04 00:46:45,315 | asyncio | ERROR | Task exception was never retrieved
+future: <Task finished name='Task-1631474' coro=<bybit.watch_trades() done, defined at C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\pro\bybit.py:1009> exception=RateLimitExceeded('bybit GET https://api.bybit.com/v5/market/time 403 Forbidden {\n    error:The Amazon CloudFront distribution is configured to block access from your country\n}')>
+Traceback (most recent call last):
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\main\executor.py", line 731, in _stream_loop
+    result = task.result()
+             ^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\pro\bybit.py", line 837, in watch_order_book
+    return await self.watch_order_book_for_symbols([symbol], limit, params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\pro\bybit.py", line 850, in watch_order_book_for_symbols
+    await self.load_markets()
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\base\exchange.py", line 375, in load_markets
+    raise e
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\base\exchange.py", line 367, in load_markets
+    result = await self.markets_loading
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^
+ccxt.base.errors.RateLimitExceeded: bybit GET https://api.bybit.com/v5/market/time 403 Forbidden {
+    error:The Amazon CloudFront distribution is configured to block access from your country
+}
+2026-08-04 00:46:45,315 | ccxt.base.exchange | WARNING | bybit requires to release all resources with an explicit call to the .close() coroutine. If you are using the exchange instance with async coroutines, add `await exchange.close()` to your code into a place when you're done with the exchange and don't need the exchange instance anymore (at the end of your async coroutine).
+2026-08-04 00:46:45,316 | asyncio | ERROR | Unclosed client session
+client_session: <aiohttp.client.ClientSession object at 0x000001D5CE38A7D0>
+2026-08-04 00:46:45,316 | ccxt.base.exchange | WARNING | bybit requires to release all resources with an explicit call to the .close() coroutine. If you are using the exchange instance with async coroutines, add `await exchange.close()` to your code into a place when you're done with the exchange and don't need the exchange instance anymore (at the end of your async coroutine).
+2026-08-04 00:46:45,316 | asyncio | ERROR | Unclosed client session
+client_session: <aiohttp.client.ClientSession object at 0x000001D5D16ED510>
+2026-08-04 00:46:45,316 | ccxt.base.exchange | WARNING | bybit requires to release all resources with an explicit call to the .close() coroutine. If you are using the exchange instance with async coroutines, add `await exchange.close()` to your code into a place when you're done with the exchange and don't need the exchange instance anymore (at the end of your async coroutine).
+2026-08-04 00:46:45,316 | asyncio | ERROR | Unclosed client session
+client_session: <aiohttp.client.ClientSession object at 0x000001D5D15E1B50>
+2026-08-04 00:46:45,316 | asyncio | ERROR | Task exception was never retrieved
+future: <Task finished name='Task-1635306' coro=<bybit.watch_trades() done, defined at C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\pro\bybit.py:1009> exception=RateLimitExceeded('bybit GET https://api.bybit.com/v5/market/time 403 Forbidden {\n    error:The Amazon CloudFront distribution is configured to block access from your country\n}')>
+Traceback (most recent call last):
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\main\executor.py", line 731, in _stream_loop
+    result = task.result()
+             ^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\pro\bybit.py", line 837, in watch_order_book
+    return await self.watch_order_book_for_symbols([symbol], limit, params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\pro\bybit.py", line 850, in watch_order_book_for_symbols
+    await self.load_markets()
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\base\exchange.py", line 375, in load_markets
+    raise e
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\base\exchange.py", line 367, in load_markets
+    result = await self.markets_loading
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^
+ccxt.base.errors.RateLimitExceeded: bybit GET https://api.bybit.com/v5/market/time 403 Forbidden {
+    error:The Amazon CloudFront distribution is configured to block access from your country
+}
+2026-08-04 00:46:45,317 | ccxt.base.exchange | WARNING | bybit requires to release all resources with an explicit call to the .close() coroutine. If you are using the exchange instance with async coroutines, add `await exchange.close()` to your code into a place when you're done with the exchange and don't need the exchange instance anymore (at the end of your async coroutine).
+2026-08-04 00:46:45,317 | asyncio | ERROR | Unclosed client session
+client_session: <aiohttp.client.ClientSession object at 0x000001D5CE39C790>
+2026-08-04 00:46:45,317 | asyncio | ERROR | Task exception was never retrieved
+future: <Task finished name='Task-1636514' coro=<bybit.watch_order_book() done, defined at C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\pro\bybit.py:826> exception=RateLimitExceeded('bybit GET https://api.bybit.com/v5/market/time 403 Forbidden {\n    error:The Amazon CloudFront distribution is configured to block access from your country\n}')>
+Traceback (most recent call last):
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\main\executor.py", line 731, in _stream_loop
+    result = task.result()
+             ^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\pro\bybit.py", line 1021, in watch_trades
+    return await self.watch_trades_for_symbols([symbol], since, limit, params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\pro\bybit.py", line 1035, in watch_trades_for_symbols
+    await self.load_markets()
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\base\exchange.py", line 375, in load_markets
+    raise e
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\base\exchange.py", line 367, in load_markets
+    result = await self.markets_loading
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\base\exchange.py", line 334, in load_markets_helper
+    markets = await self.fetch_markets(params)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\bybit.py", line 1773, in fetch_markets
+    await self.load_time_difference()
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\base\exchange.py", line 1883, in load_time_difference
+    serverTime = await self.fetch_time(params)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\bybit.py", line 1642, in fetch_time
+    response = await self.publicGetV5MarketTime(params)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\base\exchange.py", line 1041, in request
+    return await self.fetch2(path, api, method, params, headers, body, config)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\base\exchange.py", line 1035, in fetch2
+    raise e
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\base\exchange.py", line 1025, in fetch2
+    return await self.fetch(request['url'], request['method'], request['headers'], request['body'])
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\base\exchange.py", line 298, in fetch
+    self.handle_http_status_code(http_status_code, http_status_text, url, method, http_response)
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\base\exchange.py", line 2003, in handle_http_status_code
+    raise ErrorClass(self.id + ' ' + method + ' ' + url + ' ' + codeAsString + ' ' + reason + ' ' + body)
+ccxt.base.errors.RateLimitExceeded: bybit GET https://api.bybit.com/v5/market/time 403 Forbidden {
+    error:The Amazon CloudFront distribution is configured to block access from your country
+}
+2026-08-04 00:46:45,319 | ccxt.base.exchange | WARNING | bybit requires to release all resources with an explicit call to the .close() coroutine. If you are using the exchange instance with async coroutines, add `await exchange.close()` to your code into a place when you're done with the exchange and don't need the exchange instance anymore (at the end of your async coroutine).
+2026-08-04 00:46:45,319 | asyncio | ERROR | Unclosed client session
+client_session: <aiohttp.client.ClientSession object at 0x000001D5CE2EF8D0>
+2026-08-04 00:46:45,319 | ccxt.base.exchange | WARNING | bybit requires to release all resources with an explicit call to the .close() coroutine. If you are using the exchange instance with async coroutines, add `await exchange.close()` to your code into a place when you're done with the exchange and don't need the exchange instance anymore (at the end of your async coroutine).
+2026-08-04 00:46:45,319 | asyncio | ERROR | Unclosed client session
+client_session: <aiohttp.client.ClientSession object at 0x000001D5CE1FEC10>
+2026-08-04 00:46:45,319 | ccxt.base.exchange | WARNING | bybit requires to release all resources with an explicit call to the .close() coroutine. If you are using the exchange instance with async coroutines, add `await exchange.close()` to your code into a place when you're done with the exchange and don't need the exchange instance anymore (at the end of your async coroutine).
+2026-08-04 00:46:45,320 | asyncio | ERROR | Unclosed client session
+client_session: <aiohttp.client.ClientSession object at 0x000001D5CE12FE50>
+2026-08-04 00:46:45,320 | ccxt.base.exchange | WARNING | bybit requires to release all resources with an explicit call to the .close() coroutine. If you are using the exchange instance with async coroutines, add `await exchange.close()` to your code into a place when you're done with the exchange and don't need the exchange instance anymore (at the end of your async coroutine).
+2026-08-04 00:46:45,320 | asyncio | ERROR | Unclosed client session
+client_session: <aiohttp.client.ClientSession object at 0x000001D5CE125110>
+2026-08-04 00:46:45,320 | ccxt.base.exchange | WARNING | bybit requires to release all resources with an explicit call to the .close() coroutine. If you are using the exchange instance with async coroutines, add `await exchange.close()` to your code into a place when you're done with the exchange and don't need the exchange instance anymore (at the end of your async coroutine).
+2026-08-04 00:46:45,320 | asyncio | ERROR | Unclosed client session
+client_session: <aiohttp.client.ClientSession object at 0x000001D5CDBD9690>
+2026-08-04 00:46:45,320 | asyncio | ERROR | Task exception was never retrieved
+future: <Task finished name='Task-1642685' coro=<bybit.watch_trades() done, defined at C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\pro\bybit.py:1009> exception=RateLimitExceeded('bybit GET https://api.bybit.com/v5/market/time 403 Forbidden {\n    error:The Amazon CloudFront distribution is configured to block access from your country\n}')>
+Traceback (most recent call last):
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\main\executor.py", line 731, in _stream_loop
+    result = task.result()
+             ^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\pro\bybit.py", line 837, in watch_order_book
+    return await self.watch_order_book_for_symbols([symbol], limit, params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\pro\bybit.py", line 850, in watch_order_book_for_symbols
+    await self.load_markets()
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\base\exchange.py", line 375, in load_markets
+    raise e
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\base\exchange.py", line 367, in load_markets
+    result = await self.markets_loading
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^
+ccxt.base.errors.RateLimitExceeded: bybit GET https://api.bybit.com/v5/market/time 403 Forbidden {
+    error:The Amazon CloudFront distribution is configured to block access from your country
+}
+2026-08-04 00:46:45,321 | ccxt.base.exchange | WARNING | bybit requires to release all resources with an explicit call to the .close() coroutine. If you are using the exchange instance with async coroutines, add `await exchange.close()` to your code into a place when you're done with the exchange and don't need the exchange instance anymore (at the end of your async coroutine).
+2026-08-04 00:46:45,321 | asyncio | ERROR | Unclosed client session
+client_session: <aiohttp.client.ClientSession object at 0x000001D5D16D7F50>
+2026-08-04 00:46:45,321 | ccxt.base.exchange | WARNING | bybit requires to release all resources with an explicit call to the .close() coroutine. If you are using the exchange instance with async coroutines, add `await exchange.close()` to your code into a place when you're done with the exchange and don't need the exchange instance anymore (at the end of your async coroutine).
+2026-08-04 00:46:45,322 | asyncio | ERROR | Unclosed client session
+client_session: <aiohttp.client.ClientSession object at 0x000001D5CE5B0950>
+2026-08-04 00:46:45,322 | ccxt.base.exchange | WARNING | bybit requires to release all resources with an explicit call to the .close() coroutine. If you are using the exchange instance with async coroutines, add `await exchange.close()` to your code into a place when you're done with the exchange and don't need the exchange instance anymore (at the end of your async coroutine).
+2026-08-04 00:46:45,322 | asyncio | ERROR | Unclosed client session
+client_session: <aiohttp.client.ClientSession object at 0x000001D5CEAD8C90>
+2026-08-04 00:46:45,322 | ccxt.base.exchange | WARNING | bybit requires to release all resources with an explicit call to the .close() coroutine. If you are using the exchange instance with async coroutines, add `await exchange.close()` to your code into a place when you're done with the exchange and don't need the exchange instance anymore (at the end of your async coroutine).
+2026-08-04 00:46:45,323 | asyncio | ERROR | Unclosed client session
+client_session: <aiohttp.client.ClientSession object at 0x000001D5CDFE4410>
+2026-08-04 00:46:45,323 | asyncio | ERROR | Task exception was never retrieved
+future: <Task finished name='Task-1647663' coro=<bybit.watch_order_book() done, defined at C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\pro\bybit.py:826> exception=ExchangeNotAvailable('bybit GET https://api.bybit.com/v5/market/time')>
+Traceback (most recent call last):
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\aiohttp\connector.py", line 1571, in _create_direct_connection
+    hosts = await self._resolve_host(host, port, traces=traces)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\aiohttp\connector.py", line 1181, in _resolve_host
+    return await asyncio.shield(resolved_host_task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\aiohttp\connector.py", line 1212, in _resolve_host_with_throttle
+    addrs = await self._resolver.resolve(host, port, family=self._family)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\aiohttp\resolver.py", line 40, in resolve
+    infos = await self._loop.getaddrinfo(
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Himaska\AppData\Local\Programs\Python\Python311\Lib\asyncio\base_events.py", line 867, in getaddrinfo
+    return await self.run_in_executor(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Himaska\AppData\Local\Programs\Python\Python311\Lib\concurrent\futures\thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Himaska\AppData\Local\Programs\Python\Python311\Lib\socket.py", line 962, in getaddrinfo
+    for res in _socket.getaddrinfo(host, port, family, type, proto, flags):
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+socket.gaierror: [Errno 11001] getaddrinfo failed
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\base\exchange.py", line 251, in fetch
+    async with session_method(yarl.URL(url, encoded=True),
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\aiohttp\client.py", line 1683, in __aenter__
+    self._resp: _RetType_co = await self._coro
+                              ^^^^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\aiohttp\client.py", line 856, in _request
+    resp = await handler(req)
+           ^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\aiohttp\client.py", line 810, in _connect_and_send_request
+    conn = await self._connector.connect(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\aiohttp\connector.py", line 657, in connect
+    proto = await self._create_connection(req, traces, timeout)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\aiohttp\connector.py", line 1242, in _create_connection
+    _, proto = await self._create_direct_connection(req, traces, timeout)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\aiohttp\connector.py", line 1577, in _create_direct_connection
+    raise ClientConnectorDNSError(req.connection_key, exc) from exc
+aiohttp.client_exceptions.ClientConnectorDNSError: Cannot connect to host api.bybit.com:443 ssl:default [getaddrinfo failed]
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\main\executor.py", line 731, in _stream_loop
+    result = task.result()
+             ^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\pro\bybit.py", line 1021, in watch_trades
+    return await self.watch_trades_for_symbols([symbol], since, limit, params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\pro\bybit.py", line 1035, in watch_trades_for_symbols
+    await self.load_markets()
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\base\exchange.py", line 375, in load_markets
+    raise e
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\base\exchange.py", line 367, in load_markets
+    result = await self.markets_loading
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\base\exchange.py", line 334, in load_markets_helper
+    markets = await self.fetch_markets(params)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\bybit.py", line 1773, in fetch_markets
+    await self.load_time_difference()
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\base\exchange.py", line 1883, in load_time_difference
+    serverTime = await self.fetch_time(params)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\bybit.py", line 1642, in fetch_time
+    response = await self.publicGetV5MarketTime(params)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\base\exchange.py", line 1041, in request
+    return await self.fetch2(path, api, method, params, headers, body, config)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\base\exchange.py", line 1035, in fetch2
+    raise e
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\base\exchange.py", line 1025, in fetch2
+    return await self.fetch(request['url'], request['method'], request['headers'], request['body'])
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\base\exchange.py", line 291, in fetch
+    raise ExchangeNotAvailable(details) from e
+ccxt.base.errors.ExchangeNotAvailable: bybit GET https://api.bybit.com/v5/market/time
+2026-08-04 00:46:45,332 | ccxt.base.exchange | WARNING | bybit requires to release all resources with an explicit call to the .close() coroutine. If you are using the exchange instance with async coroutines, add `await exchange.close()` to your code into a place when you're done with the exchange and don't need the exchange instance anymore (at the end of your async coroutine).
+2026-08-04 00:46:45,332 | asyncio | ERROR | Unclosed client session
+client_session: <aiohttp.client.ClientSession object at 0x000001D5CE9CF010>
+2026-08-04 00:46:45,332 | asyncio | ERROR | Task exception was never retrieved
+future: <Task finished name='Task-1648419' coro=<bybit.watch_order_book() done, defined at C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\pro\bybit.py:826> exception=RequestTimeout('bybit GET https://api.bybit.com/v5/market/instruments-info?category=linear&limit=1000')>
+Traceback (most recent call last):
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\aiohttp\streams.py", line 365, in _wait
+    await waiter
+asyncio.exceptions.CancelledError
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\base\exchange.py", line 256, in fetch
+    http_response = await response.text(errors='replace')
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\aiohttp\client_reqrep.py", line 757, in text
+    await self.read()
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\aiohttp\client_reqrep.py", line 715, in read
+    self._body = await self.content.read()
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\aiohttp\streams.py", line 437, in read
+    block = await self.readany()
+            ^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\aiohttp\streams.py", line 460, in readany
+    await self._wait("readany")
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\aiohttp\streams.py", line 364, in _wait
+    with self._timer:
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\aiohttp\helpers.py", line 759, in __exit__
+    raise asyncio.TimeoutError from exc_val
+TimeoutError
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\main\executor.py", line 731, in _stream_loop
+    result = task.result()
+             ^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\pro\bybit.py", line 1021, in watch_trades
+    return await self.watch_trades_for_symbols([symbol], since, limit, params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\pro\bybit.py", line 1035, in watch_trades_for_symbols
+    await self.load_markets()
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\base\exchange.py", line 375, in load_markets
+    raise e
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\base\exchange.py", line 367, in load_markets
+    result = await self.markets_loading
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\base\exchange.py", line 334, in load_markets_helper
+    markets = await self.fetch_markets(params)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\bybit.py", line 1798, in fetch_markets
+    promises = await asyncio.gather(*promisesUnresolved)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\bybit.py", line 1944, in fetch_future_markets
+    promises = await asyncio.gather(*linearPromises)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\base\exchange.py", line 1041, in request
+    return await self.fetch2(path, api, method, params, headers, body, config)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\base\exchange.py", line 1035, in fetch2
+    raise e
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\base\exchange.py", line 1025, in fetch2
+    return await self.fetch(request['url'], request['method'], request['headers'], request['body'])
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\venv\Lib\site-packages\ccxt\async_support\base\exchange.py", line 287, in fetch
+    raise RequestTimeout(details) from e
+ccxt.base.errors.RequestTimeout: bybit GET https://api.bybit.com/v5/market/instruments-info?category=linear&limit=1000
+2026-08-04 01:27:29,019 | execution | INFO | Vol barrier (aggregated 300s bars): 0.001212 × 0.5 = 0.000606 (0.0606%)
+2026-08-04 01:27:29,036 | execution | INFO | Vol barrier (aggregated 300s bars): 0.001212 × 0.5 = 0.000606 (0.0606%)
+2026-08-04 01:27:29,040 | execution | INFO | ENTER SHORT | Mid: 63821.40 | Fill: 63821.40 | Slippage: 0.00bps | Qty: 0.0016 | Stop: 63860.07 | Profit: 63795.61
+2026-08-04 01:27:29,041 | executor | INFO | [ENTER SHORT] Sec 113088 @ 63821.40
+2026-08-04 01:27:37,621 | execution | INFO | EXIT SHORT | take_profit  | Entry: 63821.40 | Exit: 63795.61 | Gross: +0.040% | Fees: $0.0000 | Net: +0.040% | R: +0.6670 | $+0.04
+2026-08-04 01:27:38,119 | execution | INFO | PnL chart successfully generated in RR units: main/logs/pnl_chart.png
+2026-08-04 01:27:38,120 | executor | INFO | [TRADE EXIT] PnL: $+0.04
+2026-08-04 01:27:38,132 | execution | INFO | Vol barrier (aggregated 300s bars): 0.001212 × 0.5 = 0.000606 (0.0606%)
+2026-08-04 01:27:38,132 | execution | INFO | Vol barrier (aggregated 300s bars): 0.001212 × 0.5 = 0.000606 (0.0606%)
+2026-08-04 01:27:38,132 | execution | INFO | ENTER SHORT | Mid: 63791.90 | Fill: 63791.90 | Slippage: 0.00bps | Qty: 0.0016 | Stop: 63830.55 | Profit: 63766.12
+2026-08-04 01:27:38,132 | executor | INFO | [ENTER SHORT] Sec 113132 @ 63791.90
