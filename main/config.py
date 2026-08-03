@@ -52,6 +52,16 @@ OFI_LOOKBACK       = 60         # Rolling window for CVD_z (research: rolling(60
 CVD_ROLLING        = 10         # Rolling window for micro_CVD (research: rolling(10))
 BARRIER_VOL_WINDOW = 100        # Rolling window for vol estimation (research: rolling(100))
 
+# --- Aggregated-bar volatility window (barrier sizing) ---
+# Number of TIMEFRAME_BARRIER bars used to estimate bar-to-bar return std for
+# barrier sizing. This is the window both LiveFeatureEngine (features.py) and
+# research/ml_state_optimized.py fall back to via globals().get(..., 20) when
+# it's absent. Defining it here explicitly closes that silent-drift fallback so
+# the live engine, the research pipeline, and the training-data builder all use
+# the SAME window. Matches the research add_barrier_labels() bootstrap floor
+# (bar_vol_std.where(bar_vol_std > 0, 0.001)) and PositionTracker.get_barrier_pct().
+BARRIER_VOL_BAR_WINDOW = 20
+
 # --- DeepLOB feature windows ---
 DEEPLOB_Z_WINDOW    = 10        # Z-score window for spread_bps_z (research: window=10)
 RSI_Z_WINDOW        = 20        # Z-score window for rsi_z (research: window=20)
@@ -104,6 +114,31 @@ MODEL_PATH = "main/models/lgb_model.txt"
 DRY_RUN = True                    # Set False to place real orders!
 MAX_TRADES_PER_HOUR = 300
 FEE_BPS = 0                   # Binance/Bybit taker fee ~0.055%
+
+# --- Signal Debounce & Re-entry Lockout (matches research walk-forward) ---
+# Research (ml_state_optimized.py) uses a hysteresis buffer to collapse
+# probability flicker into one trade per elevated-probability period, and a
+# non-overlapping position filter that blocks re-entry until the previous
+# trade's barrier horizon has elapsed. Live previously used only a loose
+# MAX_TRADES_PER_HOUR rate limit, which let it fire far more trades than
+# research. These options make live reproduce research's trade cadence.
+#
+# HYSTERESIS_BUFFER: once P(WIN) >= CONFIDENCE_THRESHOLD fires a signal, the
+# detector disarms and only re-arms once P(WIN) drops below
+# (CONFIDENCE_THRESHOLD - HYSTERESIS_BUFFER). Set 0.0 to disable (fire on
+# every crossing, like the old behavior).
+HYSTERESIS_BUFFER = 0.08
+
+# LOCKOUT_SECONDS: after a trade closes, block new entries for this many
+# seconds (research uses the full LOOKAHEAD_SECONDS barrier horizon).
+# Set 0 to disable the lockout entirely (re-enter as soon as position closes).
+#
+# CURRENT SETTING: 0 = DISABLED. Hysteresis stays ON (0.08) so flicker is
+# still collapsed, but there is NO re-entry lockout — the executor re-enters
+# as soon as a position closes, producing many trades (executor's original
+# high-cadence behavior). Set to LOOKAHEAD_SECONDS to reproduce the research
+# walk-forward's low-cadence one-position-per-horizon behavior.
+LOCKOUT_SECONDS = 0
 
 # Set False to disable all simulated slippage: entry fills exactly at
 # mid_price, exits fill exactly at the barrier price, 0.00 bps both ways.
