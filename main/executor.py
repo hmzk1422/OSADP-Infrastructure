@@ -499,23 +499,29 @@ class StrategyExecutor:
         Hysteresis-debounced signal detector, matching research
         ml_state_optimized.py find_debounced_signals().
 
-        Returns True if a FRESH signal should fire this tick, and updates the
-        armed/disarmed state. Once armed and p_win >= CONFIDENCE_THRESHOLD, a
-        signal fires and the detector disarms. It only re-arms once p_win drops
-        below (CONFIDENCE_THRESHOLD - HYSTERESIS_BUFFER), collapsing probability
+        Returns True if the detector is ARMED (ready to fire) this tick. The
+        caller is responsible for disarming (via _disarm_signal()) only when a
+        trade actually fires. The detector re-arms once p_win drops below
+        (CONFIDENCE_THRESHOLD - HYSTERESIS_BUFFER), collapsing probability
         flicker into one trade per elevated-probability period.
+
+        NOTE: This returns the armed state, NOT whether a signal fired. That
+        decoupling makes the LOW_CONFIDENCE branch reachable (armed + p_win
+        below threshold) and prevents a rejected entry (vol filter, rate limit,
+        qty too small) from silently disarming the detector.
         """
         threshold = CONFIDENCE_THRESHOLD
         lower_bound = max(threshold - HYSTERESIS_BUFFER, 0.0)
 
-        if self._signal_armed and p_win >= threshold:
-            self._signal_armed = False
-            self._debounce_active = True
-            return True
         if not self._signal_armed and p_win < lower_bound:
             self._signal_armed = True
             self._debounce_active = False
-        return False
+        return self._signal_armed
+
+    def _disarm_signal(self) -> None:
+        """Disarm the hysteresis detector after a trade actually fires."""
+        self._signal_armed = False
+        self._debounce_active = True
 
     async def _one_sec_tick(self) -> None:
         """Shielded 1-second clock tick logic."""
@@ -593,8 +599,19 @@ class StrategyExecutor:
                             receipt['rsi_2'] = rsi_2_val
                             receipt['p_win'] = float(p_win)
                             self._last_entry_time = datetime.now()
+                            self._disarm_signal()
                             logger.info(f"[ENTER LONG] Sec {self.second_count} @ {receipt['fill_price']:.2f}")
                             self.dashboard.push_trade_enter(receipt)
+                        else:
+                            # Simulator rejected the entry (vol filter or per-hour
+                            # rate limit). Keep the detector armed so a later tick
+                            # can still fire, and surface the rejection instead of
+                            # silently showing WAIT.
+                            action = 'ENTRY_REJECTED'
+                            logger.info(
+                                f"Entry rejected by simulator (vol filter / rate limit): "
+                                f"RSI(2)={rsi_2_val:.1f}, P(WIN)={p_win:.3f}"
+                            )
                     else:
                         receipt = self.simulator.enter_short(current_price, qty)
                         if receipt is not None:
@@ -602,11 +619,24 @@ class StrategyExecutor:
                             receipt['rsi_2'] = rsi_2_val
                             receipt['p_win'] = float(p_win)
                             self._last_entry_time = datetime.now()
+                            self._disarm_signal()
                             logger.info(f"[ENTER SHORT] Sec {self.second_count} @ {receipt['fill_price']:.2f}")
                             self.dashboard.push_trade_enter(receipt)
+                        else:
+                            # Simulator rejected the entry (vol filter or per-hour
+                            # rate limit). Keep the detector armed so a later tick
+                            # can still fire, and surface the rejection instead of
+                            # silently showing WAIT.
+                            action = 'ENTRY_REJECTED'
+                            logger.info(
+                                f"Entry rejected by simulator (vol filter / rate limit): "
+                                f"RSI(2)={rsi_2_val:.1f}, P(WIN)={p_win:.3f}"
+                            )
             else:
                 action = 'LOW_CONFIDENCE'
-                # ADDED: This will print whenever the RSI is good, but the AI confidence is too weak.
+                # This branch is now reachable: the detector is armed but P(WIN)
+                # is below the threshold. Log it so the dashboard/console shows
+                # exactly why no trade fired.
                 logger.info(f"Signal ignored: RSI is good, but P(WIN) confidence ({p_win:.3f}) is below {CONFIDENCE_THRESHOLD}.")
 
             decision = {
