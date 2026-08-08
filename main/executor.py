@@ -96,6 +96,12 @@ class ModelManager:
         self.model: Optional[lgb.Booster] = None
         self.feature_columns: list = []
         self.is_trained: bool = False
+        # FIX: populated by _load_feature_manifest() when a
+        # research/ml_state_optimized.py STEP 12 export is found next to
+        # model_path. None means "no manifest" — a loaded-but-unmanifested
+        # model can't be verified, only trusted, which is exactly the gap
+        # that let a feature-order/feature-set mismatch go undetected before.
+        self.feature_manifest: Optional[dict] = None
 
     def load(self) -> bool:
         if os.path.exists(self.model_path):
@@ -103,10 +109,40 @@ class ModelManager:
                 self.model = lgb.Booster(model_file=self.model_path)
                 self.is_trained = True
                 logger.info(f"Model loaded from {self.model_path}")
+                self._load_feature_manifest()
                 return True
             except Exception as e:
                 logger.error(f"Failed to load model: {e}")
         return False
+
+    def _load_feature_manifest(self) -> None:
+        """Load the <model>.features.json sibling written by
+        ml_state_optimized.py's STEP 12 export. This is the only reliable
+        way to know the exact feature list/order a given model file was
+        trained on. It matters because predict_proba() below calls the raw
+        Booster with a plain numpy array — no column names — so a mismatch
+        here does NOT raise an error, it silently produces wrong predictions.
+        """
+        manifest_path = os.path.splitext(self.model_path)[0] + ".features.json"
+        self.feature_manifest = None
+        if os.path.exists(manifest_path):
+            try:
+                with open(manifest_path) as f:
+                    self.feature_manifest = json.load(f)
+                self.feature_columns = self.feature_manifest.get("features", [])
+                logger.info(
+                    f"Feature manifest loaded: {self.feature_manifest.get('n_features')} features, "
+                    f"orderflow={'ON' if self.feature_manifest.get('includes_orderflow') else 'OFF'}, "
+                    f"trained_at={self.feature_manifest.get('trained_at_utc', 'unknown')}"
+                )
+            except Exception as e:
+                logger.error(f"Failed to parse feature manifest at {manifest_path}: {e}")
+        else:
+            logger.warning(
+                f"No feature manifest found at {manifest_path}. This model's exact "
+                f"feature list/order can't be verified against what LiveFeatureEngine "
+                f"sends — re-export from ml_state_optimized.py (STEP 12) to fix this."
+            )
 
     def save(self) -> None:
         if self.model is not None:
@@ -414,8 +450,57 @@ class StrategyExecutor:
         # -------------------------------------------------------------
 
         loaded = self.model_mgr.load()
+
+        # FIX: previously, ANY successfully-loaded model file at MODEL_PATH was
+        # accepted as-is, and the only training path available (HistoricalDataBuilder,
+        # below) trained from REST OHLCV bars — which have no bid/ask data, so
+        # spread_bps_z there is a candle high-low proxy, not the real orderbook
+        # spread ml_state_optimized.py trains on and LiveFeatureEngine feeds this
+        # model at inference. That mismatch on the single most predictive feature
+        # was invisible: nothing here checked what a loaded model actually expected.
+        #
+        # Now: a model with a feature manifest (i.e. exported via
+        # ml_state_optimized.py STEP 12, trained on real tick data) is trusted and
+        # the OHLCV-proxy path is skipped entirely. HistoricalDataBuilder only runs
+        # as a last-resort bootstrap when NO model exists at all, and says so loudly
+        # — it should not be treated as equivalent to the research-trained model.
+        if loaded and self.model_mgr.feature_manifest is not None:
+            mf = self.model_mgr.feature_manifest
+            logger.info(
+                f"Using research-exported production model: {mf.get('n_features')} features "
+                f"(orderflow={'ON' if mf.get('includes_orderflow') else 'OFF'}), "
+                f"trained_at={mf.get('trained_at_utc', 'unknown')} on {mf.get('trained_rows', '?')} rows. "
+                f"Skipping HistoricalDataBuilder — no need to retrain from the OHLCV proxy."
+            )
+            return True
+
+        if loaded and self.model_mgr.feature_manifest is None:
+            logger.warning(
+                "Loaded a model at %s with NO feature manifest next to it. Its exact "
+                "feature list/order can't be verified against what LiveFeatureEngine "
+                "sends. If this model came from HistoricalDataBuilder's OHLCV-proxy "
+                "path, its spread_bps_z was approximated from candle high-low range, "
+                "NOT real orderbook spread — re-export from ml_state_optimized.py "
+                "(STEP 12) to fix this properly.", self.model_mgr.model_path
+            )
+            return True
+
         if not loaded and TRAIN_ON_STARTUP:
-            logger.info("No model found. Fetching historical data...")
+            logger.warning(
+                "=" * 70 + "\n"
+                "No model found at %s. Falling back to HistoricalDataBuilder "
+                "(REST OHLCV bootstrap training).\n"
+                "This path CANNOT compute real bid/ask spread — OHLCV bars simply "
+                "don't contain it — so spread_bps_z (the single most predictive "
+                "feature in research, PFI ~3x the next-best feature) is approximated "
+                "from candle high-low range instead. It also has NO orderflow "
+                "features (OFI/CVD/VPIN/absorption/etc). This model will NOT match "
+                "research's walk-forward results.\n"
+                "Run research/ml_state_optimized.py (with EXPORT_PRODUCTION_MODEL=True) "
+                "and place the resulting model + <model>.features.json at %s before "
+                "trading live with real capital.\n" + "=" * 70,
+                self.model_mgr.model_path, self.model_mgr.model_path,
+            )
             try:
                 builder = HistoricalDataBuilder(self.symbol)
                 X, y, feature_cols = builder.build_training_set()
@@ -428,6 +513,12 @@ class StrategyExecutor:
             except Exception as e:
                 logger.error(f"Failed historical training initialization: {e}")
                 return False
+            return True
+
+        if not loaded:
+            logger.error("No model found and TRAIN_ON_STARTUP is False. Exiting.")
+            return False
+
         return True
 
     async def on_trade(self, trade: Dict) -> None:
@@ -548,6 +639,30 @@ class StrategyExecutor:
                 self.simulator.update_bar_volatility(bar_vol_std)
 
             feature_vector = self.feature_engine.extract_feature_vector(features)
+
+            # FIX: predict_proba() below calls a raw Booster with a plain numpy
+            # array (no column names — see the warning suppression at the top of
+            # this file), so a feature-count mismatch does NOT raise; it silently
+            # produces a prediction from misaligned inputs. If the loaded model has
+            # a manifest (see ModelManager._load_feature_manifest), check the shape
+            # matches before trusting it, and skip the tick loudly rather than
+            # trade on it. This is the exact failure mode the orderflow-features
+            # mismatch would have hit silently if features.py isn't updated to
+            # produce them alongside a manifest that expects them.
+            if self.model_mgr.feature_manifest is not None:
+                expected_n = self.model_mgr.feature_manifest.get("n_features")
+                actual_n = int(np.asarray(feature_vector).reshape(1, -1).shape[-1])
+                if expected_n is not None and actual_n != expected_n:
+                    logger.error(
+                        f"FEATURE COUNT MISMATCH: model expects {expected_n} features "
+                        f"{self.model_mgr.feature_manifest.get('features')} but "
+                        f"LiveFeatureEngine.extract_feature_vector() produced {actual_n}. "
+                        f"Refusing to trade this tick — update LiveFeatureEngine to emit "
+                        f"the exact feature set/order in the manifest (see "
+                        f"<model>.features.json) before this model can be used live."
+                    )
+                    return
+
             proba = self.model_mgr.predict_proba(feature_vector)[0]
             p_win = proba[1]
 

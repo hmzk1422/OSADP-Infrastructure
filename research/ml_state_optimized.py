@@ -12,6 +12,7 @@ Key quant principles applied:
 
 import sys
 import os
+import json
 # Make the project root importable regardless of CWD. The old
 # os.path.join(os.getcwd(), '..') only worked when run from inside research/.
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
@@ -46,7 +47,7 @@ from main.config import (
     RSI_14_WINDOW, RSI_2_WINDOW, SMA_14_WINDOW, DEEPLOB_Z_WINDOW, RSI_Z_WINDOW,
     MA_SLOPE_WINDOW, PRICE_ROC_WINDOW_3, LABEL_LOSS, LABEL_WIN, FEATURE_COLUMNS,
     FEE_BPS, ENABLE_SLIPPAGE, MIN_BARRIER_PCT, MAX_BARRIER_PCT, EPS,
-    HYSTERESIS_BUFFER, LOCKOUT_SECONDS,
+    HYSTERESIS_BUFFER, LOCKOUT_SECONDS, MODEL_PATH,
 )
 
 # BARRIER_VOL_BAR_WINDOW is NOT currently in config.py — features.py's
@@ -67,6 +68,22 @@ except ImportError:
 # not 60s) — this was previously a silent mismatch even though feature names
 # (rsi_2, ma_slope_5, etc.) matched.
 BAR_FREQ = f"{TIMEFRAME_BARRIER}s"
+
+# FIX: orderflow/DeepLOB features (OFI, CVD, VPIN, absorption, tick
+# autocorrelation, retail/institutional delta, depth imbalance) used to be
+# unconditionally appended to `features` whenever the columns existed in
+# df_training_zone — with no way to compare against the base-feature-only
+# model that's actually what HistoricalDataBuilder trains live. Toggle it
+# explicitly here. When True, both the walk-forward chart AND the exported
+# production model (STEP 12) include them; the feature manifest written at
+# export time records which set was used, so live can verify what it's
+# actually loading rather than assume.
+USE_ORDERFLOW_FEATURES = True
+
+# FIX: export the final model after walk-forward evaluation. This is what
+# gets loaded by executor.py — see STEP 12 at the bottom of this file. Set
+# False if you only want to run the evaluation and not touch MODEL_PATH.
+EXPORT_PRODUCTION_MODEL = True
 
 BARRIER_CHUNK_SIZE   = 50_000
 N_RANDOM_SAMPLES      = 15
@@ -673,9 +690,20 @@ if __name__ == "__main__":
         'ofi_z', 'cvd_delta_z', 'cvd_slope_z', 'vpin', 'absorption_z',
         'tick_autocorr', 'inst_ratio', 'delta_divergence_z', 'depth_imbalance_z',
     ]
-    features = list(FEATURE_COLUMNS) + [
-        c for c in ORDERFLOW_FEATURE_COLUMNS if c in df_training_zone.columns
-    ]
+    # FIX: gated by USE_ORDERFLOW_FEATURES now instead of being unconditional.
+    # This was the source of an undetected research/live mismatch: this block
+    # always pulled in all 9 orderflow columns whenever they existed in
+    # df_training_zone, so every walk-forward chart included features that
+    # HistoricalDataBuilder (executor.py) never computes or serves live. The
+    # chart was evaluating a strictly bigger, different model than the one
+    # actually deployed. Toggle explicitly; the export step (STEP 12) records
+    # which set was used in the feature manifest so live can check it matches.
+    if USE_ORDERFLOW_FEATURES:
+        features = list(FEATURE_COLUMNS) + [
+            c for c in ORDERFLOW_FEATURE_COLUMNS if c in df_training_zone.columns
+        ]
+    else:
+        features = list(FEATURE_COLUMNS)
     missing = [c for c in FEATURE_COLUMNS if c not in df_training_zone.columns]
     if missing:
         raise ValueError(f"FEATURE_COLUMNS from config.py missing from pipeline output: {missing}")
@@ -749,7 +777,8 @@ if __name__ == "__main__":
           f"(mirrors executor.py's actual fade/snapback semantics)")
 
 
-    def purged_chronological_splits(index, n_samples, block_size, horizon_seconds, embargo_seconds=0):
+    def purged_chronological_splits(index, n_samples, block_size, horizon_seconds,
+                                     embargo_seconds=0, allow_overlap=False):
         n = len(index)
         horizon = pd.Timedelta(seconds=horizon_seconds)
         embargo = pd.Timedelta(seconds=embargo_seconds)
@@ -759,19 +788,33 @@ if __name__ == "__main__":
         if available_test_run <= 0:
             raise ValueError("The dataset length is too narrow for this test configuration block size.")
 
+        # FIX: this used to just warn and proceed when step_intervals < block_size,
+        # which silently let consecutive folds re-test the same historical period
+        # with different models — the same real trade opportunity scored (and
+        # logged) more than once, inflating apparent trade counts and breaking the
+        # independence assumption behind every win-rate/expectancy/CVaR stat below.
+        # Now n_samples is capped to the max number of BACK-TO-BACK, non-overlapping
+        # block_size windows the data actually supports, so every fold-by-default
+        # tests a genuinely independent period. allow_overlap=True restores the old
+        # behavior if you deliberately want denser (but non-independent) folds.
+        max_non_overlapping = max(1, available_test_run // block_size)
+
+        if n_samples > max_non_overlapping and not allow_overlap:
+            print(f"[FOLD COUNT ADJUSTED] Requested n_samples={n_samples}, but only "
+                  f"{max_non_overlapping} non-overlapping {block_size}-bar test windows fit in "
+                  f"the {available_test_run} bars available after the {min_initial_train}-bar "
+                  f"initial training block. Reducing n_samples to {max_non_overlapping} so every "
+                  f"fold tests an independent period. Pass allow_overlap=True to keep the "
+                  f"original count with overlapping (non-independent) folds instead.")
+            n_samples = max_non_overlapping
+
         step_intervals = available_test_run // n_samples
 
-        # FIX: warn if test windows overlap in time. If step_intervals < block_size,
-        # consecutive folds re-test overlapping historical periods with different
-        # models — the same real-world trade opportunity can get scored (and logged)
-        # more than once across folds, which inflates the apparent trade count and
-        # breaks the independence assumption behind the win-rate/CVaR stats later.
-        if step_intervals < block_size:
+        if allow_overlap and step_intervals < block_size:
             overlap_pct = 100 * (1 - step_intervals / block_size)
             print(f"[FOLD OVERLAP WARNING] step_intervals={step_intervals} < block_size={block_size} "
                   f"-> consecutive test folds overlap by ~{overlap_pct:.0f}% of their length. "
-                  f"Trade counts/expectancy pooled across folds are NOT independent draws. "
-                  f"Reduce n_samples or block_size, or get more data, to eliminate this.")
+                  f"Trade counts/expectancy pooled across folds are NOT independent draws.")
 
         for fold in range(n_samples):
             start_idx = min_initial_train + (fold * step_intervals)
@@ -796,7 +839,9 @@ if __name__ == "__main__":
         embargo_seconds=EMBARGO_SECONDS
     )
 
-    print(f"\n--- Starting {N_RANDOM_SAMPLES} Walk-Forward Folds | Targeting: {target_name} | Inverting Trades: {INVERT_RETURNS} ---")
+    print(f"\n--- Starting Walk-Forward (requested up to {N_RANDOM_SAMPLES} non-overlapping folds; "
+          f"see [FOLD COUNT ADJUSTED] above if fewer independent windows fit the data) "
+          f"| Targeting: {target_name} | Inverting Trades: {INVERT_RETURNS} ---")
 
     # FIX: HYSTERESIS BUFFER for signal detection
     # The original edge-trigger (np.diff(preds, prepend=0) == 1) fires a "fresh"
@@ -1214,3 +1259,90 @@ if __name__ == "__main__":
 
     print("\nReminder: this run ignores fees, slippage, latency, and partial fills.")
     print("=" * 70)
+
+    # ============================================================================
+    # STEP 12 — Export Production Model
+    # ============================================================================
+    # Everything above (walk-forward, SHAP/PFI, threshold sweep, PnL chart) is
+    # EVALUATION ONLY — none of the 15 fold-models get saved anywhere. This step
+    # does one FINAL fit on all available hunting-zone data and writes it to
+    # MODEL_PATH in the exact format executor.py's ModelManager.load() expects
+    # (raw lgb.Booster), plus a <model>.features.json manifest.
+    #
+    # WHY THIS MATTERS: HistoricalDataBuilder in executor.py trains its own
+    # bootstrap model from REST OHLCV bars, and can only APPROXIMATE spread_bps_z
+    # (the single most predictive feature — PFI 0.081, ~3x the next feature) from
+    # candle high-low range, because OHLCV bars structurally do not contain
+    # bid/ask data. No formula tweak fixes that — real spread requires real
+    # orderbook ticks, which only this research pipeline (load_and_build_state_space)
+    # has access to. This export step is the fix: train on the real tick data used
+    # here, ship *that* model, and stop training the deployed model on a proxy.
+    #
+    # The manifest exists because ModelManager.predict_proba() calls the raw
+    # Booster with a plain numpy array (no column names — see the
+    # "X does not have valid feature names" warning suppression in executor.py).
+    # A feature-order mismatch between what this model was trained on and what
+    # LiveFeatureEngine.extract_feature_vector() sends would NOT raise an error —
+    # it would just silently feed the model garbage. The manifest lets executor.py
+    # check this explicitly instead of assuming it's correct.
+    if EXPORT_PRODUCTION_MODEL:
+        print("\n" + "=" * 70)
+        print("EXPORTING PRODUCTION MODEL")
+        print("=" * 70)
+
+        final_clf = lgb.LGBMClassifier(
+            n_estimators=200,
+            learning_rate=0.01,
+            max_depth=3,
+            num_leaves=31,
+            min_child_samples=20,
+            subsample=0.8,
+            colsample_bytree=0.8,
+            class_weight='balanced',
+            random_state=42,
+            n_jobs=-1,
+            verbose=-1,
+        )
+        final_clf.fit(X, y)
+
+        model_dir = os.path.dirname(os.path.abspath(MODEL_PATH))
+        if model_dir:
+            os.makedirs(model_dir, exist_ok=True)
+        final_clf.booster_.save_model(MODEL_PATH)
+        print(f"Model saved to: {MODEL_PATH}")
+
+        manifest_path = os.path.splitext(MODEL_PATH)[0] + ".features.json"
+        manifest = {
+            "features": features,  # EXACT order — must match extract_feature_vector() output order
+            "n_features": len(features),
+            "includes_orderflow": USE_ORDERFLOW_FEATURES,
+            "orderflow_features": [c for c in ORDERFLOW_FEATURE_COLUMNS if c in features],
+            "base_features": list(FEATURE_COLUMNS),
+            "trained_rows": int(len(X)),
+            "trained_at_utc": pd.Timestamp.utcnow().isoformat(),
+            "label_counts": {CLASS_NAMES[k]: int(v) for k, v in y.value_counts().to_dict().items()},
+            "rr_ratio": RR_RATIO,
+            "lookahead_seconds": LOOKAHEAD_SECONDS,
+            "barrier_multiplier": BARRIER_MULTIPLIER,
+            "trade_direction": TRADE_DIRECTION,
+            "confidence_threshold_note": (
+                "This manifest does not set CONFIDENCE_THRESHOLD — that stays a "
+                "config.py / CLI setting. See the per-threshold table above (now "
+                "computed from non-overlapping folds) before trusting a threshold."
+            ),
+        }
+        with open(manifest_path, "w") as f:
+            json.dump(manifest, f, indent=2)
+        print(f"Feature manifest saved to: {manifest_path}")
+
+        print(f"\nFeatures ({len(features)}), IN THIS EXACT ORDER — "
+              f"LiveFeatureEngine.extract_feature_vector() must produce the same order:")
+        for i, f in enumerate(features):
+            tag = " [orderflow]" if f in ORDERFLOW_FEATURE_COLUMNS else ""
+            print(f"  [{i}] {f}{tag}")
+
+        print("\nNOTE: this export model is fit on 100% of available hunting-zone")
+        print("data (no holdout) — it is NOT itself a forward-performance estimate.")
+        print("Use the walk-forward table above for that; this step only produces")
+        print("the artifact executor.py should load.")
+        print("=" * 70)

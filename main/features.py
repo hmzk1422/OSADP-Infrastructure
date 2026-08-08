@@ -96,6 +96,16 @@ class LiveFeatureEngine:
             'spread_bps_z': 0.0,
             'rsi_x_ma': 0.0,
             'bar_vol_std': 0.0,
+            # --- Orderflow (optional, see USE_ORDERFLOW_FEATURES) ---
+            'ofi_z': 0.0,
+            'cvd_delta_z': 0.0,
+            'cvd_slope_z': 0.0,
+            'vpin': 0.0,
+            'absorption_z': 0.0,
+            'tick_autocorr': 0.0,
+            'inst_ratio': 0.0,
+            'delta_divergence_z': 0.0,
+            'depth_imbalance_z': 0.0,
         }
 
         # --- Buffers for macro feature computation ---
@@ -103,6 +113,74 @@ class LiveFeatureEngine:
         self._price_diffs = RingBuffer(300)         # For RSI computation
         self._rsi_2_buffer = RingBuffer(50)         # For rsi_z computation
         self._spread_bps_buffer = RingBuffer(50)    # For spread_bps_z computation
+
+        # --- Orderflow feature state (optional 9-feature block; gated by
+        # config.USE_ORDERFLOW_FEATURES). Mirrors ml_state_optimized.py's
+        # compute_orderflow_features() + Step 4 z-scoring, adapted to run
+        # incrementally per tick instead of over a completed CSV session.
+        self._use_orderflow = bool(globals().get('USE_ORDERFLOW_FEATURES', False))
+        self._retail_threshold = globals().get('RETAIL_THRESHOLD', 0.05)
+        self._orderflow_z_window = globals().get('ORDERFLOW_Z_WINDOW', 10)
+        self._vpin_target_buckets = globals().get('VPIN_TARGET_BUCKETS_PER_SESSION', 50)
+        self._vpin_window_buckets = globals().get('VPIN_WINDOW_BUCKETS', 10)
+        self._vpin_min_periods = globals().get('VPIN_MIN_PERIODS', 5)
+        vpin_lookback_s = globals().get('VPIN_SESSION_LOOKBACK_SECONDS', 86400)
+        vpin_lookback_bars = max(int(vpin_lookback_s // max(TIMEFRAME_BARRIER, 1)), 3)
+
+        # OFI (order flow imbalance): needs the PREVIOUS orderbook tick to
+        # compute a delta — tracked separately from _last_bid_price/etc below
+        # (those get overwritten every tick and are also used for spread/depth).
+        self._ofi_prev_bid_price: Optional[float] = None
+        self._ofi_prev_bid_amount: Optional[float] = None
+        self._ofi_prev_ask_price: Optional[float] = None
+        self._ofi_prev_ask_amount: Optional[float] = None
+        self._bar_ofi_sum: float = 0.0          # raw OFI accumulated so far this bar
+        self._prev_bar_ofi: float = 0.0         # last completed bar's total (for diff)
+        self._ofi_diff_buffer = RingBuffer(max(30, self._orderflow_z_window * 3))
+
+        # CVD (cumulative volume delta): the per-bar net (buy - sell) IS
+        # cvd_delta_1m (diff of a cumsum equals the per-bar sum it was built
+        # from — see ml_state_optimized.py). cvd_slope_5 is the sum of the
+        # last 5 per-bar deltas.
+        self._bar_cvd_net: float = 0.0
+        self._cvd_delta_buffer = RingBuffer(max(30, self._orderflow_z_window * 3))
+        self._cvd_slope_buffer = RingBuffer(max(30, self._orderflow_z_window * 3))
+
+        # VPIN: volume-clock buckets. Bucket size self-calibrates from a
+        # trailing window of realized bar volume (VPIN_SESSION_LOOKBACK_SECONDS)
+        # instead of a fixed total-session volume — live has no session
+        # endpoint to divide by up front the way a finished CSV file does.
+        self._vpin_bucket_buy: float = 0.0
+        self._vpin_bucket_sell: float = 0.0
+        self._vpin_bucket_vol: float = 0.0
+        self._vpin_bucket_size: Optional[float] = None
+        self._vpin_bar_volumes = RingBuffer(vpin_lookback_bars)
+        self._vpin_ratio_buffer = RingBuffer(max(30, self._vpin_window_buckets * 3))
+        self._vpin_smoothed: float = 0.0
+
+        # Absorption ratio: per-bar CVD delta normalized by the bar's
+        # orderbook price range (ask_high - bid_low seen during the bar).
+        self._bar_ask_high: Optional[float] = None
+        self._bar_bid_low: Optional[float] = None
+        self._absorption_buffer = RingBuffer(max(30, self._orderflow_z_window * 3))
+
+        # Trade sign autocorrelation: per-second "last trade tick sign" this
+        # bar, collected into a plain list (needs the full in-bar series, not
+        # a fixed rolling window) and lag-1-autocorrelated at bar rollover.
+        self._last_trade_price: Optional[float] = None
+        self._second_last_tick_sign: int = 0
+        self._bar_tick_signs: list = []
+
+        # Retail vs institutional trade-size cohorts.
+        self._bar_retail_buy: float = 0.0
+        self._bar_retail_sell: float = 0.0
+        self._bar_inst_buy: float = 0.0
+        self._bar_inst_sell: float = 0.0
+        self._delta_divergence_buffer = RingBuffer(max(30, self._orderflow_z_window * 3))
+
+        # Depth imbalance: reuses _last_bid_amount/_last_ask_amount (latest
+        # snapshot at bar close, tracked below), just needs its own z-score history.
+        self._depth_imbalance_buffer = RingBuffer(max(30, self._orderflow_z_window * 3))
 
         # --- Aggregated-bar volatility (for barrier sizing, NOT an ML feature) ---
         # Std-dev of bar-to-bar % returns, measured on the SAME TIMEFRAME_BARRIER
@@ -152,9 +230,95 @@ class LiveFeatureEngine:
             self._minute_sell_vol += amount
             self._minute_largest_sell = max(self._minute_largest_sell, amount)
 
+        # ================================================================
+        # Orderflow accumulation (optional — see USE_ORDERFLOW_FEATURES)
+        # ================================================================
+        if self._use_orderflow:
+            # --- CVD: cvd_tick = buy_vol - sell_vol, summed over the bar ---
+            self._bar_cvd_net += amount if side == 'buy' else -amount
+
+            # --- Retail vs institutional cohorts (ml_state_optimized.py
+            # compute_orderflow_features Step 5) ---
+            if amount < self._retail_threshold:
+                if side == 'buy':
+                    self._bar_retail_buy += amount
+                else:
+                    self._bar_retail_sell += amount
+            else:
+                if side == 'buy':
+                    self._bar_inst_buy += amount
+                else:
+                    self._bar_inst_sell += amount
+
+            # --- Trade sign / tick rule (vs previous TRADE price, not
+            # previous second) — resample('1s').last() means only the last
+            # trade's sign within a second survives, so just overwrite. ---
+            if self._last_trade_price is not None:
+                if price > self._last_trade_price:
+                    self._second_last_tick_sign = 1
+                elif price < self._last_trade_price:
+                    self._second_last_tick_sign = -1
+                else:
+                    self._second_last_tick_sign = 0
+            self._last_trade_price = price
+
+            # --- VPIN: volume-clock bucket accumulation ---
+            self._vpin_bucket_buy += amount if side == 'buy' else 0.0
+            self._vpin_bucket_sell += amount if side == 'sell' else 0.0
+            self._vpin_bucket_vol += amount
+            if self._vpin_bucket_size is not None and self._vpin_bucket_vol >= self._vpin_bucket_size:
+                vpin_raw = abs(self._vpin_bucket_buy - self._vpin_bucket_sell) / (self._vpin_bucket_vol + EPS)
+                self._vpin_ratio_buffer.append(vpin_raw)
+                if self._vpin_ratio_buffer._count >= self._vpin_min_periods:
+                    vals = self._vpin_ratio_buffer.values
+                    window = min(len(vals), self._vpin_window_buckets)
+                    self._vpin_smoothed = float(np.nanmean(vals[-window:]))
+                # Reset the bucket (any overshoot past the target size is
+                # dropped rather than carried forward — a minor approximation
+                # of the offline bucket-boundary logic, negligible at these
+                # trade sizes relative to bucket size).
+                self._vpin_bucket_buy = 0.0
+                self._vpin_bucket_sell = 0.0
+                self._vpin_bucket_vol = 0.0
+
     def on_orderbook(self, timestamp_ms: int, bid_price: float, bid_amount: float,
                      ask_price: float, ask_amount: float) -> None:
         """Ingest an orderbook snapshot."""
+        # --- OFI (Cont et al.) — needs the PREVIOUS tick, so compute this
+        # tick's contribution BEFORE overwriting _last_bid_price/etc below.
+        # Mirrors ml_state_optimized.py compute_orderflow_features() Step 1,
+        # applied per-tick instead of per-row-of-a-dataframe (sum is
+        # associative, so accumulating raw ticks gives the same bar total as
+        # resample('1s').sum() -> resample(BAR_FREQ).sum()).
+        if self._use_orderflow:
+            if self._ofi_prev_bid_price is not None:
+                if bid_price > self._ofi_prev_bid_price:
+                    delta_bid = bid_amount
+                elif bid_price < self._ofi_prev_bid_price:
+                    delta_bid = -self._ofi_prev_bid_amount
+                else:
+                    delta_bid = bid_amount - self._ofi_prev_bid_amount
+
+                if ask_price < self._ofi_prev_ask_price:
+                    delta_ask = ask_amount
+                elif ask_price > self._ofi_prev_ask_price:
+                    delta_ask = -self._ofi_prev_ask_amount
+                else:
+                    delta_ask = ask_amount - self._ofi_prev_ask_amount
+
+                self._bar_ofi_sum += (delta_bid - delta_ask)
+            # else: first tick ever (no previous snapshot) — matches
+            # research's shift(1)-produced NaN row, which contributes 0.
+
+            self._ofi_prev_bid_price = bid_price
+            self._ofi_prev_bid_amount = bid_amount
+            self._ofi_prev_ask_price = ask_price
+            self._ofi_prev_ask_amount = ask_amount
+
+            # --- Absorption ratio's price range: bar's ask high / bid low ---
+            self._bar_ask_high = ask_price if self._bar_ask_high is None else max(self._bar_ask_high, ask_price)
+            self._bar_bid_low = bid_price if self._bar_bid_low is None else min(self._bar_bid_low, bid_price)
+
         self._last_bid_price = bid_price
         self._last_bid_amount = bid_amount
         self._last_ask_price = ask_price
@@ -172,6 +336,13 @@ class LiveFeatureEngine:
         self._price_buffer.append(close)
 
         self._second_count += 1
+
+        # Tick sign autocorrelation input: research resamples per-trade tick
+        # rule to 1s via .last().fillna(0) — a second with no trade counts as
+        # neutral (0), not carried forward from the prior second.
+        if self._use_orderflow:
+            self._bar_tick_signs.append(self._second_last_tick_sign)
+            self._second_last_tick_sign = 0
 
         # Check if we need to compute new macro features (timeframe rollover)
         # TIMEFRAME_BARRIER is already in seconds (300 = 5 minutes)
@@ -304,6 +475,103 @@ class LiveFeatureEngine:
 
         rsi_x_ma = rsi_z * ma_slope_5
 
+        # ================================================================
+        # Orderflow features (optional — see USE_ORDERFLOW_FEATURES).
+        # Mirrors ml_state_optimized.py compute_orderflow_features() + the
+        # Step 4 z-scoring, computed from this bar's accumulated state
+        # instead of a resampled dataframe.
+        # ================================================================
+        if self._use_orderflow:
+            zw = self._orderflow_z_window
+
+            def _rolling_zscore(buffer: 'RingBuffer', value: float) -> float:
+                buffer.append(value)
+                vals = buffer.values
+                if len(vals) < zw:
+                    return 0.0
+                window_vals = vals[-zw:]
+                mean = np.nanmean(window_vals)
+                std = np.nanstd(window_vals)
+                return float((value - mean) / (std + EPS))
+
+            # --- OFI: this bar's total minus last bar's total, z-scored ---
+            ofi_diff = self._bar_ofi_sum - self._prev_bar_ofi
+            ofi_z = _rolling_zscore(self._ofi_diff_buffer, ofi_diff)
+            self._prev_bar_ofi = self._bar_ofi_sum
+
+            # --- CVD: per-bar net delta, and 5-bar slope, each z-scored ---
+            cvd_delta_z = _rolling_zscore(self._cvd_delta_buffer, self._bar_cvd_net)
+            # Slope needs the raw (un-zscored) delta history, which
+            # _rolling_zscore already appended to _cvd_delta_buffer above.
+            cvd_hist = self._cvd_delta_buffer.values
+            cvd_slope_5 = float(np.sum(cvd_hist[-5:])) if len(cvd_hist) >= 5 else 0.0
+            cvd_slope_z = _rolling_zscore(self._cvd_slope_buffer, cvd_slope_5)
+
+            # --- VPIN: bucket-close smoothing already maintained in
+            # on_trade(); recalibrate the bucket size from trailing bar
+            # volume so it tracks changing liquidity. ---
+            self._vpin_bar_volumes.append(self._minute_volume)
+            if self._vpin_bar_volumes._count >= 3:
+                trailing_vol = float(np.nansum(self._vpin_bar_volumes.values))
+                self._vpin_bucket_size = max(trailing_vol / self._vpin_target_buckets, EPS)
+            vpin = self._vpin_smoothed
+
+            # --- Absorption ratio: this bar's CVD delta / orderbook price range ---
+            if self._bar_ask_high is not None and self._bar_bid_low is not None:
+                price_range = self._bar_ask_high - self._bar_bid_low
+            else:
+                price_range = 0.0
+            abs_ratio_raw = self._bar_cvd_net / (price_range + EPS)
+            absorption_z = _rolling_zscore(self._absorption_buffer, abs_ratio_raw)
+
+            # --- Trade sign autocorrelation (lag-1) over this bar's
+            # per-second tick-sign series ---
+            tick_arr = np.asarray(self._bar_tick_signs, dtype=float)
+            if len(tick_arr) > 5 and np.nanstd(tick_arr) > 0:
+                corr = np.corrcoef(tick_arr[:-1], tick_arr[1:])[0, 1]
+                tick_autocorr = float(corr) if not np.isnan(corr) else 0.0
+            else:
+                tick_autocorr = 0.0
+
+            # --- Retail vs institutional flow ---
+            bar_volume = (self._bar_retail_buy + self._bar_retail_sell
+                          + self._bar_inst_buy + self._bar_inst_sell)
+            inst_delta = self._bar_inst_buy - self._bar_inst_sell
+            retail_delta = self._bar_retail_buy - self._bar_retail_sell
+            delta_divergence = inst_delta - retail_delta
+            inst_ratio = (self._bar_inst_buy + self._bar_inst_sell) / (bar_volume + EPS)
+            delta_divergence_z = _rolling_zscore(self._delta_divergence_buffer, delta_divergence)
+
+            # --- Depth imbalance: latest orderbook snapshot at bar close ---
+            bid_amt, ask_amt = self._last_bid_amount, self._last_ask_amount
+            depth_imbalance = (bid_amt - ask_amt) / (bid_amt + ask_amt + EPS)
+            depth_imbalance_z = _rolling_zscore(self._depth_imbalance_buffer, depth_imbalance)
+
+            orderflow_features = {
+                'ofi_z': ofi_z,
+                'cvd_delta_z': cvd_delta_z,
+                'cvd_slope_z': cvd_slope_z,
+                'vpin': vpin,
+                'absorption_z': absorption_z,
+                'tick_autocorr': tick_autocorr,
+                'inst_ratio': inst_ratio,
+                'delta_divergence_z': delta_divergence_z,
+                'depth_imbalance_z': depth_imbalance_z,
+            }
+
+            # Reset this bar's raw accumulators for the next bar.
+            self._bar_ofi_sum = 0.0
+            self._bar_cvd_net = 0.0
+            self._bar_ask_high = None
+            self._bar_bid_low = None
+            self._bar_tick_signs = []
+            self._bar_retail_buy = 0.0
+            self._bar_retail_sell = 0.0
+            self._bar_inst_buy = 0.0
+            self._bar_inst_sell = 0.0
+        else:
+            orderflow_features = {}
+
         # Store macro features (these will be forward-filled across 1s bars)
         self._macro_features = {
             'rsi_2': rsi_2_val,
@@ -313,6 +581,7 @@ class LiveFeatureEngine:
             'spread_bps_z': spread_bps_z,
             'rsi_x_ma': rsi_x_ma,
             'bar_vol_std': self._bar_vol_std,  # NOT an ML feature — barrier sizing only
+            **orderflow_features,
         }
 
         # Update with TIMEFRAME_BARRIER-based timeframe key
@@ -380,6 +649,15 @@ class LiveFeatureEngine:
             'bar_vol_std': self._macro_features.get('bar_vol_std', 0.0),
         }
 
+        # Optional orderflow block (see USE_ORDERFLOW_FEATURES) — always
+        # copied out of _macro_features if present so the dict has them
+        # whenever they've been computed, regardless of the toggle; whether
+        # they actually reach the model is decided by get_feature_columns().
+        if self._use_orderflow:
+            for col in ('ofi_z', 'cvd_delta_z', 'cvd_slope_z', 'vpin', 'absorption_z',
+                        'tick_autocorr', 'inst_ratio', 'delta_divergence_z', 'depth_imbalance_z'):
+                features[col] = self._macro_features.get(col, 0.0)
+
         return features
 
     @property
@@ -387,12 +665,18 @@ class LiveFeatureEngine:
         return self._last_mid_price
 
     def get_feature_columns(self) -> list:
-        """Return the list of feature column names in order."""
+        """Return the list of feature column names in order.
+
+        Base 7 features, plus the 9 orderflow features when
+        USE_ORDERFLOW_FEATURES is on (config.py) — matching the exact
+        FEATURE_COLUMNS + ORDERFLOW_FEATURE_COLUMNS order ml_state_optimized.py
+        exports in <model>.features.json.
+        """
         try:
             from main.config import FEATURE_COLUMNS
-            return FEATURE_COLUMNS
+            cols = list(FEATURE_COLUMNS)
         except (ImportError, AttributeError):
-            return [
+            cols = [
                 'spread_bps_z',
                 'ma_slope_5',
                 'rsi_x_ma',
@@ -401,6 +685,15 @@ class LiveFeatureEngine:
                 'rsi_2',
                 'sma_14',
             ]
+
+        try:
+            from main.config import USE_ORDERFLOW_FEATURES, ORDERFLOW_FEATURE_COLUMNS
+            if USE_ORDERFLOW_FEATURES:
+                cols = cols + list(ORDERFLOW_FEATURE_COLUMNS)
+        except (ImportError, AttributeError):
+            pass
+
+        return cols
 
     def extract_feature_vector(self, features: Dict[str, float]) -> np.ndarray:
         """Convert feature dict to model-ready numpy array (1D)."""
