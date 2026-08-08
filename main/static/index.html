@@ -633,6 +633,7 @@ const actionClassMap = {
   'ENTER_LONG':'enter-long', 'ENTER_SHORT':'enter-short',
   'LOW_CONFIDENCE':'low', 'RSI_FILTERED':'wait', 'IN_POSITION':'wait',
   'RATE_LIMITED':'wait', 'QTY_TOO_SMALL':'wait', 'WAIT':'wait',
+  'DEBOUNCED':'wait', 'LOCKOUT':'wait', 'ENTRY_REJECTED':'low',
 };
 function renderDecision(d){
   const list = document.getElementById('feed-list');
