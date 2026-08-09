@@ -33,6 +33,7 @@ import shap
 from scipy import stats
 from sklearn.inspection import permutation_importance
 from sklearn.linear_model import LinearRegression
+import polars as pl
 
 # ============================================================================
 # CONFIG — imported directly from main.config, NOT re-hardcoded.
@@ -244,7 +245,7 @@ def add_barrier_labels(df, lookahead_seconds=LOOKAHEAD_SECONDS, barrier_mult=BAR
         g['_valid'] = valid
 
         g = g[g['_valid']].drop(columns=['_valid'])
-        g['target'] = g['target'].astype(int)
+        g['target'] = g['target'].astype('int32')
         labeled.append(g)
 
     return pd.concat(labeled)
@@ -293,7 +294,7 @@ def compute_orderflow_features(df_trades, df_orderbook):
 
     ob['ofi_raw'] = delta_bid - delta_ask
 
-    ob['datetime'] = pd.to_datetime(ob['timestamp'].astype('int64') // 1000, unit='s')
+    ob['datetime'] = pd.to_datetime(ob['timestamp'].astype('int32') // 1000, unit='s')
     ob = ob.set_index('datetime').sort_index()
 
     ofi_1s = ob['ofi_raw'].resample('1s').sum()
@@ -308,7 +309,7 @@ def compute_orderflow_features(df_trades, df_orderbook):
     trades['sell_vol'] = trades['amount'].where(trades['side'] == 'sell', 0)
 
     trades['cvd_tick'] = trades['buy_vol'] - trades['sell_vol']
-    trades['datetime'] = pd.to_datetime(trades['timestamp'].astype('int64') // 1000, unit='s')
+    trades['datetime'] = pd.to_datetime(trades['timestamp'].astype('int32') // 1000, unit='s')
     trades = trades.set_index('datetime').sort_index()
 
     cvd_1m = trades['cvd_tick'].resample(BAR_FREQ).sum().cumsum()
@@ -322,11 +323,15 @@ def compute_orderflow_features(df_trades, df_orderbook):
     trades['tick_rule'] = np.where(trades['price'] > trades['price_prev'], 1,
                           np.where(trades['price'] < trades['price_prev'], -1, 0))
 
-    micro = trades.resample(BAR_FREQ).agg({
-        'tick_rule': 'mean',
-        'amount': ['sum', 'count'],
-        'price': 'std',
-    })
+    resampled_parts = []
+    for _, day_df in trades.groupby(trades.index.floor('1D')):
+        resampled_parts.append(day_df.resample(BAR_FREQ).agg({
+            'tick_rule': 'mean',
+            'amount': ['sum', 'count'],
+            'price': 'std',
+        }))
+    micro = pd.concat(resampled_parts).sort_index()
+    
     micro.columns = ['tick_rule', 'volume', 'n_trades', 'price_volatility']
     micro['trade_intensity'] = micro['n_trades'] / 60.0
     micro['avg_trade_size'] = micro['volume'] / (micro['n_trades'] + EPS)
@@ -350,7 +355,7 @@ def compute_orderflow_features(df_trades, df_orderbook):
     vpin_bucket_size = max(total_session_volume / VPIN_TARGET_BUCKETS_PER_SESSION, EPS)
 
     cum_vol = trades_sorted['amount'].cumsum()
-    bucket_labels = (cum_vol / vpin_bucket_size).astype(int)
+    bucket_labels = (cum_vol / vpin_bucket_size).astype("int32")
 
     vpin_buckets = trades_sorted.groupby(bucket_labels).agg({
         'buy_vol': 'sum',
@@ -433,12 +438,16 @@ def compute_orderflow_features(df_trades, df_orderbook):
 # ============================================================================
 # STEP 1b — Per-session feature pipeline
 # ============================================================================
-def load_and_build_state_space(orderbook_path, trades_path, session_id):
-    df_orderbook = pd.read_csv(orderbook_path)
-    df_trades = pd.read_csv(trades_path)
 
-    df_orderbook['datetime'] = pd.to_datetime(df_orderbook['timestamp'].astype('int64') // 1000, unit='s')
-    df_trades['datetime'] = pd.to_datetime(df_trades['timestamp'].astype('int64') // 1000, unit='s')
+def _read_table(path):
+    return pd.read_parquet(path) if str(path).endswith('.parquet') else pd.read_csv(path)
+
+def load_and_build_state_space(orderbook_path, trades_path, session_id):
+    df_orderbook = _read_table(orderbook_path)
+    df_trades = _read_table(trades_path)
+
+    df_orderbook['datetime'] = pd.to_datetime(df_orderbook['timestamp'].astype('int32') // 1000, unit='s')
+    df_trades['datetime'] = pd.to_datetime(df_trades['timestamp'].astype('int32') // 1000, unit='s')
 
     df_orderbook = df_orderbook.set_index('datetime').sort_index()
     df_trades = df_trades.set_index('datetime').sort_index()
@@ -624,6 +633,7 @@ def load_and_build_state_space(orderbook_path, trades_path, session_id):
 # STEP 2 — Build combined state space
 # ============================================================================
 if __name__ == "__main__":
+    """
     print("Loading sessions...")
     session_0 = load_and_build_state_space(
         "./research/csv/BTCUSDT_orderbook.csv", "./research/csv/BTCUSDT_trades.csv", session_id=0
@@ -640,6 +650,13 @@ if __name__ == "__main__":
 
     #df_state_space = load_and_build_state_space("./research/csv/XAUTUSDT_orderbook.csv", "./research/csv/XAUTUSDT_trades.csv", 0)
     df_state_space = pd.concat([session_0, session_1, session_2]).sort_index()
+    print(f"Combined state space: {len(df_state_space)} rows")
+    """
+    print("Loading sessions...")
+    session_0 = load_and_build_state_space(
+        "./research/csv/BTCUSDT_orderbook.parquet", "./research/csv/BTCUSDT_trades.parquet", session_id=0
+    )
+    df_state_space = session_0
     print(f"Combined state space: {len(df_state_space)} rows")
 
     # ============================================================================

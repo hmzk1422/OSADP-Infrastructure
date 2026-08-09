@@ -54,3 +54,12 @@ nohup python bot.py > bot.log 2>&1 &
 nohup python -m main.execution > bot.log 2>&1 &
 
 python -m main.executor
+
+## Downloading Research File
+```
+python binance_downloader.py \
+  --symbol BTCUSDT \
+  --start-date 2026-08-01 \
+  --end-date 2026-08-07 \
+  --outdir ./research/csv
+```
