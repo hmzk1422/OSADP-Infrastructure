@@ -18,3 +18,6 @@ main/logs/executor.log
 main/logs/trade_journal.jsonl
 
 binance_cache/
+*.parquet
+main/logs/
+*.log
