@@ -32,7 +32,7 @@ STOP_LOSS_BPS        = 5        # Fallback stop if barrier logic fails
 TAKE_PROFIT_BPS      = 5
 MAX_POSITION_USD     = 100       # Max notional per position (~0.0017 BTC at $60k)
 MIN_ORDER_SIZE       = 0.001     # Minimum contract size
-RR_RATIO             = 0.667       # Risk:Reward ratio (2.0 = 1:2, profit target = 2x stop distance)
+RR_RATIO             = 1.0       # Risk:Reward ratio (2.0 = 1:2, profit target = 2x stop distance)
 
 # --- Volatility / Barrier-Size Filter ---
 # Reject entries when the volatility-scaled barrier is outside this range.
@@ -104,6 +104,57 @@ FEATURE_COLUMNS = [
 # Note on depth_imbalance_z (PFI=0.002): excluded because it contributes
 # negligibly and adds complexity. The research also excludes it from model
 # features since it's in the drop_cols.
+
+# --- Orderflow Features (optional 9-feature block, ml_state_optimized.py Step 4) ---
+# These mirror the constants ml_state_optimized.py hardcodes locally near the
+# top of that file (USE_ORDERFLOW_FEATURES, ORDERFLOW_FEATURE_COLUMNS,
+# RETAIL_THRESHOLD, VPIN_TARGET_BUCKETS_PER_SESSION, VPIN_WINDOW_BUCKETS,
+# VPIN_MIN_PERIODS). The research script is read-only and imports its copies
+# from itself, not from here — so if you ever change RETAIL_THRESHOLD or the
+# VPIN bucket/window constants in ml_state_optimized.py, update the matching
+# values below too, or the live orderflow features will silently be computed
+# on different definitions than whatever produced the model's manifest.
+#
+# USE_ORDERFLOW_FEATURES here controls what LiveFeatureEngine.get_feature_columns()
+# (features.py) actually emits. It must match the USE_ORDERFLOW_FEATURES the
+# model was exported with (see <model>.features.json "includes_orderflow"),
+# or executor.py's feature-count guard will refuse to trade every tick.
+USE_ORDERFLOW_FEATURES = True
+
+# Exact same 9 names, same order, as ORDERFLOW_FEATURE_COLUMNS in
+# ml_state_optimized.py — order matters, it's the column order the model was
+# trained on.
+ORDERFLOW_FEATURE_COLUMNS = [
+    'ofi_z', 'cvd_delta_z', 'cvd_slope_z', 'vpin', 'absorption_z',
+    'tick_autocorr', 'inst_ratio', 'delta_divergence_z', 'depth_imbalance_z',
+]
+
+# Rolling z-score window (in bars) for ofi_z, cvd_delta_z, cvd_slope_z,
+# absorption_z, delta_divergence_z, depth_imbalance_z — mirrors the
+# hardcoded window=10 in every calculate_zscore(...) call for these features
+# in ml_state_optimized.py.
+ORDERFLOW_Z_WINDOW = 10
+
+# Trade-size cutoff (base-asset units) separating "retail" from
+# "institutional" for inst_ratio / delta_divergence_z. Matches
+# RETAIL_THRESHOLD in ml_state_optimized.py.
+RETAIL_THRESHOLD = 0.05
+
+# --- VPIN (volume-clock informed-trading probability) ---
+# Research derives its volume-per-bucket size from each CSV session's total
+# traded volume (total_session_volume / VPIN_TARGET_BUCKETS_PER_SESSION),
+# because a research "session" is a fixed, already-complete file. Live
+# trading has no such fixed endpoint — the bucket size instead self-
+# calibrates from a trailing VPIN_SESSION_LOOKBACK_SECONDS window of realized
+# volume (see LiveFeatureEngine._compute_macro_features), recomputed on every
+# bar rollover so it tracks changing liquidity. This is the live analogue of
+# the research definition, not a byte-for-byte replica of it — flagging this
+# because VPIN is the one orderflow feature that can't be made identical
+# between an offline CSV session and an open-ended live stream.
+VPIN_TARGET_BUCKETS_PER_SESSION = 50
+VPIN_WINDOW_BUCKETS = 10   # smoothing window in closed buckets
+VPIN_MIN_PERIODS    = 5    # buckets needed before vpin leaves its 0.0 default
+VPIN_SESSION_LOOKBACK_SECONDS = 86400   # trailing window used to size buckets (1 day)
 
 # --- Training ---
 TRAIN_ON_STARTUP = True           # Retrain model on initial historical fetch?

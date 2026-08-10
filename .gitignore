@@ -17,5 +17,9 @@ venv/
 main/logs/executor.log
 main/logs/trade_journal.jsonl
 
+<<<<<<< HEAD
 binance_cache/
 *.parquet
+=======
+binance_cache/
+>>>>>>> origin/main
