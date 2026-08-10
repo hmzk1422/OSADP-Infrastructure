@@ -81,14 +81,9 @@ still be subtly wrong on data shaped differently than what I tested.
 import sys
 import os
 import json
-<<<<<<< HEAD
 import datetime as _dt
 import gc
 
-=======
-# Make the project root importable regardless of CWD. The old
-# os.path.join(os.getcwd(), '..') only worked when run from inside research/.
->>>>>>> origin/main
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
@@ -105,11 +100,6 @@ import lightgbm as lgb
 from sklearn.metrics import precision_score, recall_score, classification_report
 import shap
 from sklearn.inspection import permutation_importance
-<<<<<<< HEAD
-=======
-from sklearn.linear_model import LinearRegression
-import polars as pl
->>>>>>> origin/main
 
 from main.config import (
     LOOKAHEAD_SECONDS, BARRIER_MULTIPLIER, RSI_FILTER_COLUMN, RSI_FILTER_THRESHOLD,
@@ -128,39 +118,11 @@ BAR_FREQ = f"{TIMEFRAME_BARRIER}s"
 USE_ORDERFLOW_FEATURES = True
 EXPORT_PRODUCTION_MODEL = True
 
-<<<<<<< HEAD
 BARRIER_CHUNK_SIZE = 50_000
 N_RANDOM_SAMPLES = 20
 TEST_BLOCK_SIZE = 2000
 EMBARGO_SECONDS = LOOKAHEAD_SECONDS
 CLASS_NAMES = {LABEL_LOSS: 'LOSS', LABEL_WIN: 'WIN'}
-=======
-# FIX: orderflow/DeepLOB features (OFI, CVD, VPIN, absorption, tick
-# autocorrelation, retail/institutional delta, depth imbalance) used to be
-# unconditionally appended to `features` whenever the columns existed in
-# df_training_zone — with no way to compare against the base-feature-only
-# model that's actually what HistoricalDataBuilder trains live. Toggle it
-# explicitly here. When True, both the walk-forward chart AND the exported
-# production model (STEP 12) include them; the feature manifest written at
-# export time records which set was used, so live can verify what it's
-# actually loading rather than assume.
-USE_ORDERFLOW_FEATURES = True
-
-# FIX: export the final model after walk-forward evaluation. This is what
-# gets loaded by executor.py — see STEP 12 at the bottom of this file. Set
-# False if you only want to run the evaluation and not touch MODEL_PATH.
-EXPORT_PRODUCTION_MODEL = True
-
-BARRIER_CHUNK_SIZE   = 50_000
-N_RANDOM_SAMPLES      = 15
-# TEST_BLOCK_SIZE was 10000 rows when the state space was 1-second resolution
-# (≈10000 consecutive seconds). After deduplicate_to_bar() the dataset is
-# bar-level (~4500 bars across 3 sessions), so 10000 rows no longer fits.
-# 150 bars = 12.5 hours of 5-minute bars per test fold.
-TEST_BLOCK_SIZE       = 150
-EMBARGO_SECONDS       = LOOKAHEAD_SECONDS
-CLASS_NAMES           = {LABEL_LOSS: 'LOSS', LABEL_WIN: 'WIN'}
->>>>>>> origin/main
 
 VPIN_TARGET_BUCKETS_PER_SESSION = 50
 VPIN_WINDOW_BUCKETS = 10
@@ -695,15 +657,7 @@ def add_barrier_labels(df: pl.DataFrame, lookahead_seconds: int = LOOKAHEAD_SECO
         g = g.filter(pl.col("_valid")).drop("_valid")
         parts.append(g)
 
-<<<<<<< HEAD
     return pl.concat(parts)
-=======
-        g = g[g['_valid']].drop(columns=['_valid'])
-        g['target'] = g['target'].astype('int32')
-        labeled.append(g)
-
-    return pd.concat(labeled)
->>>>>>> origin/main
 
 
 # ============================================================================
@@ -747,13 +701,8 @@ def purged_chronological_splits(datetimes: np.ndarray, n_samples: int, block_siz
         test_idx = np.arange(start_idx, start_idx + block_size)
         test_start_time = datetimes[test_idx[0]]
 
-<<<<<<< HEAD
         possible_train_idx = np.arange(0, start_idx)
         train_times = datetimes[possible_train_idx]
-=======
-    ob['datetime'] = pd.to_datetime(ob['timestamp'].astype('int32') // 1000, unit='s')
-    ob = ob.set_index('datetime').sort_index()
->>>>>>> origin/main
 
         purge_mask = (train_times + horizon + embargo >= test_start_time)
         train_idx = possible_train_idx[~purge_mask]
@@ -761,7 +710,6 @@ def purged_chronological_splits(datetimes: np.ndarray, n_samples: int, block_siz
         n_purged = len(possible_train_idx) - len(train_idx)
         yield train_idx, test_idx, n_purged
 
-<<<<<<< HEAD
 
 def find_debounced_signals(y_proba: np.ndarray, threshold: float, hysteresis: float = HYSTERESIS_BUFFER) -> np.ndarray:
     """Return indices of fresh threshold crossings, ignoring flicker."""
@@ -834,360 +782,6 @@ if __name__ == "__main__":
     # ... [PROCEED WITH YOUR BARRIER LABELING AND LIGHTGBM CODE] ...
 
     # ------------------------------------------------------------------
-=======
-    trades['cvd_tick'] = trades['buy_vol'] - trades['sell_vol']
-    trades['datetime'] = pd.to_datetime(trades['timestamp'].astype('int32') // 1000, unit='s')
-    trades = trades.set_index('datetime').sort_index()
-
-    cvd_1m = trades['cvd_tick'].resample(BAR_FREQ).sum().cumsum()
-    cvd_delta_1m = cvd_1m.diff().fillna(0)
-    cvd_slope_5 = cvd_1m.diff(5).fillna(0)
-
-    # ================================================================
-    # 3. MICROSTRUCTURE: Tick Rule & Trade Sign Autocorrelation
-    # ================================================================
-    trades['price_prev'] = trades['price'].shift(1)
-    trades['tick_rule'] = np.where(trades['price'] > trades['price_prev'], 1,
-                          np.where(trades['price'] < trades['price_prev'], -1, 0))
-
-    resampled_parts = []
-    for _, day_df in trades.groupby(trades.index.floor('1D')):
-        resampled_parts.append(day_df.resample(BAR_FREQ).agg({
-            'tick_rule': 'mean',
-            'amount': ['sum', 'count'],
-            'price': 'std',
-        }))
-    micro = pd.concat(resampled_parts).sort_index()
-    
-    micro.columns = ['tick_rule', 'volume', 'n_trades', 'price_volatility']
-    micro['trade_intensity'] = micro['n_trades'] / 60.0
-    micro['avg_trade_size'] = micro['volume'] / (micro['n_trades'] + EPS)
-
-    # Trade sign autocorrelation: rolling autocorrelation of tick rule
-    # High autocorrelation = hidden institutional order splitting
-    tick_1s = trades['tick_rule'].resample('1s').last().fillna(0)
-    tick_1m = tick_1s.resample(BAR_FREQ).apply(
-        lambda x: x.autocorr() if len(x) > 5 and not np.isnan(x.autocorr()) else 0
-    )
-
-    # ================================================================
-    # 4. VPIN
-    # ================================================================
-    # FIX: bucket size is now derived from this session's actual total traded
-    # volume / VPIN_TARGET_BUCKETS_PER_SESSION, instead of a hardcoded constant
-    # that assumed a specific liquidity regime. This guarantees ~50 buckets close
-    # per session regardless of how much volume the CSV actually contains.
-    trades_sorted = trades.sort_index()
-    total_session_volume = trades_sorted['amount'].sum()
-    vpin_bucket_size = max(total_session_volume / VPIN_TARGET_BUCKETS_PER_SESSION, EPS)
-
-    cum_vol = trades_sorted['amount'].cumsum()
-    bucket_labels = (cum_vol / vpin_bucket_size).astype("int32")
-
-    vpin_buckets = trades_sorted.groupby(bucket_labels).agg({
-        'buy_vol': 'sum',
-        'sell_vol': 'sum',
-        'amount': 'sum'
-    })
-
-    vpin_buckets['vpin_raw'] = np.abs(vpin_buckets['buy_vol'] - vpin_buckets['sell_vol']) / (vpin_buckets['amount'] + EPS)
-    vpin_buckets['vpin_smoothed'] = vpin_buckets['vpin_raw'].rolling(VPIN_WINDOW_BUCKETS, min_periods=VPIN_MIN_PERIODS).mean()
-
-    n_buckets_closed = bucket_labels.nunique()
-    if n_buckets_closed < VPIN_MIN_PERIODS:
-        print(f"  [VPIN WARNING] Only {n_buckets_closed} buckets closed this session "
-              f"(need {VPIN_MIN_PERIODS}+) — VPIN will be NaN/sparse for this session.")
-
-    bucket_end_times = trades_sorted.groupby(bucket_labels).apply(lambda g: g.index[-1])
-    if isinstance(bucket_end_times, pd.Series):
-        bucket_end_times = bucket_end_times.reset_index(drop=True)
-
-    vpin_aligned = pd.Series(vpin_buckets['vpin_smoothed'].values, index=bucket_end_times)
-    vpin_1m = vpin_aligned.resample(BAR_FREQ).last().ffill()
-
-    # ================================================================
-    # 5. RETAIL vs INSTITUTIONAL DELTA
-    # ================================================================
-    trades['is_retail'] = trades['amount'] < RETAIL_THRESHOLD
-    trades['is_institutional'] = trades['amount'] >= RETAIL_THRESHOLD
-
-    trades['retail_buy'] = trades['buy_vol'].where(trades['is_retail'], 0)
-    trades['retail_sell'] = trades['sell_vol'].where(trades['is_retail'], 0)
-    trades['inst_buy'] = trades['buy_vol'].where(trades['is_institutional'], 0)
-    trades['inst_sell'] = trades['sell_vol'].where(trades['is_institutional'], 0)
-
-    trade_size = trades.resample(BAR_FREQ).agg({
-        'retail_buy': 'sum',
-        'retail_sell': 'sum',
-        'inst_buy': 'sum',
-        'inst_sell': 'sum',
-        'amount': ['sum', 'count'],
-    })
-    trade_size.columns = ['retail_buy', 'retail_sell', 'inst_buy', 'inst_sell', 'volume', 'n_trades']
-
-    trade_size['retail_delta'] = trade_size['retail_buy'] - trade_size['retail_sell']
-    trade_size['inst_delta'] = trade_size['inst_buy'] - trade_size['inst_sell']
-    trade_size['delta_divergence'] = trade_size['inst_delta'] - trade_size['retail_delta']
-    trade_size['inst_ratio'] = (trade_size['inst_buy'] + trade_size['inst_sell']) / (trade_size['volume'] + EPS)
-
-    # ================================================================
-    # 6. ABSORPTION RATIO
-    # ================================================================
-    ob_1m_price = ob[['bid_price', 'ask_price']].resample(BAR_FREQ).agg({
-        'bid_price': ['min', 'max'],
-        'ask_price': ['min', 'max']
-    })
-    ob_1m_price.columns = ['bid_low', 'bid_high', 'ask_low', 'ask_high']
-    ob_1m_price['price_range'] = (ob_1m_price['ask_high'] - ob_1m_price['bid_low']).ffill()
-
-    abs_ratio_raw = cvd_delta_1m / (ob_1m_price['price_range'] + EPS)
-
-    # ================================================================
-    # 7. DeepLOB: Order Book Depth Imbalance
-    # ================================================================
-    # Simulate depth features from top-of-book dynamics
-    # Depth imbalance ratio: (bid_amount - ask_amount) / (bid_amount + ask_amount)
-    ob['depth_imbalance'] = (ob['bid_amount'] - ob['ask_amount']) / (ob['bid_amount'] + ob['ask_amount'] + EPS)
-
-    # Rate of change of depth imbalance (liquidity absorption speed)
-    ob['depth_imbalance_roc'] = ob['depth_imbalance'].diff().fillna(0)
-
-    # Bid-ask spread pressure: how fast the spread is changing
-    ob['mid'] = (ob['bid_price'] + ob['ask_price']) / 2
-    ob['spread_bps'] = (ob['ask_price'] - ob['bid_price']) / ob['mid'] * 10000
-
-    depth_1m = ob[['depth_imbalance', 'depth_imbalance_roc', 'spread_bps']].resample(BAR_FREQ).last()
-
-    return (ofi_1m, ofi_diff, cvd_delta_1m, cvd_slope_5, micro,
-            vpin_1m, trade_size, abs_ratio_raw, tick_1m, depth_1m)
-
-
-# ============================================================================
-# STEP 1b — Per-session feature pipeline
-# ============================================================================
-
-def _read_table(path):
-    return pd.read_parquet(path) if str(path).endswith('.parquet') else pd.read_csv(path)
-
-def load_and_build_state_space(orderbook_path, trades_path, session_id):
-    df_orderbook = _read_table(orderbook_path)
-    df_trades = _read_table(trades_path)
-
-    df_orderbook['datetime'] = pd.to_datetime(df_orderbook['timestamp'].astype('int32') // 1000, unit='s')
-    df_trades['datetime'] = pd.to_datetime(df_trades['timestamp'].astype('int32') // 1000, unit='s')
-
-    df_orderbook = df_orderbook.set_index('datetime').sort_index()
-    df_trades = df_trades.set_index('datetime').sort_index()
-
-    df_orderbook['mid_price'] = (df_orderbook['bid_price'] + df_orderbook['ask_price']) / 2
-
-    df_ob_1m = df_orderbook.resample(BAR_FREQ).agg({
-        'mid_price': ['first', 'max', 'min', 'last'],
-        'bid_price': 'last',
-        'ask_price': 'last',
-        'bid_amount': 'sum',
-        'ask_amount': 'sum',
-    })
-    df_ob_1m.columns = ['open', 'high', 'low', 'close', 'bid_price', 'ask_price', 'bid_amount', 'ask_amount']
-    df_ob_1m['spread'] = df_ob_1m['ask_price'] - df_ob_1m['bid_price']
-    df_ob_1m['spread_pct'] = df_ob_1m['spread'] / df_ob_1m['close']
-
-    df_trades['buy_vol'] = df_trades['amount'].where(df_trades['side'] == 'buy', 0)
-    df_trades['sell_vol'] = df_trades['amount'].where(df_trades['side'] == 'sell', 0)
-
-    df_micro = df_trades.resample('1s').agg({
-        'price': 'last',
-        'buy_vol': 'sum',
-        'sell_vol': 'sum'
-    }).ffill()
-
-    df_micro['micro_OFI'] = df_micro['buy_vol'] - df_micro['sell_vol']
-    df_micro['micro_CVD'] = df_micro['micro_OFI'].rolling(10).sum()
-
-    df_trades_1m = df_trades.resample(BAR_FREQ).agg({
-        'price': ['first', 'max', 'min', 'last', 'count'],
-        'amount': 'sum',
-        'buy_vol': ['sum', 'max'],
-        'sell_vol': ['sum', 'max']
-    })
-    df_trades_1m.columns = ['open', 'high', 'low', 'close', 'num_trades', 'volume',
-                             'agg_buyer', 'largest_buyer', 'agg_seller', 'largest_seller']
-    df_trades_1m = df_trades_1m.dropna(subset=['close'])
-
-    # ===== COMPUTE ORDERFLOW FEATURES =====
-    (ofi_1m, ofi_diff, cvd_delta_1m, cvd_slope_5, micro,
-     vpin_1m, trade_size, abs_ratio_raw, tick_autocorr_1m,
-     depth_1m) = compute_orderflow_features(df_trades, df_orderbook)
-
-    # ===== BUILD PRICE DATAFRAME =====
-    df_price_1m = pd.DataFrame({
-        'open': df_ob_1m['open'],
-        'high': df_ob_1m['high'],
-        'low': df_ob_1m['low'],
-        'close': df_ob_1m['close'],
-        'volume': df_trades_1m['volume'],
-        'spread_pct': df_ob_1m['spread_pct'],
-    })
-
-    # ================================================================
-    # PRICE-BASED FEATURES
-    # ================================================================
-    price_clean = np.asarray(df_price_1m['close'], dtype=float)
-    diffs = np.diff(price_clean)
-
-    def _pad_front(arr, target_len):
-        out = np.full(target_len, np.nan)
-        out[-len(arr):] = arr
-        return out
-
-    # RSI features — windows now come from config, not re-hardcoded literals
-    df_price_1m['rsi_2'] = _pad_front(get_wilders_rsi(diffs, RSI_2_WINDOW), len(df_price_1m))
-    rsi_14_raw = get_wilders_rsi(diffs, RSI_14_WINDOW)
-    df_price_1m['rsi_14'] = _pad_front(rsi_14_raw, len(df_price_1m))
-    df_price_1m['sma_14'] = _pad_front(sma(rsi_14_raw, SMA_14_WINDOW), len(df_price_1m))
-
-    # MA Slope (velocity) - strictly backward looking
-    ma_5 = df_price_1m['close'].rolling(window=MA_SLOPE_WINDOW).mean()
-    df_price_1m['ma_slope_5'] = ma_5.diff().fillna(0)
-
-    # MA acceleration (2nd derivative)
-    df_price_1m['ma_accel'] = df_price_1m['ma_slope_5'].diff().fillna(0)
-    df_price_1m['ma_accel_regime'] = np.where(df_price_1m['ma_accel'] > 0, 1,
-                                      np.where(df_price_1m['ma_accel'] < 0, -1, 0))
-
-    # Price rate of change
-    df_price_1m['price_roc_3'] = df_price_1m['close'].pct_change(PRICE_ROC_WINDOW_3)
-
-    # Aggregated-bar volatility for barrier sizing — matches
-    # LiveFeatureEngine._compute_macro_features()'s _bar_vol_std exactly:
-    # std of bar-to-bar % returns on the SAME TIMEFRAME_BARRIER close series
-    # RSI(2) is built from, over a trailing BARRIER_VOL_BAR_WINDOW-bar window.
-    # This is NOT a model feature (not in FEATURE_COLUMNS) — it only feeds
-    # add_barrier_labels(), matching PositionTracker.get_barrier_pct().
-    # FIX: ddof=0 to match live EXACTLY.
-    # Live features.py _compute_macro_features() computes:
-    #     bar_rets = np.diff(bar_closes) / (bar_closes[:-1] + EPS)
-    #     bar_vol_std = np.nanstd(bar_rets[-window:])   # np.nanstd defaults ddof=0
-    # and live execution.py get_barrier_pct() does:
-    #     barrier = bar_vol_std * BARRIER_MULTIPLIER    # NO sqrt(horizon) scaling
-    # pandas .rolling().std() defaults to ddof=1 (sample std), which is a
-    # ~2.6% constant bias vs np.nanstd's ddof=0 at window=20 — making research
-    # barriers slightly wider than live. .std(ddof=0) removes that bias.
-    bar_rets = df_price_1m['close'].pct_change()
-    df_price_1m['bar_vol_std'] = bar_rets.rolling(
-        window=BARRIER_VOL_BAR_WINDOW, min_periods=2
-    ).std(ddof=0)
-    df_price_1m['price_roc_5'] = df_price_1m['close'].pct_change(5)
-
-    # RSI rate of change — speed of entry into oversold
-    df_price_1m['rsi_roc_3'] = df_price_1m['rsi_2'].diff(3)
-    df_price_1m['rsi_roc_5'] = df_price_1m['rsi_2'].diff(5)
-
-    # ================================================================
-    # MINIMAL FEATURE SET (only proven high-PFI features)
-    # ================================================================
-    # From v3 analysis, the top features by PFI are:
-    # spread_bps_z(0.081), ma_slope_5(0.024), rsi_x_ma(0.006), 
-    # ma_accel(0.005), price_roc_3(0.005), depth_imbalance_z(0.002)
-    
-    # DeepLOB: spread in basis points (PFI=0.081 — dominant feature)
-    df_price_1m['spread_bps_z'] = calculate_zscore(
-        depth_1m['spread_bps'].reindex(df_ob_1m.index).fillna(0), window=DEEPLOB_Z_WINDOW)
-    
-    # DeepLOB: depth imbalance (PFI=0.002)
-    df_price_1m['depth_imbalance_z'] = calculate_zscore(
-        depth_1m['depth_imbalance'].reindex(df_ob_1m.index).fillna(0), window=10)
-
-    # RSI × MA slope interaction (PFI=0.006 — key signal)
-    rsi_z = calculate_zscore(df_price_1m['rsi_2'], window=RSI_Z_WINDOW)
-    df_price_1m['rsi_x_ma'] = rsi_z * df_price_1m['ma_slope_5']
-
-    # ================================================================
-    # FIX: PREVIOUSLY-DEAD ORDERFLOW FEATURES
-    # ================================================================
-    # ofi_1m, ofi_diff, cvd_delta_1m, cvd_slope_5, vpin_1m, trade_size, and
-    # abs_ratio_raw were all computed by compute_orderflow_features() above but
-    # were never joined into df_price_1m — they were silently discarded, so the
-    # model never actually saw them despite the docstring/feature-importance
-    # comments describing them as inputs. Wiring them in here for real, using
-    # the same reindex-onto-df_ob_1m.index pattern already used for depth_1m.
-    # Their actual predictive value (PFI/SHAP) will show up honestly in Step 7
-    # on the next run instead of being assumed away.
-
-    # OFI: structural order flow imbalance (change in imbalance per minute)
-    df_price_1m['ofi_z'] = calculate_zscore(
-        ofi_diff.reindex(df_ob_1m.index).fillna(0), window=10)
-
-    # CVD: cumulative volume delta, level change and short-window slope
-    df_price_1m['cvd_delta_z'] = calculate_zscore(
-        cvd_delta_1m.reindex(df_ob_1m.index).fillna(0), window=10)
-    df_price_1m['cvd_slope_z'] = calculate_zscore(
-        cvd_slope_5.reindex(df_ob_1m.index).fillna(0), window=10)
-
-    # VPIN: informed-trading probability. Forward-filled (not zero-filled) on
-    # reindex, since VPIN is a volume-clock signal that should persist its last
-    # known estimate between bucket closes rather than snap to 0.
-    df_price_1m['vpin'] = vpin_1m.reindex(df_ob_1m.index).ffill().fillna(0)
-
-    # Absorption ratio: CVD delta normalized by price range (institutional absorption)
-    df_price_1m['absorption_z'] = calculate_zscore(
-        abs_ratio_raw.reindex(df_ob_1m.index).fillna(0), window=10)
-
-    # Trade sign autocorrelation: hidden institutional order-splitting signature
-    df_price_1m['tick_autocorr'] = tick_autocorr_1m.reindex(df_ob_1m.index).fillna(0)
-
-    # Retail vs institutional flow: ratio and divergence between size cohorts
-    df_price_1m['inst_ratio'] = trade_size['inst_ratio'].reindex(df_ob_1m.index).fillna(0)
-    df_price_1m['delta_divergence_z'] = calculate_zscore(
-        trade_size['delta_divergence'].reindex(df_ob_1m.index).fillna(0), window=10)
-
-    # ================================================================
-    # JOIN MICRO (1s) WITH MACRO (1m)
-    # ================================================================
-    df_micro_shifted = df_micro.shift(1)
-    df_macro_shifted = df_price_1m.shift(1)
-
-    df_state_space = df_micro_shifted.join(df_macro_shifted, how='left').ffill()
-    df_state_space['execution_price'] = df_micro['price']
-
-    df_state_space = df_state_space.dropna()
-    df_state_space['session_id'] = session_id
-
-    return df_state_space
-
-
-# ============================================================================
-# STEP 2 — Build combined state space
-# ============================================================================
-if __name__ == "__main__":
-    """
-    print("Loading sessions...")
-    session_0 = load_and_build_state_space(
-        "./research/csv/BTCUSDT_orderbook.csv", "./research/csv/BTCUSDT_trades.csv", session_id=0
-    )
-    print(f"Session 0: {len(session_0)} rows")
-    session_1 = load_and_build_state_space(
-        "./research/csv/BTCUSDT_orderbook_2.csv", "./research/csv/BTCUSDT_trades_2.csv", session_id=1
-    )
-    print(f"Session 1: {len(session_1)} rows")
-    session_2 = load_and_build_state_space(
-        "./research/csv/BTCUSDT_orderbook_3.csv", "./research/csv/BTCUSDT_trades_3.csv", session_id=2
-    )
-    print(f"Session 2: {len(session_2)} rows")
-
-    #df_state_space = load_and_build_state_space("./research/csv/XAUTUSDT_orderbook.csv", "./research/csv/XAUTUSDT_trades.csv", 0)
-    df_state_space = pd.concat([session_0, session_1, session_2]).sort_index()
-    print(f"Combined state space: {len(df_state_space)} rows")
-    """
-    print("Loading sessions...")
-    session_0 = load_and_build_state_space(
-        "./research/csv/BTCUSDT_orderbook.parquet", "./research/csv/BTCUSDT_trades.parquet", session_id=0
-    )
-    df_state_space = session_0
-    print(f"Combined state space: {len(df_state_space)} rows")
-
-    # ============================================================================
->>>>>>> origin/main
     # STEP 3 — Barrier labeling
     # ------------------------------------------------------------------
     df_state_space = add_barrier_labels(df_state_space)
@@ -1220,17 +814,6 @@ if __name__ == "__main__":
         'ofi_z', 'cvd_delta_z', 'cvd_slope_z', 'vpin', 'absorption_z',
         'tick_autocorr', 'inst_ratio', 'delta_divergence_z', 'depth_imbalance_z',
     ]
-<<<<<<< HEAD
-=======
-    # FIX: gated by USE_ORDERFLOW_FEATURES now instead of being unconditional.
-    # This was the source of an undetected research/live mismatch: this block
-    # always pulled in all 9 orderflow columns whenever they existed in
-    # df_training_zone, so every walk-forward chart included features that
-    # HistoricalDataBuilder (executor.py) never computes or serves live. The
-    # chart was evaluating a strictly bigger, different model than the one
-    # actually deployed. Toggle explicitly; the export step (STEP 12) records
-    # which set was used in the feature manifest so live can check it matches.
->>>>>>> origin/main
     if USE_ORDERFLOW_FEATURES:
         features = list(FEATURE_COLUMNS) + [
             c for c in ORDERFLOW_FEATURE_COLUMNS if c in df_training_zone.columns
@@ -1293,64 +876,6 @@ if __name__ == "__main__":
     print(f"TRADE_DIRECTION={TRADE_DIRECTION!r} -> INVERT_RETURNS={INVERT_RETURNS} "
           f"(mirrors executor.py's actual fade/snapback semantics)")
 
-<<<<<<< HEAD
-=======
-
-    def purged_chronological_splits(index, n_samples, block_size, horizon_seconds,
-                                     embargo_seconds=0, allow_overlap=False):
-        n = len(index)
-        horizon = pd.Timedelta(seconds=horizon_seconds)
-        embargo = pd.Timedelta(seconds=embargo_seconds)
-        min_initial_train = int(n * 0.35)
-        available_test_run = n - min_initial_train - block_size
-
-        if available_test_run <= 0:
-            raise ValueError("The dataset length is too narrow for this test configuration block size.")
-
-        # FIX: this used to just warn and proceed when step_intervals < block_size,
-        # which silently let consecutive folds re-test the same historical period
-        # with different models — the same real trade opportunity scored (and
-        # logged) more than once, inflating apparent trade counts and breaking the
-        # independence assumption behind every win-rate/expectancy/CVaR stat below.
-        # Now n_samples is capped to the max number of BACK-TO-BACK, non-overlapping
-        # block_size windows the data actually supports, so every fold-by-default
-        # tests a genuinely independent period. allow_overlap=True restores the old
-        # behavior if you deliberately want denser (but non-independent) folds.
-        max_non_overlapping = max(1, available_test_run // block_size)
-
-        if n_samples > max_non_overlapping and not allow_overlap:
-            print(f"[FOLD COUNT ADJUSTED] Requested n_samples={n_samples}, but only "
-                  f"{max_non_overlapping} non-overlapping {block_size}-bar test windows fit in "
-                  f"the {available_test_run} bars available after the {min_initial_train}-bar "
-                  f"initial training block. Reducing n_samples to {max_non_overlapping} so every "
-                  f"fold tests an independent period. Pass allow_overlap=True to keep the "
-                  f"original count with overlapping (non-independent) folds instead.")
-            n_samples = max_non_overlapping
-
-        step_intervals = available_test_run // n_samples
-
-        if allow_overlap and step_intervals < block_size:
-            overlap_pct = 100 * (1 - step_intervals / block_size)
-            print(f"[FOLD OVERLAP WARNING] step_intervals={step_intervals} < block_size={block_size} "
-                  f"-> consecutive test folds overlap by ~{overlap_pct:.0f}% of their length. "
-                  f"Trade counts/expectancy pooled across folds are NOT independent draws.")
-
-        for fold in range(n_samples):
-            start_idx = min_initial_train + (fold * step_intervals)
-            test_idx = np.arange(start_idx, start_idx + block_size)
-            test_start_time = index[test_idx[0]]
-
-            possible_train_idx = np.arange(0, start_idx)
-            train_times = index[possible_train_idx]
-
-            purge_mask = (train_times + horizon + embargo >= test_start_time)
-            train_idx = possible_train_idx[~purge_mask]
-
-            n_purged = len(possible_train_idx) - len(train_idx)
-            yield train_idx, test_idx, n_purged
-
-
->>>>>>> origin/main
     splitter = purged_chronological_splits(
         datetimes, n_samples=N_RANDOM_SAMPLES, block_size=TEST_BLOCK_SIZE,
         horizon_seconds=LOOKAHEAD_SECONDS, embargo_seconds=EMBARGO_SECONDS
@@ -1359,43 +884,6 @@ if __name__ == "__main__":
     print(f"\n--- Starting Walk-Forward (requested up to {N_RANDOM_SAMPLES} non-overlapping folds; "
           f"see [FOLD COUNT ADJUSTED] above if fewer independent windows fit the data) "
           f"| Targeting: {target_name} | Inverting Trades: {INVERT_RETURNS} ---")
-<<<<<<< HEAD
-=======
-
-    # FIX: HYSTERESIS BUFFER for signal detection
-    # The original edge-trigger (np.diff(preds, prepend=0) == 1) fires a "fresh"
-    # signal every time y_proba crosses from below t to >= t. If y_proba is noisy
-    # right around a given threshold (e.g. the model's output clusters near 0.85),
-    # it can cross back and forth many times within what is really one continuous
-    # elevated-probability period, and each crossing gets counted as a separate
-    # trade. This produced the non-monotonic trade-count spike (58 trades at >=85%
-    # vs. 27 at >=80% and 6 at >=90%) — a strong signature of flicker, not signal.
-    # HYSTERESIS_BUFFER requires proba to drop meaningfully below the threshold
-    # before a new signal is allowed to re-arm, collapsing flicker into one trade.
-    # NOTE: 0.08 is a starting point, not a proven-correct constant — tested on
-    # synthetic noise (std=0.02) where 0.03 only cut flicker by ~79% (66->14
-    # spurious signals) while 0.08 fully collapsed it to the true count. Your
-    # model's actual y_proba noise level may differ. Before trusting this on your
-    # real data, plot a histogram of y_proba for the fold(s) that fed the >=85%
-    # threshold and check its local volatility against this buffer.
-    # HYSTERESIS_BUFFER is now imported from main.config (see import block above)
-    # so it stays in sync with executor.py. Do NOT re-define it here.
-
-    def find_debounced_signals(y_proba, threshold, hysteresis=HYSTERESIS_BUFFER):
-        """Return indices of fresh threshold crossings, ignoring flicker.
-        Once armed and proba >= threshold, a signal fires and the detector disarms.
-        It only re-arms once proba drops below (threshold - hysteresis)."""
-        lower_bound = max(threshold - hysteresis, 0.0)
-        armed = True
-        out = []
-        for i, p in enumerate(y_proba):
-            if armed and p >= threshold:
-                out.append(i)
-                armed = False
-            elif not armed and p < lower_bound:
-                armed = True
-        return np.array(out, dtype=int)
->>>>>>> origin/main
 
     thresholds_to_track = np.arange(0.20, 0.96, 0.05)
     fold_metrics = {t: {'precisions': [], 'win_rates': [], 'rrs': [], 'trades': []} for t in thresholds_to_track}
@@ -1709,60 +1197,18 @@ if __name__ == "__main__":
     print("\nReminder: this run ignores fees, slippage, latency, and partial fills.")
     print("=" * 70)
 
-<<<<<<< HEAD
     # ------------------------------------------------------------------
     # STEP 12 — Export Production Model
     # ------------------------------------------------------------------
-=======
-    # ============================================================================
-    # STEP 12 — Export Production Model
-    # ============================================================================
-    # Everything above (walk-forward, SHAP/PFI, threshold sweep, PnL chart) is
-    # EVALUATION ONLY — none of the 15 fold-models get saved anywhere. This step
-    # does one FINAL fit on all available hunting-zone data and writes it to
-    # MODEL_PATH in the exact format executor.py's ModelManager.load() expects
-    # (raw lgb.Booster), plus a <model>.features.json manifest.
-    #
-    # WHY THIS MATTERS: HistoricalDataBuilder in executor.py trains its own
-    # bootstrap model from REST OHLCV bars, and can only APPROXIMATE spread_bps_z
-    # (the single most predictive feature — PFI 0.081, ~3x the next feature) from
-    # candle high-low range, because OHLCV bars structurally do not contain
-    # bid/ask data. No formula tweak fixes that — real spread requires real
-    # orderbook ticks, which only this research pipeline (load_and_build_state_space)
-    # has access to. This export step is the fix: train on the real tick data used
-    # here, ship *that* model, and stop training the deployed model on a proxy.
-    #
-    # The manifest exists because ModelManager.predict_proba() calls the raw
-    # Booster with a plain numpy array (no column names — see the
-    # "X does not have valid feature names" warning suppression in executor.py).
-    # A feature-order mismatch between what this model was trained on and what
-    # LiveFeatureEngine.extract_feature_vector() sends would NOT raise an error —
-    # it would just silently feed the model garbage. The manifest lets executor.py
-    # check this explicitly instead of assuming it's correct.
->>>>>>> origin/main
     if EXPORT_PRODUCTION_MODEL:
         print("\n" + "=" * 70)
         print("EXPORTING PRODUCTION MODEL")
         print("=" * 70)
 
         final_clf = lgb.LGBMClassifier(
-<<<<<<< HEAD
             n_estimators=200, learning_rate=0.01, max_depth=3, num_leaves=31,
             min_child_samples=20, subsample=0.8, colsample_bytree=0.8,
             class_weight='balanced', random_state=42, n_jobs=-1, verbose=-1,
-=======
-            n_estimators=200,
-            learning_rate=0.01,
-            max_depth=3,
-            num_leaves=31,
-            min_child_samples=20,
-            subsample=0.8,
-            colsample_bytree=0.8,
-            class_weight='balanced',
-            random_state=42,
-            n_jobs=-1,
-            verbose=-1,
->>>>>>> origin/main
         )
         final_clf.fit(X, y)
 
@@ -1773,26 +1219,16 @@ if __name__ == "__main__":
         print(f"Model saved to: {MODEL_PATH}")
 
         manifest_path = os.path.splitext(MODEL_PATH)[0] + ".features.json"
-<<<<<<< HEAD
         label_counts_export = {CLASS_NAMES[k]: int((y == k).sum()) for k in np.unique(y)}
         manifest = {
             "features": features,
-=======
-        manifest = {
-            "features": features,  # EXACT order — must match extract_feature_vector() output order
->>>>>>> origin/main
             "n_features": len(features),
             "includes_orderflow": USE_ORDERFLOW_FEATURES,
             "orderflow_features": [c for c in ORDERFLOW_FEATURE_COLUMNS if c in features],
             "base_features": list(FEATURE_COLUMNS),
             "trained_rows": int(len(X)),
-<<<<<<< HEAD
             "trained_at_utc": _dt.datetime.now(_dt.timezone.utc).isoformat(),
             "label_counts": label_counts_export,
-=======
-            "trained_at_utc": pd.Timestamp.utcnow().isoformat(),
-            "label_counts": {CLASS_NAMES[k]: int(v) for k, v in y.value_counts().to_dict().items()},
->>>>>>> origin/main
             "rr_ratio": RR_RATIO,
             "lookahead_seconds": LOOKAHEAD_SECONDS,
             "barrier_multiplier": BARRIER_MULTIPLIER,
