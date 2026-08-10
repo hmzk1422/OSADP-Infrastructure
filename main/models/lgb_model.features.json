@@ -39,6 +39,7 @@
     "rsi_2",
     "sma_14"
   ],
+<<<<<<< HEAD
   "trained_rows": 9346,
   "trained_at_utc": "2026-08-09T20:32:59.658515+00:00",
   "label_counts": {
@@ -46,6 +47,15 @@
     "WIN": 5468
   },
   "rr_ratio": 0.667,
+=======
+  "trained_rows": 196500,
+  "trained_at_utc": "2026-08-09T08:11:52.512187+00:00",
+  "label_counts": {
+    "WIN": 98741,
+    "LOSS": 97759
+  },
+  "rr_ratio": 1.0,
+>>>>>>> origin/main
   "lookahead_seconds": 3000,
   "barrier_multiplier": 0.5,
   "trade_direction": "short",
