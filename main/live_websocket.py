@@ -18,7 +18,8 @@ def run():
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
     # Define your target tickers here
-    tickers = ["ETHUSDT", "SOLUSDT", "LINKUSDT", "ARBUSDT", "OPUSDT", "XAUTUSDT", "BEATUSDT"]
+    #tickers = ["ETHUSDT", "SOLUSDT", "LINKUSDT", "ARBUSDT", "OPUSDT", "XAUTUSDT", "BEATUSDT"]
+    tickers = ["BTCUSDT"]
 
     asyncio.run(main(tickers))
 
