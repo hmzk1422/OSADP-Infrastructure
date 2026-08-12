@@ -83,23 +83,28 @@ import os
 import json
 import datetime as _dt
 import gc
-
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
-if PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, PROJECT_ROOT)
+from dataclasses import dataclass
 
 import numpy as np
 import polars as pl
 from numpy.lib.stride_tricks import sliding_window_view
-
-# get_wilders_rsi/sma operate on plain numpy arrays in the original script
-# (np.diff(...) output) — untouched by the pandas->polars switch.
 from utils.indicators import get_wilders_rsi, sma
 
 import lightgbm as lgb
 from sklearn.metrics import precision_score, recall_score, classification_report
 import shap
 from sklearn.inspection import permutation_importance
+
+
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
+# 1. Limit thread allocation to keep per-core memory low
+os.environ["POLARS_MAX_THREADS"] = "4"
+
+# get_wilders_rsi/sma operate on plain numpy arrays in the original script
+# (np.diff(...) output) — untouched by the pandas->polars switch.
 
 from main.config import (
     LOOKAHEAD_SECONDS, BARRIER_MULTIPLIER, RSI_FILTER_COLUMN, RSI_FILTER_THRESHOLD,
@@ -118,9 +123,31 @@ BAR_FREQ = f"{TIMEFRAME_BARRIER}s"
 USE_ORDERFLOW_FEATURES = True
 EXPORT_PRODUCTION_MODEL = True
 
+# FIX: chunk warm-up buffer, derived from the actual rolling windows this
+# script uses, instead of a fixed "2 hours" guess. A fixed constant is only
+# correct by coincidence -- if TIMEFRAME_BARRIER or any window above changes,
+# 2 hours could silently stop being enough bars of history for a chunk's
+# rolling features to warm up correctly, and you'd get quietly-wrong values
+# with no error (unlike the null-timestamp case, this wouldn't crash -- it'd
+# just be subtly off right after every chunk boundary). All rolling-window
+# features in this module use windows drawn from this list, plus the
+# hardcoded window=10 z-scores (ofi_z, cvd_delta_z, cvd_slope_z,
+# depth_imbalance_z, absorption_z, delta_divergence_z) and window=5
+# (price_roc_5 / rsi_roc_5) -- both included explicitly below since they
+# aren't config constants.
+_KNOWN_BAR_WINDOWS = [
+    RSI_14_WINDOW, RSI_2_WINDOW, SMA_14_WINDOW, DEEPLOB_Z_WINDOW, RSI_Z_WINDOW,
+    MA_SLOPE_WINDOW, PRICE_ROC_WINDOW_3, BARRIER_VOL_BAR_WINDOW,
+    10,  # hardcoded window=10 rolling z-scores
+    5,   # hardcoded window=5 rolling features (price_roc_5 / rsi_roc_5)
+]
+_CHUNK_WARMUP_SAFETY_BARS = 10  # extra margin on top of the largest window found
+CHUNK_WARMUP_BARS = max(_KNOWN_BAR_WINDOWS) + _CHUNK_WARMUP_SAFETY_BARS
+CHUNK_BUFFER_SECONDS = TIMEFRAME_BARRIER * CHUNK_WARMUP_BARS
+
 BARRIER_CHUNK_SIZE = 50_000
-N_RANDOM_SAMPLES = 20
-TEST_BLOCK_SIZE = 2000
+N_RANDOM_SAMPLES = 100
+TEST_BLOCK_SIZE = 300
 EMBARGO_SECONDS = LOOKAHEAD_SECONDS
 CLASS_NAMES = {LABEL_LOSS: 'LOSS', LABEL_WIN: 'WIN'}
 
@@ -128,6 +155,99 @@ VPIN_TARGET_BUCKETS_PER_SESSION = 50
 VPIN_WINDOW_BUCKETS = 10
 VPIN_MIN_PERIODS = 5
 RETAIL_THRESHOLD = 0.05
+
+
+# ============================================================================
+# DATA SOURCE CONFIGURATION
+# ----------------------------------------------------------------------------
+# Flip DATA_FORMAT to switch the entire pipeline (both the time-bounds scan
+# and the per-chunk load) between parquet and csv input files, instead of
+# editing hardcoded paths in __main__.
+# ============================================================================
+DATA_FORMAT = "parquet"  # "parquet" or "csv"
+DATA_DIR = "./research/csv"
+CHUNK_SESSIONS = True
+N_CHUNKS_PER_SESSION = 6
+
+AUTO_CONVERT_CSV_TO_PARQUET = False  # see _ensure_parquet() below
+
+
+def _ensure_parquet(parquet_path: str, csv_fallback_path: str) -> str:
+    """If parquet_path doesn't exist yet but the matching CSV does, convert it
+    ONCE (streaming, so it doesn't require loading the whole file into RAM)
+    and return parquet_path.
+
+    FIX: this is why flipping DATA_FORMAT to "parquet" previously "did
+    nothing" -- the script never converted anything on its own. It just
+    looked for BTCUSDT_orderbook[.suffix].parquet, silently found nothing,
+    and get_session_paths() either skipped that session or (if no parquet
+    files existed anywhere) raised. If you only ever had the .csv exports on
+    disk, there was no parquet source for it to read, full stop. This makes
+    the switch actually take effect the first time; on every later run it's a
+    no-op (the .parquet file already exists) and just returns immediately.
+    """
+    if os.path.exists(parquet_path):
+        return parquet_path
+    if os.path.exists(csv_fallback_path):
+        print(f"  [AUTO-CONVERT] {csv_fallback_path} -> {parquet_path} (one-time, streaming)")
+        pl.scan_csv(csv_fallback_path).sink_parquet(parquet_path)
+    return parquet_path
+
+
+def get_session_paths(data_format: str = DATA_FORMAT) -> list[tuple[str, str, int]]:
+    """Resolve (orderbook_path, trades_path, session_id) for EVERY session found
+    under DATA_DIR for the given format.
+
+    FIX: this replaces the old get_data_paths(), which only ever resolved ONE
+    file pair. ml_state_optimized_csv.py's __main__ trains on THREE independent
+    sessions (BTCUSDT_orderbook[.ext] + _2 + _3), so flipping DATA_FORMAT to
+    "csv" here previously trained on 1/3 the sessions the csv script uses --
+    not an apples-to-apples comparison, and a likely cause of PnL divergence
+    between the two scripts. Add more session files (_4, _5, ...) and they'll
+    be picked up automatically; a session is skipped (with a warning) if
+    either of its two files is missing, instead of raising.
+    """
+    data_format = data_format.lower()
+    if data_format not in ("parquet", "csv"):
+        raise ValueError(f"Unsupported data_format: {data_format!r} (expected 'parquet' or 'csv')")
+
+    session_suffixes = ["", "_2", "_3"]
+    sessions = []
+    for session_id, suffix in enumerate(session_suffixes):
+        orderbook_path = f"{DATA_DIR}/BTCUSDT_orderbook{suffix}.{data_format}"
+        trades_path = f"{DATA_DIR}/BTCUSDT_trades{suffix}.{data_format}"
+
+        if data_format == "parquet" and AUTO_CONVERT_CSV_TO_PARQUET:
+            orderbook_path = _ensure_parquet(orderbook_path, f"{DATA_DIR}/BTCUSDT_orderbook{suffix}.csv")
+            trades_path = _ensure_parquet(trades_path, f"{DATA_DIR}/BTCUSDT_trades{suffix}.csv")
+
+        if os.path.exists(orderbook_path) and os.path.exists(trades_path):
+            sessions.append((orderbook_path, trades_path, session_id))
+        else:
+            print(f"  [SESSION SKIPPED] session_id={session_id}: missing {orderbook_path!r} or {trades_path!r}")
+
+    if not sessions:
+        raise FileNotFoundError(f"No session files found under {DATA_DIR!r} for data_format={data_format!r}")
+    return sessions
+
+
+def _scan_source(path: str) -> pl.LazyFrame:
+    """Lazily scan a data file, dispatching on its extension (.parquet vs .csv)."""
+    return pl.scan_parquet(path) if str(path).endswith(".parquet") else pl.scan_csv(path)
+
+
+def _session_total_volume(trades_path: str) -> float:
+    """Fast full-file lazy sum of traded volume for the WHOLE session, used to
+    size VPIN buckets. FIX: computed ONCE per session here, rather than being
+    re-derived from whatever slice of the session a given chunk happens to
+    see (see compute_orderflow_features). That old per-chunk approach made
+    vpin_bucket_size -- and therefore VPIN's scale -- drift between chunks of
+    the SAME session depending on each chunk's local volume. This is a single
+    lazy aggregate (no full materialization), so it's cheap even for large
+    parquet files."""
+    trades_lazy = _scan_source(trades_path)
+    total = trades_lazy.select(pl.col("amount").sum().cast(pl.Float64)).collect()["amount"][0]
+    return float(total)
 
 
 # ============================================================================
@@ -144,8 +264,9 @@ def dense_resample(df: pl.DataFrame, every: str, agg_exprs: list, time_col: str 
     grid = pl.DataFrame({
         time_col: pl.datetime_range(grid_start, grid_end, interval=every, closed="both", eager=True)
     })
+    sort_columns = [time_col, "timestamp"] if "timestamp" in df.columns else time_col
     agg = (
-        df.sort(time_col)
+        df.sort(sort_columns, maintain_order=True)
           .group_by_dynamic(time_col, every=every, closed="left", label="left")
           .agg(agg_exprs)
     )
@@ -178,8 +299,9 @@ def _pl_rolling_zscore(col: str, window: int) -> pl.Expr:
 # ============================================================================
 # STEP 1a — ORDERFLOW FEATURE COMPUTATION
 # ============================================================================
-def compute_orderflow_features(df_trades: pl.DataFrame, df_orderbook: pl.DataFrame) -> dict:
-    ob = df_orderbook.sort("datetime")
+def compute_orderflow_features(df_trades: pl.DataFrame, df_orderbook: pl.DataFrame,
+                                total_session_volume: float | None = None) -> dict:
+    ob = df_orderbook.sort(["datetime", "timestamp"], maintain_order=True)
     ob = ob.with_columns([
         pl.col("bid_price").shift(1).alias("bid_price_prev"),
         pl.col("ask_price").shift(1).alias("ask_price_prev"),
@@ -204,7 +326,7 @@ def compute_orderflow_features(df_trades: pl.DataFrame, df_orderbook: pl.DataFra
     ofi_1m = dense_resample(ofi_1s, BAR_FREQ, [pl.col("ofi_raw").sum().alias("ofi_1m")], zero_fill_cols=["ofi_1m"])
     ofi_1m = ofi_1m.with_columns(pl.col("ofi_1m").diff().fill_null(0).alias("ofi_diff"))
 
-    trades = df_trades.sort("datetime").with_columns([
+    trades = df_trades.sort(["datetime", "timestamp"], maintain_order=True).with_columns([
         pl.when(pl.col("side") == "buy").then(pl.col("amount")).otherwise(0.0).alias("buy_vol"),
         pl.when(pl.col("side") == "sell").then(pl.col("amount")).otherwise(0.0).alias("sell_vol"),
     ])
@@ -256,12 +378,29 @@ def compute_orderflow_features(df_trades: pl.DataFrame, df_orderbook: pl.DataFra
                .select(["datetime", "tick_autocorr"])
     )
 
-    trades_sorted = trades.sort("datetime")
-    total_session_volume = trades_sorted["amount"].sum()
-    vpin_bucket_size = max(total_session_volume / VPIN_TARGET_BUCKETS_PER_SESSION, EPS)
+    trades_sorted = trades.sort(["datetime", "timestamp"], maintain_order=True)
+    # FIX: use the TRUE full-session volume (passed in by the caller, computed
+    # once via _session_total_volume) when available, rather than this call's
+    # locally-visible volume. When this function is invoked per time-chunk
+    # (see load_and_build_state_space), the local trades frame only spans a
+    # buffered chunk window, not the whole session -- deriving bucket size from
+    # it made vpin_bucket_size (and therefore VPIN's scale) drift chunk to
+    # chunk. Falls back to the local sum when total_session_volume isn't
+    # supplied, which is exactly correct when the whole session is loaded in
+    # one shot (no chunking).
+    session_volume = total_session_volume if total_session_volume is not None else trades_sorted["amount"].sum()
+    vpin_bucket_size = max(session_volume / VPIN_TARGET_BUCKETS_PER_SESSION, EPS)
 
+    # VPIN is order-sensitive. Build bucket totals from ordered cumulative
+    # sums rather than parallel group-by reductions, which otherwise produce
+    # tiny run-to-run floating-point differences on dense CSV sessions.
+    trades_sorted = trades_sorted.with_columns([
+        pl.col("buy_vol").cast(pl.Float64).cum_sum().alias("_cum_buy_vol"),
+        pl.col("sell_vol").cast(pl.Float64).cum_sum().alias("_cum_sell_vol"),
+        pl.col("amount").cast(pl.Float64).cum_sum().alias("_cum_volume"),
+    ])
     trades_sorted = trades_sorted.with_columns(
-        (pl.col("amount").cum_sum() / vpin_bucket_size).cast(pl.Int32).alias("_bucket")
+        (pl.col("_cum_volume") / vpin_bucket_size).cast(pl.Int32).alias("_bucket")
     )
     n_buckets_closed = trades_sorted["_bucket"].n_unique()
     if n_buckets_closed < VPIN_MIN_PERIODS:
@@ -271,13 +410,18 @@ def compute_orderflow_features(df_trades: pl.DataFrame, df_orderbook: pl.DataFra
     vpin_buckets = (
         trades_sorted.group_by("_bucket", maintain_order=True)
         .agg([
-            pl.col("buy_vol").sum(), pl.col("sell_vol").sum(), pl.col("amount").sum(),
+            pl.col("_cum_buy_vol").last(), pl.col("_cum_sell_vol").last(), pl.col("_cum_volume").last(),
             pl.col("datetime").last().alias("bucket_end_time"),
         ])
         .sort("_bucket")
     )
+    vpin_buckets = vpin_buckets.with_columns([
+        (pl.col("_cum_buy_vol") - pl.col("_cum_buy_vol").shift(1).fill_null(0.0)).alias("buy_vol"),
+        (pl.col("_cum_sell_vol") - pl.col("_cum_sell_vol").shift(1).fill_null(0.0)).alias("sell_vol"),
+        (pl.col("_cum_volume") - pl.col("_cum_volume").shift(1).fill_null(0.0)).alias("volume"),
+    ])
     vpin_buckets = vpin_buckets.with_columns(
-        ((pl.col("buy_vol") - pl.col("sell_vol")).abs() / (pl.col("amount") + EPS)).alias("vpin_raw")
+        ((pl.col("buy_vol") - pl.col("sell_vol")).abs() / (pl.col("volume") + EPS)).alias("vpin_raw")
     )
     vpin_buckets = vpin_buckets.with_columns(
         pl.col("vpin_raw").rolling_mean(window_size=VPIN_WINDOW_BUCKETS, min_samples=VPIN_MIN_PERIODS)
@@ -355,38 +499,182 @@ import polars.selectors as cs
 # STEP 1b — Per-session feature pipeline
 # ============================================================================
 
-def load_and_build_state_space(orderbook_path: str, trades_path: str, session_id: int, start_dt=None, end_dt=None) -> pl.DataFrame:
+
+@dataclass(frozen=True)
+class SessionFeatureContext:
+    """Small, session-owned inputs that must not reset at a chunk boundary."""
+
+    total_volume: float
+    rsi_features: pl.DataFrame
+
+
+def _with_datetime(source: pl.LazyFrame) -> pl.LazyFrame:
+    """Normalize source types and expose the shared event-time column."""
+    return (
+        source
+        .cast({cs.float(): pl.Float32, cs.integer() - cs.by_name("timestamp"): pl.Int32})
+        .with_columns(
+            pl.from_epoch((pl.col("timestamp") // 1000).cast(pl.Int64), time_unit="s").alias("datetime")
+        )
+    )
+
+
+def _rsi_features_from_price_bars(price_bars: pl.DataFrame) -> pl.DataFrame:
+    """Compute the recursive RSI family once over a continuous close series."""
+    price_bars = price_bars.sort("datetime")
+    price_clean = price_bars["close"].to_numpy().astype(float)
+    diffs = np.diff(price_clean)
+
+    def _pad_front(arr: np.ndarray, target_len: int) -> np.ndarray:
+        out = np.full(target_len, np.nan)
+        if len(arr):
+            out[-len(arr):] = arr
+        return out
+
+    def _wilders_or_nan(window: int) -> np.ndarray:
+        return get_wilders_rsi(diffs, window) if len(diffs) > window else np.full(len(diffs), np.nan)
+
+    rsi_2 = _pad_front(_wilders_or_nan(RSI_2_WINDOW), len(price_bars))
+    rsi_14_raw = _wilders_or_nan(RSI_14_WINDOW)
+    return price_bars.select("datetime").with_columns([
+        pl.Series("rsi_2", rsi_2, nan_to_null=True),
+        pl.Series("rsi_14", _pad_front(rsi_14_raw, len(price_bars)), nan_to_null=True),
+        pl.Series("sma_14", _pad_front(sma(rsi_14_raw, SMA_14_WINDOW), len(price_bars)), nan_to_null=True),
+    ])
+
+
+def _build_session_rsi_features(orderbook_path: str) -> pl.DataFrame:
+    """Materialize only session-level price bars, never the raw order book.
+
+    Wilder RSI is recursive.  Re-running it on a buffered chunk is an
+    approximation whose error is largest exactly where a new chunk starts.
+    This full-session bar pass makes the RSI family bit-for-bit independent
+    of how the raw event stream is later partitioned.
+    """
+    orderbook = _with_datetime(_scan_source(orderbook_path)).filter(pl.col("datetime").is_not_null())
+    sparse_bars = (
+        orderbook
+        .with_columns(((pl.col("bid_price") + pl.col("ask_price")) / 2).alias("mid_price"))
+        .sort(["datetime", "timestamp"], maintain_order=True)
+        .group_by_dynamic("datetime", every=BAR_FREQ, closed="left", label="left")
+        .agg(pl.col("mid_price").last().alias("close"))
+        .collect(engine="streaming")
+    )
+    price_bars = dense_resample(sparse_bars, BAR_FREQ, [pl.col("close").last().alias("close")])
+    return _rsi_features_from_price_bars(price_bars)
+
+
+def build_session_feature_context(orderbook_path: str, trades_path: str) -> SessionFeatureContext:
+    """Precompute session-scoped feature state shared by every raw-data chunk."""
+    return SessionFeatureContext(
+        total_volume=_session_total_volume(trades_path),
+        rsi_features=_build_session_rsi_features(orderbook_path),
+    )
+
+
+def _session_time_bounds(trades_path: str) -> tuple[_dt.datetime, _dt.datetime]:
+    """Return the source time bounds used to partition an already-built state space."""
+    bounds = _scan_source(trades_path).select([
+        pl.from_epoch((pl.col("timestamp").min() // 1000).cast(pl.Int64), time_unit="s").alias("start"),
+        pl.from_epoch((pl.col("timestamp").max() // 1000).cast(pl.Int64), time_unit="s").alias("end"),
+    ]).collect()
+    return bounds["start"][0], bounds["end"][0]
+
+
+def partition_state_space(state_space: pl.DataFrame, session_start: _dt.datetime,
+                          session_end: _dt.datetime, chunks_per_session: int) -> list[pl.DataFrame]:
+    """Partition an already-built state space.
+
+    Kept for callers that explicitly need post-hoc partitioning. The historical
+    orchestration below no longer uses it for chunked runs because that would
+    require materializing the complete session first.
+    """
+    if chunks_per_session < 1:
+        raise ValueError("chunks_per_session must be at least 1")
+
+    chunk_duration = (session_end - session_start) / chunks_per_session
+    chunks = []
+    for index in range(chunks_per_session):
+        start = session_start + (chunk_duration * index)
+        end = session_start + (chunk_duration * (index + 1))
+        predicate = pl.col("datetime") >= start
+        if index < chunks_per_session - 1:
+            predicate &= pl.col("datetime") < end
+        chunks.append(state_space.filter(predicate))
+    return chunks
+
+
+def load_and_build_state_space(orderbook_path: str, trades_path: str, session_id: int, start_dt=None, end_dt=None,
+                               session_features: SessionFeatureContext | None = None) -> pl.DataFrame:
     # 1. Use LazyFrames
-    df_orderbook = pl.scan_parquet(orderbook_path) if str(orderbook_path).endswith(".parquet") else pl.scan_csv(orderbook_path)
-    df_trades = pl.scan_parquet(trades_path) if str(trades_path).endswith(".parquet") else pl.scan_csv(trades_path)
-
-    # 2. DOWNCAST TO 32-BIT (EXCLUDING TIMESTAMP)
-    # We subtract the timestamp column so it safely remains a 64-bit integer
-    df_orderbook = df_orderbook.cast({cs.float(): pl.Float32, cs.integer() - cs.by_name("timestamp"): pl.Int32})
-    df_trades = df_trades.cast({cs.float(): pl.Float32, cs.integer() - cs.by_name("timestamp"): pl.Int32})
-
-    # 3. Convert timestamps to datetime (reverted back to Int64)
-    df_orderbook = df_orderbook.with_columns(
-        pl.from_epoch((pl.col("timestamp") // 1000).cast(pl.Int64), time_unit="s").alias("datetime")
-    )
-    df_trades = df_trades.with_columns(
-        pl.from_epoch((pl.col("timestamp") // 1000).cast(pl.Int64), time_unit="s").alias("datetime")
-    )
+    df_orderbook = _with_datetime(_scan_source(orderbook_path))
+    df_trades = _with_datetime(_scan_source(trades_path))
 
     # 4. APPLY THE TIME FILTER BEFORE LOADING INTO RAM
     if start_dt and end_dt:
-        buffer_start = start_dt - timedelta(hours=2)
+        # FIX: was a fixed timedelta(hours=2) regardless of what TIMEFRAME_BARRIER
+        # or the feature windows actually are. CHUNK_BUFFER_SECONDS (module level)
+        # is derived from the largest configured rolling window, so it can't
+        # silently fall short of warm-up needs if config.py changes.
+        buffer_start = start_dt - timedelta(seconds=CHUNK_BUFFER_SECONDS)
         df_orderbook = df_orderbook.filter((pl.col("datetime") >= buffer_start) & (pl.col("datetime") < end_dt))
         df_trades = df_trades.filter((pl.col("datetime") >= buffer_start) & (pl.col("datetime") < end_dt))
 
-    df_orderbook = df_orderbook.sort("datetime")
-    df_trades = df_trades.sort("datetime")
+    # 3b. FIX: guard against null/unparseable timestamps. Some source CSVs
+    # have a handful of malformed or blank timestamp rows (an empty field, a
+    # stray header line if two exports got concatenated, an out-of-range
+    # value that silently casts to null on the "// 1000" / cast(Int64) above).
+    # polars' group_by_dynamic() (used throughout dense_resample) hard-errors
+    # on ANY null in the time column -- "null values in dynamic group_by not
+    # supported" -- rather than quietly skipping them the way pandas'
+    # .resample() does. Drop them here, once, with a visible count, instead
+    # of crashing deep inside dense_resample() with no indication of which
+    # rows or how many were the problem.
+    #
+    # FIX (ordering, this pass): moved to run AFTER step 4's time-window
+    # filter instead of before it. On a chunked run this was previously
+    # forcing a full, non-streaming .collect() of the ENTIRE session file's
+    # datetime column on every single chunk (start_dt/end_dt hadn't been
+    # applied yet) -- N_CHUNKS_PER_SESSION redundant full-file
+    # materializations per session, which is what was exhausting RAM on a
+    # multi-GB parquet file. Now it only touches the already-windowed
+    # (buffered chunk) slice. For non-chunked calls (start_dt=None) step 4
+    # above is a no-op, so this is identical to before -- same data, same
+    # counts, same warnings.
+    n_ob_null = df_orderbook.select(pl.col("datetime").is_null().sum()).collect(engine="streaming").item()
+    n_tr_null = df_trades.select(pl.col("datetime").is_null().sum()).collect(engine="streaming").item()
+    if n_ob_null:
+        print(f"  [DATA WARNING] session {session_id}: dropping {n_ob_null} orderbook row(s) "
+              f"with null/unparseable timestamp ({orderbook_path})")
+    if n_tr_null:
+        print(f"  [DATA WARNING] session {session_id}: dropping {n_tr_null} trades row(s) "
+              f"with null/unparseable timestamp ({trades_path})")
+    df_orderbook = df_orderbook.filter(pl.col("datetime").is_not_null())
+    df_trades = df_trades.filter(pl.col("datetime").is_not_null())
+
+    df_orderbook = df_orderbook.sort(["datetime", "timestamp"], maintain_order=True)
+    df_trades = df_trades.sort(["datetime", "timestamp"], maintain_order=True)
     
     df_orderbook = df_orderbook.with_columns(((pl.col("bid_price") + pl.col("ask_price")) / 2).alias("mid_price"))
 
     # 5. Pull only this chunk into memory safely using the new Polars syntax
-    df_orderbook = df_orderbook.collect(engine="streaming")
-    df_trades = df_trades.collect(engine="streaming")
+    # df_orderbook = df_orderbook.collect(engine="streaming")
+    # df_trades = df_trades.collect(engine="streaming")
+
+    temp_ob_path = f"temp_ob_chunk_{session_id}.parquet"
+    temp_tr_path = f"temp_tr_chunk_{session_id}.parquet"
+    
+    df_orderbook.sink_parquet(temp_ob_path)
+    df_trades.sink_parquet(temp_tr_path)
+
+    # Read them back eagerly to feed into dense_resample and numpy arrays
+    df_orderbook = pl.read_parquet(temp_ob_path)
+    df_trades = pl.read_parquet(temp_tr_path)
+
+    # 6. AGGRESSIVE GARBAGE COLLECTION
+    # Clean up the SSD footprint once we have the data in RAM
+    os.remove(temp_ob_path)
+    os.remove(temp_tr_path)
 
     df_ob_1m = dense_resample(
         df_orderbook, BAR_FREQ,
@@ -421,7 +709,11 @@ def load_and_build_state_space(orderbook_path: str, trades_path: str, session_id
     # See module docstring point 3: no zero_fill here
     df_trades_1m = dense_resample(df_trades, BAR_FREQ, [pl.col("amount").sum().alias("volume")])
 
-    feats = compute_orderflow_features(df_trades, df_orderbook)
+    feats = compute_orderflow_features(
+        df_trades,
+        df_orderbook,
+        total_session_volume=session_features.total_volume if session_features else None,
+    )
 
     # 6. AGGRESSIVE GARBAGE COLLECTION (CRITICAL FOR YOUR 16GB RAM)
     # We have our features, so delete the raw massive dataframes before numpy operations start
@@ -433,25 +725,13 @@ def load_and_build_state_space(orderbook_path: str, trades_path: str, session_id
         df_trades_1m.select(["datetime", "volume"]), on="datetime", how="left"
     )
 
-    price_clean = df_price_1m["close"].to_numpy().astype(float)
-    diffs = np.diff(price_clean)
-
-    def _pad_front(arr, target_len):
-        out = np.full(target_len, np.nan)
-        out[-len(arr):] = arr
-        return out
-
-    rsi_2 = _pad_front(get_wilders_rsi(diffs, RSI_2_WINDOW), len(df_price_1m))
-    rsi_14_raw = get_wilders_rsi(diffs, RSI_14_WINDOW)
-    rsi_14 = _pad_front(rsi_14_raw, len(df_price_1m))
-    sma_14 = _pad_front(sma(rsi_14_raw, SMA_14_WINDOW), len(df_price_1m))
-
-    # nan_to_null=True
-    df_price_1m = df_price_1m.with_columns([
-        pl.Series("rsi_2", rsi_2, nan_to_null=True),
-        pl.Series("rsi_14", rsi_14, nan_to_null=True),
-        pl.Series("sma_14", sma_14, nan_to_null=True),
-    ])
+    # A chunk owns raw-event work only.  Recursive RSI belongs to the whole
+    # session; joining its precomputed values prevents a smoothing restart at
+    # every chunk boundary.  The fallback keeps single-shot callers simple.
+    rsi_features = session_features.rsi_features if session_features else _rsi_features_from_price_bars(
+        df_price_1m.select(["datetime", "close"])
+    )
+    df_price_1m = df_price_1m.join(rsi_features, on="datetime", how="left")
 
     df_price_1m = df_price_1m.with_columns(
         pl.col("close").rolling_mean(window_size=MA_SLOPE_WINDOW).alias("_ma_5")
@@ -726,58 +1006,122 @@ def find_debounced_signals(y_proba: np.ndarray, threshold: float, hysteresis: fl
 
 
 # ============================================================================
-# MAIN
+# HISTORICAL STATE-SPACE ORCHESTRATION
+# ============================================================================
+def build_historical_state_space(sessions: list[tuple[str, str, int]] | None = None,
+                                 chunk_sessions: bool = True,
+                                 chunks_per_session: int = 6) -> pl.DataFrame:
+    """Build raw historical state space independently from labeling/modeling.
+
+    The returned frame is the exact input to barrier labeling and walk-forward
+    evaluation. Keeping it separate gives the backtest and live-parity checks
+    one concrete, testable feature boundary.
+    """
+    sessions = sessions if sessions is not None else get_session_paths()
+    print(f"Data source: DATA_FORMAT={DATA_FORMAT!r}, DATA_DIR={DATA_DIR!r}")
+    if chunk_sessions:
+        print(f"CHUNK_SESSIONS=True: computing features continuously per session, "
+              f"then writing {chunks_per_session} state-space partitions")
+    print(f"Found {len(sessions)} session(s): {[sid for _, _, sid in sessions]}")
+
+    chunk_files = []
+    for orderbook_path, trades_path, session_id in sessions:
+        print(f"\n=== Session {session_id}: {orderbook_path}, {trades_path} ===")
+        session_features = build_session_feature_context(orderbook_path, trades_path)
+        print(f"Session {session_id}: precomputed {session_features.rsi_features.height} continuous RSI bars")
+
+        session_start, session_end = _session_time_bounds(trades_path)
+
+        if not chunk_sessions:
+            # Eagerly load the whole session (will spike RAM, but expected if
+            # chunk_sessions=False).
+            session_df = load_and_build_state_space(
+                orderbook_path,
+                trades_path,
+                session_id=session_id,
+                session_features=session_features,
+            )
+            fname = f"state_space_session{session_id}.parquet"
+            session_df.write_parquet(fname)
+            chunk_files.append(fname)
+            print(f"Session {session_id}: {session_df.height} rows -> {fname}")
+            del session_df
+            gc.collect()
+            continue
+
+        # ---- Chunked computation + persistence path ----
+        # IMPORTANT: pass the time boundaries into load_and_build_state_space
+        # so the raw orderbook/trades are windowed BEFORE any eager materialization.
+        # Each chunk includes CHUNK_BUFFER_SECONDS of warm-up history, then trims
+        # back to [start_dt, end_dt) before returning.
+        chunk_duration = (session_end - session_start) / chunks_per_session
+
+        print(f"Session {session_id} time range: {session_start} to {session_end} "
+              f"-> {chunks_per_session} chunks (all sharing session_id={session_id})")
+
+        for i in range(chunks_per_session):
+            start_dt = session_start + (chunk_duration * i)
+            end_dt = session_start + (chunk_duration * (i + 1))
+
+            chunk_df = load_and_build_state_space(
+                orderbook_path,
+                trades_path,
+                session_id=session_id,
+                start_dt=start_dt,
+                end_dt=end_dt,
+                session_features=session_features,
+            )
+
+            fname = f"state_space_session{session_id}_chunk{i}.parquet"
+            # chunk_df is already bounded; sink the final chunk to SSD.
+            chunk_df.lazy().sink_parquet(fname)
+            chunk_files.append(fname)
+
+            print(f"  chunk {i+1} -> {fname}. Wiping memory...")
+            del chunk_df
+            gc.collect()
+
+    print("\nAll sessions processed successfully! Loading final compiled dataset...")
+
+    # Explicit sort by datetime after concatenating sessions -- matches
+    # ml_state_optimized_csv.py's pd.concat([...]).sort_index() exactly.
+    df_state_space = pl.concat([pl.scan_parquet(f).collect() for f in chunk_files]).sort("datetime")
+    print(f"Combined state space: {df_state_space.height} rows across {len(sessions)} session(s)")
+    return df_state_space
+
+
+# ============================================================================
+# MAIN: historical state space -> labels -> walk-forward evaluation
 # ============================================================================
 if __name__ == "__main__":
-    print("Finding time boundaries of the dataset...")
+    # Chunking partitions the finished state space for downstream storage or
+    # transport. Feature calculation itself remains session-continuous.
+    df_state_space = build_historical_state_space(
+        chunk_sessions=CHUNK_SESSIONS,
+        chunks_per_session=N_CHUNKS_PER_SESSION,
+    )
+
+    # ==========================================
+    # ADD THESE LINES TO INSPECT YOUR TABLE
+    # ==========================================
     
-    trades_lazy = pl.scan_parquet("./research/csv/BTCUSDT_trades.parquet")
-    time_bounds = trades_lazy.select([
-        pl.from_epoch((pl.col("timestamp").min() // 1000).cast(pl.Int64), time_unit="s").alias("start"),
-        pl.from_epoch((pl.col("timestamp").max() // 1000).cast(pl.Int64), time_unit="s").alias("end")
-    ]).collect()
+    # 1. Force Polars to show ALL columns instead of truncating them
+    pl.Config.set_tbl_cols(-1)
+    pl.Config.set_tbl_rows(10) # Show 10 rows
     
-    global_start = time_bounds["start"][0]
-    global_end = time_bounds["end"][0]
+    print("\n--- STATE SPACE PREVIEW (FIRST 5 ROWS) ---")
+    print(df_state_space.head(5))
     
-    N_CHUNKS = 6
-    chunk_duration = (global_end - global_start) / N_CHUNKS
+    print("\n--- STATE SPACE SUMMARY STATISTICS ---")
+    # describe() is great for spotting NaN issues or extreme z-scores
+    print(df_state_space.describe())
     
-    print(f"Total time range: {global_start} to {global_end}")
-    print(f"Splitting into {N_CHUNKS} chunks...")
+    print("\n--- STATE SPACE GLIMPSE ---")
+    # glimpse() flips the table sideways, making it very easy to read wide ML datasets
+    print(df_state_space.glimpse())
     
-    for i in range(N_CHUNKS):
-        chunk_start = global_start + (chunk_duration * i)
-        chunk_end = global_start + (chunk_duration * (i + 1))
-        
-        if i == N_CHUNKS - 1:
-            chunk_end = chunk_end + timedelta(minutes=1)
-            
-        print(f"\n--- Processing Chunk {i+1}/{N_CHUNKS} ---")
-        print(f"Timeframe: {chunk_start} to {chunk_end}")
-        
-        chunk_df = load_and_build_state_space(
-            "./research/csv/BTCUSDT_orderbook.parquet", 
-            "./research/csv/BTCUSDT_trades.parquet", 
-            session_id=0,
-            start_dt=chunk_start,
-            end_dt=chunk_end
-        )
-        
-        # FIX: Save each chunk to its own file instead of breaking a single file
-        chunk_filename = f"state_space_chunk_{i}.parquet"
-        chunk_df.write_parquet(chunk_filename)
-                
-        print(f"Chunk {i+1} saved to {chunk_filename}. Wiping memory...")
-        
-        del chunk_df
-        gc.collect()
-        
-    print("\nAll chunks processed successfully! Loading final compiled dataset...")
-    
-    # FIX: Polars will scan the folder and stitch all chunks together seamlessly
-    df_state_space = pl.scan_parquet("state_space_chunk_*.parquet").collect()
-    print(f"Combined state space: {df_state_space.height} rows")
+    # Optional: Reset config back to default so later prints aren't massive
+    pl.Config.set_tbl_cols(8)
     
     # ... [PROCEED WITH YOUR BARRIER LABELING AND LIGHTGBM CODE] ...
 
