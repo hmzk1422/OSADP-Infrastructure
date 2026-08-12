@@ -89,16 +89,25 @@ import numpy as np
 import polars as pl
 from numpy.lib.stride_tricks import sliding_window_view
 from utils.indicators import get_wilders_rsi, sma
+import warnings
 
 import lightgbm as lgb
 from sklearn.metrics import precision_score, recall_score, classification_report
 import shap
 from sklearn.inspection import permutation_importance
-
+from research.ml_state_features import *
+from research.ml_state_features import _session_time_bounds
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
+
+# Suppress sklearn's missing feature names warning
+warnings.filterwarnings(
+    action="ignore",
+    category=UserWarning,
+    message="X does not have valid feature names"
+)
 
 # 1. Limit thread allocation to keep per-core memory low
 os.environ["POLARS_MAX_THREADS"] = "4"
@@ -106,721 +115,7 @@ os.environ["POLARS_MAX_THREADS"] = "4"
 # get_wilders_rsi/sma operate on plain numpy arrays in the original script
 # (np.diff(...) output) — untouched by the pandas->polars switch.
 
-from main.config import (
-    LOOKAHEAD_SECONDS, BARRIER_MULTIPLIER, RSI_FILTER_COLUMN, RSI_FILTER_THRESHOLD,
-    RR_RATIO, TRADE_DIRECTION, TIMEFRAME_BARRIER,
-    RSI_14_WINDOW, RSI_2_WINDOW, SMA_14_WINDOW, DEEPLOB_Z_WINDOW, RSI_Z_WINDOW,
-    MA_SLOPE_WINDOW, PRICE_ROC_WINDOW_3, LABEL_LOSS, LABEL_WIN, FEATURE_COLUMNS,
-    FEE_BPS, ENABLE_SLIPPAGE, MIN_BARRIER_PCT, MAX_BARRIER_PCT, EPS,
-    HYSTERESIS_BUFFER, LOCKOUT_SECONDS, MODEL_PATH,
-)
-try:
-    from main.config import BARRIER_VOL_BAR_WINDOW
-except ImportError:
-    BARRIER_VOL_BAR_WINDOW = 20
-
-BAR_FREQ = f"{TIMEFRAME_BARRIER}s"
-USE_ORDERFLOW_FEATURES = True
-EXPORT_PRODUCTION_MODEL = True
-
-# FIX: chunk warm-up buffer, derived from the actual rolling windows this
-# script uses, instead of a fixed "2 hours" guess. A fixed constant is only
-# correct by coincidence -- if TIMEFRAME_BARRIER or any window above changes,
-# 2 hours could silently stop being enough bars of history for a chunk's
-# rolling features to warm up correctly, and you'd get quietly-wrong values
-# with no error (unlike the null-timestamp case, this wouldn't crash -- it'd
-# just be subtly off right after every chunk boundary). All rolling-window
-# features in this module use windows drawn from this list, plus the
-# hardcoded window=10 z-scores (ofi_z, cvd_delta_z, cvd_slope_z,
-# depth_imbalance_z, absorption_z, delta_divergence_z) and window=5
-# (price_roc_5 / rsi_roc_5) -- both included explicitly below since they
-# aren't config constants.
-_KNOWN_BAR_WINDOWS = [
-    RSI_14_WINDOW, RSI_2_WINDOW, SMA_14_WINDOW, DEEPLOB_Z_WINDOW, RSI_Z_WINDOW,
-    MA_SLOPE_WINDOW, PRICE_ROC_WINDOW_3, BARRIER_VOL_BAR_WINDOW,
-    10,  # hardcoded window=10 rolling z-scores
-    5,   # hardcoded window=5 rolling features (price_roc_5 / rsi_roc_5)
-]
-_CHUNK_WARMUP_SAFETY_BARS = 10  # extra margin on top of the largest window found
-CHUNK_WARMUP_BARS = max(_KNOWN_BAR_WINDOWS) + _CHUNK_WARMUP_SAFETY_BARS
-CHUNK_BUFFER_SECONDS = TIMEFRAME_BARRIER * CHUNK_WARMUP_BARS
-
-BARRIER_CHUNK_SIZE = 50_000
-N_RANDOM_SAMPLES = 100
-TEST_BLOCK_SIZE = 300
-EMBARGO_SECONDS = LOOKAHEAD_SECONDS
-CLASS_NAMES = {LABEL_LOSS: 'LOSS', LABEL_WIN: 'WIN'}
-
-VPIN_TARGET_BUCKETS_PER_SESSION = 50
-VPIN_WINDOW_BUCKETS = 10
-VPIN_MIN_PERIODS = 5
-RETAIL_THRESHOLD = 0.05
-
-
-# ============================================================================
-# DATA SOURCE CONFIGURATION
-# ----------------------------------------------------------------------------
-# Flip DATA_FORMAT to switch the entire pipeline (both the time-bounds scan
-# and the per-chunk load) between parquet and csv input files, instead of
-# editing hardcoded paths in __main__.
-# ============================================================================
-DATA_FORMAT = "parquet"  # "parquet" or "csv"
-DATA_DIR = "./research/csv"
-CHUNK_SESSIONS = True
-N_CHUNKS_PER_SESSION = 6
-
-AUTO_CONVERT_CSV_TO_PARQUET = False  # see _ensure_parquet() below
-
-
-def _ensure_parquet(parquet_path: str, csv_fallback_path: str) -> str:
-    """If parquet_path doesn't exist yet but the matching CSV does, convert it
-    ONCE (streaming, so it doesn't require loading the whole file into RAM)
-    and return parquet_path.
-
-    FIX: this is why flipping DATA_FORMAT to "parquet" previously "did
-    nothing" -- the script never converted anything on its own. It just
-    looked for BTCUSDT_orderbook[.suffix].parquet, silently found nothing,
-    and get_session_paths() either skipped that session or (if no parquet
-    files existed anywhere) raised. If you only ever had the .csv exports on
-    disk, there was no parquet source for it to read, full stop. This makes
-    the switch actually take effect the first time; on every later run it's a
-    no-op (the .parquet file already exists) and just returns immediately.
-    """
-    if os.path.exists(parquet_path):
-        return parquet_path
-    if os.path.exists(csv_fallback_path):
-        print(f"  [AUTO-CONVERT] {csv_fallback_path} -> {parquet_path} (one-time, streaming)")
-        pl.scan_csv(csv_fallback_path).sink_parquet(parquet_path)
-    return parquet_path
-
-
-def get_session_paths(data_format: str = DATA_FORMAT) -> list[tuple[str, str, int]]:
-    """Resolve (orderbook_path, trades_path, session_id) for EVERY session found
-    under DATA_DIR for the given format.
-
-    FIX: this replaces the old get_data_paths(), which only ever resolved ONE
-    file pair. ml_state_optimized_csv.py's __main__ trains on THREE independent
-    sessions (BTCUSDT_orderbook[.ext] + _2 + _3), so flipping DATA_FORMAT to
-    "csv" here previously trained on 1/3 the sessions the csv script uses --
-    not an apples-to-apples comparison, and a likely cause of PnL divergence
-    between the two scripts. Add more session files (_4, _5, ...) and they'll
-    be picked up automatically; a session is skipped (with a warning) if
-    either of its two files is missing, instead of raising.
-    """
-    data_format = data_format.lower()
-    if data_format not in ("parquet", "csv"):
-        raise ValueError(f"Unsupported data_format: {data_format!r} (expected 'parquet' or 'csv')")
-
-    session_suffixes = ["", "_2", "_3"]
-    sessions = []
-    for session_id, suffix in enumerate(session_suffixes):
-        orderbook_path = f"{DATA_DIR}/BTCUSDT_orderbook{suffix}.{data_format}"
-        trades_path = f"{DATA_DIR}/BTCUSDT_trades{suffix}.{data_format}"
-
-        if data_format == "parquet" and AUTO_CONVERT_CSV_TO_PARQUET:
-            orderbook_path = _ensure_parquet(orderbook_path, f"{DATA_DIR}/BTCUSDT_orderbook{suffix}.csv")
-            trades_path = _ensure_parquet(trades_path, f"{DATA_DIR}/BTCUSDT_trades{suffix}.csv")
-
-        if os.path.exists(orderbook_path) and os.path.exists(trades_path):
-            sessions.append((orderbook_path, trades_path, session_id))
-        else:
-            print(f"  [SESSION SKIPPED] session_id={session_id}: missing {orderbook_path!r} or {trades_path!r}")
-
-    if not sessions:
-        raise FileNotFoundError(f"No session files found under {DATA_DIR!r} for data_format={data_format!r}")
-    return sessions
-
-
-def _scan_source(path: str) -> pl.LazyFrame:
-    """Lazily scan a data file, dispatching on its extension (.parquet vs .csv)."""
-    return pl.scan_parquet(path) if str(path).endswith(".parquet") else pl.scan_csv(path)
-
-
-def _session_total_volume(trades_path: str) -> float:
-    """Fast full-file lazy sum of traded volume for the WHOLE session, used to
-    size VPIN buckets. FIX: computed ONCE per session here, rather than being
-    re-derived from whatever slice of the session a given chunk happens to
-    see (see compute_orderflow_features). That old per-chunk approach made
-    vpin_bucket_size -- and therefore VPIN's scale -- drift between chunks of
-    the SAME session depending on each chunk's local volume. This is a single
-    lazy aggregate (no full materialization), so it's cheap even for large
-    parquet files."""
-    trades_lazy = _scan_source(trades_path)
-    total = trades_lazy.select(pl.col("amount").sum().cast(pl.Float64)).collect()["amount"][0]
-    return float(total)
-
-
-# ============================================================================
-# dense_resample — see module docstring point 1.
-# ============================================================================
-def dense_resample(df: pl.DataFrame, every: str, agg_exprs: list, time_col: str = "datetime",
-                    zero_fill_cols: list | None = None, start=None, end=None) -> pl.DataFrame:
-    bounds = df.select(
-        pl.col(time_col).min().dt.truncate(every).alias("_s"),
-        pl.col(time_col).max().dt.truncate(every).alias("_e"),
-    )
-    grid_start = start if start is not None else bounds["_s"][0]
-    grid_end = end if end is not None else bounds["_e"][0]
-    grid = pl.DataFrame({
-        time_col: pl.datetime_range(grid_start, grid_end, interval=every, closed="both", eager=True)
-    })
-    sort_columns = [time_col, "timestamp"] if "timestamp" in df.columns else time_col
-    agg = (
-        df.sort(sort_columns, maintain_order=True)
-          .group_by_dynamic(time_col, every=every, closed="left", label="left")
-          .agg(agg_exprs)
-    )
-    out = grid.join(agg, on=time_col, how="left").sort(time_col)
-    if zero_fill_cols:
-        out = out.with_columns([pl.col(c).fill_null(0) for c in zero_fill_cols])
-    return out
-
-
-def _rolling_autocorr_lag1(values) -> float:
-    """Matches pandas' Series.autocorr(): Pearson corr of x[:-1] vs x[1:]."""
-    x = np.asarray(values, dtype=float)
-    if len(x) <= 5:
-        return 0.0
-    a, b = x[:-1], x[1:]
-    if np.std(a) == 0 or np.std(b) == 0:
-        return 0.0
-    r = np.corrcoef(a, b)[0, 1]
-    return 0.0 if np.isnan(r) else float(r)
-
-
-def _pl_rolling_zscore(col: str, window: int) -> pl.Expr:
-    """Rolling z-score (sample std, ddof=1, NaN->0) — see module docstring
-    point 6. This is a reimplementation, not your real calculate_zscore()."""
-    mean = pl.col(col).rolling_mean(window_size=window, min_samples=window)
-    std = pl.col(col).rolling_std(window_size=window, min_samples=window, ddof=1)
-    return ((pl.col(col) - mean) / (std + EPS)).fill_null(0)
-
-
-# ============================================================================
-# STEP 1a — ORDERFLOW FEATURE COMPUTATION
-# ============================================================================
-def compute_orderflow_features(df_trades: pl.DataFrame, df_orderbook: pl.DataFrame,
-                                total_session_volume: float | None = None) -> dict:
-    ob = df_orderbook.sort(["datetime", "timestamp"], maintain_order=True)
-    ob = ob.with_columns([
-        pl.col("bid_price").shift(1).alias("bid_price_prev"),
-        pl.col("ask_price").shift(1).alias("ask_price_prev"),
-        pl.col("bid_amount").shift(1).alias("bid_amount_prev"),
-        pl.col("ask_amount").shift(1).alias("ask_amount_prev"),
-    ])
-    delta_bid = (
-        pl.when(pl.col("bid_price") > pl.col("bid_price_prev")).then(pl.col("bid_amount"))
-        .when(pl.col("bid_price") < pl.col("bid_price_prev")).then(-pl.col("bid_amount_prev"))
-        .when(pl.col("bid_price") == pl.col("bid_price_prev")).then(pl.col("bid_amount") - pl.col("bid_amount_prev"))
-        .otherwise(0.0)
-    )
-    delta_ask = (
-        pl.when(pl.col("ask_price") < pl.col("ask_price_prev")).then(pl.col("ask_amount"))
-        .when(pl.col("ask_price") > pl.col("ask_price_prev")).then(-pl.col("ask_amount_prev"))
-        .when(pl.col("ask_price") == pl.col("ask_price_prev")).then(pl.col("ask_amount") - pl.col("ask_amount_prev"))
-        .otherwise(0.0)
-    )
-    ob = ob.with_columns((delta_bid - delta_ask).alias("ofi_raw"))
-
-    ofi_1s = dense_resample(ob, "1s", [pl.col("ofi_raw").sum()], zero_fill_cols=["ofi_raw"])
-    ofi_1m = dense_resample(ofi_1s, BAR_FREQ, [pl.col("ofi_raw").sum().alias("ofi_1m")], zero_fill_cols=["ofi_1m"])
-    ofi_1m = ofi_1m.with_columns(pl.col("ofi_1m").diff().fill_null(0).alias("ofi_diff"))
-
-    trades = df_trades.sort(["datetime", "timestamp"], maintain_order=True).with_columns([
-        pl.when(pl.col("side") == "buy").then(pl.col("amount")).otherwise(0.0).alias("buy_vol"),
-        pl.when(pl.col("side") == "sell").then(pl.col("amount")).otherwise(0.0).alias("sell_vol"),
-    ])
-    trades = trades.with_columns((pl.col("buy_vol") - pl.col("sell_vol")).alias("cvd_tick"))
-
-    cvd_1m = dense_resample(trades, BAR_FREQ, [pl.col("cvd_tick").sum().alias("cvd_tick_sum")],
-                             zero_fill_cols=["cvd_tick_sum"])
-    cvd_1m = cvd_1m.with_columns(pl.col("cvd_tick_sum").cum_sum().alias("cvd_1m"))
-    cvd_1m = cvd_1m.with_columns([
-        pl.col("cvd_1m").diff().fill_null(0).alias("cvd_delta_1m"),
-        (pl.col("cvd_1m") - pl.col("cvd_1m").shift(5)).fill_null(0).alias("cvd_slope_5"),
-    ])
-
-    trades = trades.with_columns(pl.col("price").shift(1).alias("price_prev"))
-    trades = trades.with_columns(
-        pl.when(pl.col("price") > pl.col("price_prev")).then(1)
-          .when(pl.col("price") < pl.col("price_prev")).then(-1)
-          .otherwise(0).alias("tick_rule")
-    )
-
-    # pandas grouped by calendar day before resampling; for `every` bins
-    # that divide evenly into a day (as BAR_FREQ does), one dense resample
-    # across the whole span gives the same bar boundaries, so the per-day
-    # loop is skipped here.
-    micro = dense_resample(
-        trades, BAR_FREQ,
-        [
-            pl.col("tick_rule").mean().alias("tick_rule"),
-            pl.col("amount").sum().alias("volume"),
-            pl.col("amount").count().alias("n_trades"),
-            pl.col("price").std(ddof=1).alias("price_volatility"),
-        ],
-        zero_fill_cols=["volume", "n_trades"],
-    )
-    micro = micro.with_columns([
-        (pl.col("n_trades") / 60.0).alias("trade_intensity"),
-        (pl.col("volume") / (pl.col("n_trades") + EPS)).alias("avg_trade_size"),
-    ])
-
-    tick_1s = dense_resample(trades, "1s", [pl.col("tick_rule").last()], zero_fill_cols=["tick_rule"])
-    tick_1m = (
-        tick_1s.sort("datetime")
-               .group_by_dynamic("datetime", every=BAR_FREQ, closed="left", label="left")
-               .agg(pl.col("tick_rule"))
-               .with_columns(
-                   pl.col("tick_rule").map_elements(_rolling_autocorr_lag1, return_dtype=pl.Float64)
-                     .alias("tick_autocorr")
-               )
-               .select(["datetime", "tick_autocorr"])
-    )
-
-    trades_sorted = trades.sort(["datetime", "timestamp"], maintain_order=True)
-    # FIX: use the TRUE full-session volume (passed in by the caller, computed
-    # once via _session_total_volume) when available, rather than this call's
-    # locally-visible volume. When this function is invoked per time-chunk
-    # (see load_and_build_state_space), the local trades frame only spans a
-    # buffered chunk window, not the whole session -- deriving bucket size from
-    # it made vpin_bucket_size (and therefore VPIN's scale) drift chunk to
-    # chunk. Falls back to the local sum when total_session_volume isn't
-    # supplied, which is exactly correct when the whole session is loaded in
-    # one shot (no chunking).
-    session_volume = total_session_volume if total_session_volume is not None else trades_sorted["amount"].sum()
-    vpin_bucket_size = max(session_volume / VPIN_TARGET_BUCKETS_PER_SESSION, EPS)
-
-    # VPIN is order-sensitive. Build bucket totals from ordered cumulative
-    # sums rather than parallel group-by reductions, which otherwise produce
-    # tiny run-to-run floating-point differences on dense CSV sessions.
-    trades_sorted = trades_sorted.with_columns([
-        pl.col("buy_vol").cast(pl.Float64).cum_sum().alias("_cum_buy_vol"),
-        pl.col("sell_vol").cast(pl.Float64).cum_sum().alias("_cum_sell_vol"),
-        pl.col("amount").cast(pl.Float64).cum_sum().alias("_cum_volume"),
-    ])
-    trades_sorted = trades_sorted.with_columns(
-        (pl.col("_cum_volume") / vpin_bucket_size).cast(pl.Int32).alias("_bucket")
-    )
-    n_buckets_closed = trades_sorted["_bucket"].n_unique()
-    if n_buckets_closed < VPIN_MIN_PERIODS:
-        print(f"  [VPIN WARNING] Only {n_buckets_closed} buckets closed this session "
-              f"(need {VPIN_MIN_PERIODS}+) — VPIN will be null/sparse for this session.")
-
-    vpin_buckets = (
-        trades_sorted.group_by("_bucket", maintain_order=True)
-        .agg([
-            pl.col("_cum_buy_vol").last(), pl.col("_cum_sell_vol").last(), pl.col("_cum_volume").last(),
-            pl.col("datetime").last().alias("bucket_end_time"),
-        ])
-        .sort("_bucket")
-    )
-    vpin_buckets = vpin_buckets.with_columns([
-        (pl.col("_cum_buy_vol") - pl.col("_cum_buy_vol").shift(1).fill_null(0.0)).alias("buy_vol"),
-        (pl.col("_cum_sell_vol") - pl.col("_cum_sell_vol").shift(1).fill_null(0.0)).alias("sell_vol"),
-        (pl.col("_cum_volume") - pl.col("_cum_volume").shift(1).fill_null(0.0)).alias("volume"),
-    ])
-    vpin_buckets = vpin_buckets.with_columns(
-        ((pl.col("buy_vol") - pl.col("sell_vol")).abs() / (pl.col("volume") + EPS)).alias("vpin_raw")
-    )
-    vpin_buckets = vpin_buckets.with_columns(
-        pl.col("vpin_raw").rolling_mean(window_size=VPIN_WINDOW_BUCKETS, min_samples=VPIN_MIN_PERIODS)
-          .alias("vpin_smoothed")
-    )
-    # See module docstring point 4 — must bin bucket closes into the bar
-    # grid (dense_resample), not asof-join against bar left edges.
-    vpin_by_bucket_close = vpin_buckets.select(pl.col("bucket_end_time").alias("datetime"), "vpin_smoothed")
-    vpin_lookup = dense_resample(
-        vpin_by_bucket_close, BAR_FREQ, [pl.col("vpin_smoothed").last()]
-    ).with_columns(pl.col("vpin_smoothed").forward_fill())
-
-    trade_size = dense_resample(
-        trades.with_columns([
-            pl.when(pl.col("amount") < RETAIL_THRESHOLD).then(pl.col("buy_vol")).otherwise(0.0).alias("retail_buy"),
-            pl.when(pl.col("amount") < RETAIL_THRESHOLD).then(pl.col("sell_vol")).otherwise(0.0).alias("retail_sell"),
-            pl.when(pl.col("amount") >= RETAIL_THRESHOLD).then(pl.col("buy_vol")).otherwise(0.0).alias("inst_buy"),
-            pl.when(pl.col("amount") >= RETAIL_THRESHOLD).then(pl.col("sell_vol")).otherwise(0.0).alias("inst_sell"),
-        ]),
-        BAR_FREQ,
-        [
-            pl.col("retail_buy").sum(), pl.col("retail_sell").sum(),
-            pl.col("inst_buy").sum(), pl.col("inst_sell").sum(),
-            pl.col("amount").sum().alias("volume"),
-        ],
-        zero_fill_cols=["retail_buy", "retail_sell", "inst_buy", "inst_sell", "volume"],
-    )
-    trade_size = trade_size.with_columns([
-        (pl.col("inst_buy") - pl.col("inst_sell") - (pl.col("retail_buy") - pl.col("retail_sell")))
-            .alias("delta_divergence"),
-        ((pl.col("inst_buy") + pl.col("inst_sell")) / (pl.col("volume") + EPS)).alias("inst_ratio"),
-    ])
-
-    ob_1m_price = dense_resample(
-        ob, BAR_FREQ,
-        [pl.col("bid_price").min().alias("bid_low"), pl.col("ask_price").max().alias("ask_high")],
-    )
-    ob_1m_price = ob_1m_price.with_columns(
-        (pl.col("ask_high") - pl.col("bid_low")).forward_fill().alias("price_range")
-    )
-    abs_ratio = cvd_1m.select(["datetime", "cvd_delta_1m"]).join(
-        ob_1m_price.select(["datetime", "price_range"]), on="datetime", how="left"
-    ).with_columns(
-        (pl.col("cvd_delta_1m") / (pl.col("price_range") + EPS)).alias("abs_ratio_raw")
-    ).select(["datetime", "abs_ratio_raw"])
-
-    ob = ob.with_columns(
-        ((pl.col("bid_amount") - pl.col("ask_amount")) / (pl.col("bid_amount") + pl.col("ask_amount") + EPS))
-            .alias("depth_imbalance")
-    )
-    ob = ob.with_columns(pl.col("depth_imbalance").diff().fill_null(0).alias("depth_imbalance_roc"))
-    ob = ob.with_columns(((pl.col("bid_price") + pl.col("ask_price")) / 2).alias("mid"))
-    ob = ob.with_columns(((pl.col("ask_price") - pl.col("bid_price")) / pl.col("mid") * 10000).alias("spread_bps"))
-    depth_1m = dense_resample(
-        ob, BAR_FREQ,
-        [pl.col("depth_imbalance").last(), pl.col("depth_imbalance_roc").last(), pl.col("spread_bps").last()],
-    )
-
-    return {
-        "ofi_1m": ofi_1m.select(["datetime", "ofi_diff"]),
-        "cvd_1m": cvd_1m.select(["datetime", "cvd_delta_1m", "cvd_slope_5"]),
-        "micro": micro,
-        "vpin_lookup": vpin_lookup,
-        "trade_size": trade_size.select(["datetime", "inst_ratio", "delta_divergence"]),
-        "abs_ratio": abs_ratio,
-        "tick_autocorr": tick_1m,
-        "depth_1m": depth_1m,
-    }
-
-
-from datetime import timedelta
-import polars.selectors as cs
-
-# ============================================================================
-# STEP 1b — Per-session feature pipeline
-# ============================================================================
-
-
-@dataclass(frozen=True)
-class SessionFeatureContext:
-    """Small, session-owned inputs that must not reset at a chunk boundary."""
-
-    total_volume: float
-    rsi_features: pl.DataFrame
-
-
-def _with_datetime(source: pl.LazyFrame) -> pl.LazyFrame:
-    """Normalize source types and expose the shared event-time column."""
-    return (
-        source
-        .cast({cs.float(): pl.Float32, cs.integer() - cs.by_name("timestamp"): pl.Int32})
-        .with_columns(
-            pl.from_epoch((pl.col("timestamp") // 1000).cast(pl.Int64), time_unit="s").alias("datetime")
-        )
-    )
-
-
-def _rsi_features_from_price_bars(price_bars: pl.DataFrame) -> pl.DataFrame:
-    """Compute the recursive RSI family once over a continuous close series."""
-    price_bars = price_bars.sort("datetime")
-    price_clean = price_bars["close"].to_numpy().astype(float)
-    diffs = np.diff(price_clean)
-
-    def _pad_front(arr: np.ndarray, target_len: int) -> np.ndarray:
-        out = np.full(target_len, np.nan)
-        if len(arr):
-            out[-len(arr):] = arr
-        return out
-
-    def _wilders_or_nan(window: int) -> np.ndarray:
-        return get_wilders_rsi(diffs, window) if len(diffs) > window else np.full(len(diffs), np.nan)
-
-    rsi_2 = _pad_front(_wilders_or_nan(RSI_2_WINDOW), len(price_bars))
-    rsi_14_raw = _wilders_or_nan(RSI_14_WINDOW)
-    return price_bars.select("datetime").with_columns([
-        pl.Series("rsi_2", rsi_2, nan_to_null=True),
-        pl.Series("rsi_14", _pad_front(rsi_14_raw, len(price_bars)), nan_to_null=True),
-        pl.Series("sma_14", _pad_front(sma(rsi_14_raw, SMA_14_WINDOW), len(price_bars)), nan_to_null=True),
-    ])
-
-
-def _build_session_rsi_features(orderbook_path: str) -> pl.DataFrame:
-    """Materialize only session-level price bars, never the raw order book.
-
-    Wilder RSI is recursive.  Re-running it on a buffered chunk is an
-    approximation whose error is largest exactly where a new chunk starts.
-    This full-session bar pass makes the RSI family bit-for-bit independent
-    of how the raw event stream is later partitioned.
-    """
-    orderbook = _with_datetime(_scan_source(orderbook_path)).filter(pl.col("datetime").is_not_null())
-    sparse_bars = (
-        orderbook
-        .with_columns(((pl.col("bid_price") + pl.col("ask_price")) / 2).alias("mid_price"))
-        .sort(["datetime", "timestamp"], maintain_order=True)
-        .group_by_dynamic("datetime", every=BAR_FREQ, closed="left", label="left")
-        .agg(pl.col("mid_price").last().alias("close"))
-        .collect(engine="streaming")
-    )
-    price_bars = dense_resample(sparse_bars, BAR_FREQ, [pl.col("close").last().alias("close")])
-    return _rsi_features_from_price_bars(price_bars)
-
-
-def build_session_feature_context(orderbook_path: str, trades_path: str) -> SessionFeatureContext:
-    """Precompute session-scoped feature state shared by every raw-data chunk."""
-    return SessionFeatureContext(
-        total_volume=_session_total_volume(trades_path),
-        rsi_features=_build_session_rsi_features(orderbook_path),
-    )
-
-
-def _session_time_bounds(trades_path: str) -> tuple[_dt.datetime, _dt.datetime]:
-    """Return the source time bounds used to partition an already-built state space."""
-    bounds = _scan_source(trades_path).select([
-        pl.from_epoch((pl.col("timestamp").min() // 1000).cast(pl.Int64), time_unit="s").alias("start"),
-        pl.from_epoch((pl.col("timestamp").max() // 1000).cast(pl.Int64), time_unit="s").alias("end"),
-    ]).collect()
-    return bounds["start"][0], bounds["end"][0]
-
-
-def partition_state_space(state_space: pl.DataFrame, session_start: _dt.datetime,
-                          session_end: _dt.datetime, chunks_per_session: int) -> list[pl.DataFrame]:
-    """Partition an already-built state space.
-
-    Kept for callers that explicitly need post-hoc partitioning. The historical
-    orchestration below no longer uses it for chunked runs because that would
-    require materializing the complete session first.
-    """
-    if chunks_per_session < 1:
-        raise ValueError("chunks_per_session must be at least 1")
-
-    chunk_duration = (session_end - session_start) / chunks_per_session
-    chunks = []
-    for index in range(chunks_per_session):
-        start = session_start + (chunk_duration * index)
-        end = session_start + (chunk_duration * (index + 1))
-        predicate = pl.col("datetime") >= start
-        if index < chunks_per_session - 1:
-            predicate &= pl.col("datetime") < end
-        chunks.append(state_space.filter(predicate))
-    return chunks
-
-
-def load_and_build_state_space(orderbook_path: str, trades_path: str, session_id: int, start_dt=None, end_dt=None,
-                               session_features: SessionFeatureContext | None = None) -> pl.DataFrame:
-    # 1. Use LazyFrames
-    df_orderbook = _with_datetime(_scan_source(orderbook_path))
-    df_trades = _with_datetime(_scan_source(trades_path))
-
-    # 4. APPLY THE TIME FILTER BEFORE LOADING INTO RAM
-    if start_dt and end_dt:
-        # FIX: was a fixed timedelta(hours=2) regardless of what TIMEFRAME_BARRIER
-        # or the feature windows actually are. CHUNK_BUFFER_SECONDS (module level)
-        # is derived from the largest configured rolling window, so it can't
-        # silently fall short of warm-up needs if config.py changes.
-        buffer_start = start_dt - timedelta(seconds=CHUNK_BUFFER_SECONDS)
-        df_orderbook = df_orderbook.filter((pl.col("datetime") >= buffer_start) & (pl.col("datetime") < end_dt))
-        df_trades = df_trades.filter((pl.col("datetime") >= buffer_start) & (pl.col("datetime") < end_dt))
-
-    # 3b. FIX: guard against null/unparseable timestamps. Some source CSVs
-    # have a handful of malformed or blank timestamp rows (an empty field, a
-    # stray header line if two exports got concatenated, an out-of-range
-    # value that silently casts to null on the "// 1000" / cast(Int64) above).
-    # polars' group_by_dynamic() (used throughout dense_resample) hard-errors
-    # on ANY null in the time column -- "null values in dynamic group_by not
-    # supported" -- rather than quietly skipping them the way pandas'
-    # .resample() does. Drop them here, once, with a visible count, instead
-    # of crashing deep inside dense_resample() with no indication of which
-    # rows or how many were the problem.
-    #
-    # FIX (ordering, this pass): moved to run AFTER step 4's time-window
-    # filter instead of before it. On a chunked run this was previously
-    # forcing a full, non-streaming .collect() of the ENTIRE session file's
-    # datetime column on every single chunk (start_dt/end_dt hadn't been
-    # applied yet) -- N_CHUNKS_PER_SESSION redundant full-file
-    # materializations per session, which is what was exhausting RAM on a
-    # multi-GB parquet file. Now it only touches the already-windowed
-    # (buffered chunk) slice. For non-chunked calls (start_dt=None) step 4
-    # above is a no-op, so this is identical to before -- same data, same
-    # counts, same warnings.
-    n_ob_null = df_orderbook.select(pl.col("datetime").is_null().sum()).collect(engine="streaming").item()
-    n_tr_null = df_trades.select(pl.col("datetime").is_null().sum()).collect(engine="streaming").item()
-    if n_ob_null:
-        print(f"  [DATA WARNING] session {session_id}: dropping {n_ob_null} orderbook row(s) "
-              f"with null/unparseable timestamp ({orderbook_path})")
-    if n_tr_null:
-        print(f"  [DATA WARNING] session {session_id}: dropping {n_tr_null} trades row(s) "
-              f"with null/unparseable timestamp ({trades_path})")
-    df_orderbook = df_orderbook.filter(pl.col("datetime").is_not_null())
-    df_trades = df_trades.filter(pl.col("datetime").is_not_null())
-
-    df_orderbook = df_orderbook.sort(["datetime", "timestamp"], maintain_order=True)
-    df_trades = df_trades.sort(["datetime", "timestamp"], maintain_order=True)
-    
-    df_orderbook = df_orderbook.with_columns(((pl.col("bid_price") + pl.col("ask_price")) / 2).alias("mid_price"))
-
-    # 5. Pull only this chunk into memory safely using the new Polars syntax
-    # df_orderbook = df_orderbook.collect(engine="streaming")
-    # df_trades = df_trades.collect(engine="streaming")
-
-    temp_ob_path = f"temp_ob_chunk_{session_id}.parquet"
-    temp_tr_path = f"temp_tr_chunk_{session_id}.parquet"
-    
-    df_orderbook.sink_parquet(temp_ob_path)
-    df_trades.sink_parquet(temp_tr_path)
-
-    # Read them back eagerly to feed into dense_resample and numpy arrays
-    df_orderbook = pl.read_parquet(temp_ob_path)
-    df_trades = pl.read_parquet(temp_tr_path)
-
-    # 6. AGGRESSIVE GARBAGE COLLECTION
-    # Clean up the SSD footprint once we have the data in RAM
-    os.remove(temp_ob_path)
-    os.remove(temp_tr_path)
-
-    df_ob_1m = dense_resample(
-        df_orderbook, BAR_FREQ,
-        [
-            pl.col("mid_price").first().alias("open"),
-            pl.col("mid_price").max().alias("high"),
-            pl.col("mid_price").min().alias("low"),
-            pl.col("mid_price").last().alias("close"),
-            pl.col("bid_price").last().alias("bid_price"),
-            pl.col("ask_price").last().alias("ask_price"),
-            pl.col("bid_amount").sum().alias("bid_amount"),
-            pl.col("ask_amount").sum().alias("ask_amount"),
-        ],
-        zero_fill_cols=["bid_amount", "ask_amount"],
-    )
-    df_ob_1m = df_ob_1m.with_columns((pl.col("ask_price") - pl.col("bid_price")).alias("spread"))
-    df_ob_1m = df_ob_1m.with_columns((pl.col("spread") / pl.col("close")).alias("spread_pct"))
-
-    df_trades = df_trades.with_columns([
-        pl.when(pl.col("side") == "buy").then(pl.col("amount")).otherwise(0.0).alias("buy_vol"),
-        pl.when(pl.col("side") == "sell").then(pl.col("amount")).otherwise(0.0).alias("sell_vol"),
-    ])
-
-    df_micro = dense_resample(
-        df_trades, "1s",
-        [pl.col("price").last(), pl.col("buy_vol").sum(), pl.col("sell_vol").sum()],
-        zero_fill_cols=["buy_vol", "sell_vol"],
-    ).with_columns(pl.col("price").forward_fill())
-    df_micro = df_micro.with_columns((pl.col("buy_vol") - pl.col("sell_vol")).alias("micro_OFI"))
-    df_micro = df_micro.with_columns(pl.col("micro_OFI").rolling_sum(window_size=10).alias("micro_CVD"))
-
-    # See module docstring point 3: no zero_fill here
-    df_trades_1m = dense_resample(df_trades, BAR_FREQ, [pl.col("amount").sum().alias("volume")])
-
-    feats = compute_orderflow_features(
-        df_trades,
-        df_orderbook,
-        total_session_volume=session_features.total_volume if session_features else None,
-    )
-
-    # 6. AGGRESSIVE GARBAGE COLLECTION (CRITICAL FOR YOUR 16GB RAM)
-    # We have our features, so delete the raw massive dataframes before numpy operations start
-    del df_orderbook
-    del df_trades
-    gc.collect()
-
-    df_price_1m = df_ob_1m.select(["datetime", "open", "high", "low", "close", "spread_pct"]).join(
-        df_trades_1m.select(["datetime", "volume"]), on="datetime", how="left"
-    )
-
-    # A chunk owns raw-event work only.  Recursive RSI belongs to the whole
-    # session; joining its precomputed values prevents a smoothing restart at
-    # every chunk boundary.  The fallback keeps single-shot callers simple.
-    rsi_features = session_features.rsi_features if session_features else _rsi_features_from_price_bars(
-        df_price_1m.select(["datetime", "close"])
-    )
-    df_price_1m = df_price_1m.join(rsi_features, on="datetime", how="left")
-
-    df_price_1m = df_price_1m.with_columns(
-        pl.col("close").rolling_mean(window_size=MA_SLOPE_WINDOW).alias("_ma_5")
-    )
-    df_price_1m = df_price_1m.with_columns(pl.col("_ma_5").diff().fill_null(0).alias("ma_slope_5")).drop("_ma_5")
-    df_price_1m = df_price_1m.with_columns(pl.col("ma_slope_5").diff().fill_null(0).alias("ma_accel"))
-    df_price_1m = df_price_1m.with_columns(
-        pl.when(pl.col("ma_accel") > 0).then(1).when(pl.col("ma_accel") < 0).then(-1).otherwise(0)
-          .alias("ma_accel_regime")
-    )
-    df_price_1m = df_price_1m.with_columns(pl.col("close").pct_change(PRICE_ROC_WINDOW_3).alias("price_roc_3"))
-
-    bar_rets = df_price_1m.select(pl.col("close").pct_change().alias("bar_ret"))["bar_ret"]
-    df_price_1m = df_price_1m.with_columns(
-        bar_rets.rolling_std(window_size=BARRIER_VOL_BAR_WINDOW, min_samples=2, ddof=0).alias("bar_vol_std")
-    )
-    df_price_1m = df_price_1m.with_columns(pl.col("close").pct_change(5).alias("price_roc_5"))
-    df_price_1m = df_price_1m.with_columns([
-        pl.col("rsi_2").diff(3).alias("rsi_roc_3"),
-        pl.col("rsi_2").diff(5).alias("rsi_roc_5"),
-    ])
-
-    df_price_1m = df_price_1m.join(
-        feats["depth_1m"].select(["datetime", "spread_bps", "depth_imbalance"]), on="datetime", how="left"
-    ).with_columns([pl.col("spread_bps").fill_null(0), pl.col("depth_imbalance").fill_null(0)])
-    df_price_1m = df_price_1m.with_columns([
-        _pl_rolling_zscore("spread_bps", DEEPLOB_Z_WINDOW).alias("spread_bps_z"),
-        _pl_rolling_zscore("depth_imbalance", 10).alias("depth_imbalance_z"),
-    ]).drop(["spread_bps", "depth_imbalance"])
-
-    rsi_z = df_price_1m.select(_pl_rolling_zscore("rsi_2", RSI_Z_WINDOW).alias("_rsi_z"))["_rsi_z"]
-    df_price_1m = df_price_1m.with_columns((rsi_z * pl.col("ma_slope_5")).alias("rsi_x_ma"))
-
-    df_price_1m = df_price_1m.join(feats["ofi_1m"], on="datetime", how="left").with_columns(
-        pl.col("ofi_diff").fill_null(0)
-    )
-    df_price_1m = df_price_1m.join(feats["cvd_1m"], on="datetime", how="left").with_columns([
-        pl.col("cvd_delta_1m").fill_null(0), pl.col("cvd_slope_5").fill_null(0),
-    ])
-    df_price_1m = df_price_1m.with_columns([
-        _pl_rolling_zscore("ofi_diff", 10).alias("ofi_z"),
-        _pl_rolling_zscore("cvd_delta_1m", 10).alias("cvd_delta_z"),
-        _pl_rolling_zscore("cvd_slope_5", 10).alias("cvd_slope_z"),
-    ]).drop(["ofi_diff", "cvd_delta_1m", "cvd_slope_5"])
-
-    df_price_1m = df_price_1m.join(feats["vpin_lookup"], on="datetime", how="left").with_columns(
-        pl.col("vpin_smoothed").forward_fill().fill_null(0).alias("vpin")
-    ).drop("vpin_smoothed")
-
-    df_price_1m = df_price_1m.join(feats["abs_ratio"], on="datetime", how="left").with_columns(
-        pl.col("abs_ratio_raw").fill_null(0)
-    )
-    df_price_1m = df_price_1m.with_columns(
-        _pl_rolling_zscore("abs_ratio_raw", 10).alias("absorption_z")
-    ).drop("abs_ratio_raw")
-
-    df_price_1m = df_price_1m.join(feats["tick_autocorr"], on="datetime", how="left").with_columns(
-        pl.col("tick_autocorr").fill_null(0)
-    )
-
-    df_price_1m = df_price_1m.join(feats["trade_size"], on="datetime", how="left").with_columns([
-        pl.col("inst_ratio").fill_null(0), pl.col("delta_divergence").fill_null(0),
-    ])
-    df_price_1m = df_price_1m.with_columns(
-        _pl_rolling_zscore("delta_divergence", 10).alias("delta_divergence_z")
-    ).drop("delta_divergence")
-
-    df_micro_shifted = df_micro.with_columns([pl.col(c).shift(1) for c in df_micro.columns if c != "datetime"])
-    macro_cols = [c for c in df_price_1m.columns if c != "datetime"]
-    df_macro_shifted = df_price_1m.with_columns([pl.col(c).shift(1) for c in macro_cols])
-    
-    # See module docstring point 3(b).
-    df_macro_shifted = df_macro_shifted.with_columns(pl.all().forward_fill())
-
-    # See module docstring point 3(a)
-    state_space = df_micro_shifted.sort("datetime").join_asof(
-        df_macro_shifted.sort("datetime"), on="datetime", strategy="backward"
-    )
-    exec_price = df_micro.select(["datetime", pl.col("price").alias("execution_price")])
-    state_space = state_space.join(exec_price, on="datetime", how="left")
-
-    state_space = state_space.drop_nulls()
-    state_space = state_space.with_columns(pl.lit(session_id).alias("session_id"))
-
-    # 7. Trim the overlap buffer before returning
-    if start_dt:
-        state_space = state_space.filter(pl.col("datetime") >= start_dt)
-        
-    return state_space
+from research.ml_shared_config import *
 
 # ============================================================================
 # STEP 3 — TRIPLE BARRIER LABELING (pure numpy — unchanged by the polars
@@ -1089,6 +384,213 @@ def build_historical_state_space(sessions: list[tuple[str, str, int]] | None = N
     print(f"Combined state space: {df_state_space.height} rows across {len(sessions)} session(s)")
     return df_state_space
 
+def _session_expr() -> pl.Expr:
+    minute_of_day = pl.col("datetime").dt.hour() * 60 + pl.col("datetime").dt.minute()
+    expr = pl.when(minute_of_day < SESSION_BOUNDS[0][2]).then(pl.lit(SESSION_BOUNDS[0][0]))
+    for label, _, hi in SESSION_BOUNDS[1:]:
+        expr = expr.when(minute_of_day < hi).then(pl.lit(label))
+    return expr.otherwise(pl.lit(SESSION_BOUNDS[-1][0]))
+ 
+ 
+def _pwe(ret: pl.Series) -> float:
+    """Win-rate-weighted expectancy in R. See module docstring point 2."""
+    r = ret.to_numpy()
+    if len(r) == 0:
+        return float("nan")
+    wins, losses = r[r > 0], r[r < 0]
+    win_rate = len(wins) / len(r)
+    loss_rate = len(losses) / len(r)
+    avg_win = wins.mean() if len(wins) else 0.0
+    avg_loss = losses.mean() if len(losses) else 0.0  # negative
+    return float(win_rate * avg_win + loss_rate * avg_loss)
+ 
+ 
+def _sortino(ret: pl.Series, mar: float = 0.0) -> float:
+    """Raw (non-annualized) per-trade Sortino. See module docstring point 3."""
+    r = ret.to_numpy()
+    if len(r) == 0:
+        return float("nan")
+    downside = np.minimum(0.0, r - mar)
+    downside_dev = np.sqrt(np.mean(downside ** 2))
+    if downside_dev == 0:
+        return float("nan")
+    return float((r.mean() - mar) / downside_dev)
+ 
+ 
+def session_regime_breakdown(trade_df: pl.DataFrame,
+                              threshold: float | None = None) -> tuple[pl.DataFrame, pl.DataFrame]:
+    """
+    trade_df: must have `datetime` (Datetime) and `ret` (float) columns --
+        e.g. master_trade_df from STEP 10 of the main script.
+    threshold: if trade_df has a `threshold` column (master_trade_df pools
+        every tracked threshold together) and you only want one production
+        threshold's trades, pass it here to filter first. If trade_df is
+        already filtered to a single threshold, leave this None.
+ 
+    Returns (stats_df, count_df):
+        stats_df  -- rows: Weekend (PWE), Weekday (PWE), Weekend (Sortino),
+                     Weekday (Sortino); columns: Regime/Hour + one per session.
+        count_df  -- rows: Weekend, Weekday; columns: Regime/Hour + one per session.
+    """
+    df = trade_df
+    if threshold is not None and "threshold" in df.columns:
+        df = df.filter(pl.col("threshold") == threshold)
+ 
+    df = df.with_columns([
+        _session_expr().alias("session"),
+        pl.col("datetime").dt.weekday().alias("_iso_weekday"),  # polars: Mon=1..Sun=7
+    ]).with_columns(
+        pl.when(pl.col("_iso_weekday") >= 6).then(pl.lit("Weekend"))
+          .otherwise(pl.lit("Weekday")).alias("regime")
+    ).drop("_iso_weekday")
+ 
+    pwe_rows, sortino_rows, count_rows = [], [], []
+    for regime in ("Weekend", "Weekday"):
+        pwe_row = {"Regime/Hour": f"{regime} (PWE)"}
+        sortino_row = {"Regime/Hour": f"{regime} (Sortino)"}
+        count_row = {"Regime/Hour": regime}
+        for session in SESSION_ORDER:
+            bucket = df.filter((pl.col("regime") == regime) & (pl.col("session") == session))
+            rets = bucket["ret"]
+            pwe_row[session] = _pwe(rets)
+            sortino_row[session] = _sortino(rets)
+            count_row[session] = bucket.height
+        pwe_rows.append(pwe_row)
+        sortino_rows.append(sortino_row)
+        count_rows.append(count_row)
+ 
+    # Screenshot order: Weekend(PWE), Weekday(PWE), Weekend(Sortino), Weekday(Sortino)
+    stats_df = pl.DataFrame([pwe_rows[0], pwe_rows[1], sortino_rows[0], sortino_rows[1]])
+    count_df = pl.DataFrame(count_rows)
+    return stats_df, count_df
+ 
+ 
+def print_regime_report(stats_df: pl.DataFrame, count_df: pl.DataFrame) -> None:
+    label_w, col_w = 22, 24
+ 
+    def _fmt(v, is_count: bool) -> str:
+        if is_count:
+            return str(v)
+        if v is None or (isinstance(v, float) and np.isnan(v)):
+            return "n/a"
+        return f"{v:.2f}"
+ 
+    def _print_table(df: pl.DataFrame, title: str, is_count: bool) -> None:
+        print(f"\n{title}")
+        header = f"{'Regime/Hour':<{label_w}}" + "".join(f"{c:<{col_w}}" for c in SESSION_ORDER)
+        print(header)
+        print("-" * len(header))
+        for row in df.iter_rows(named=True):
+            line = f"{row['Regime/Hour']:<{label_w}}"
+            for c in SESSION_ORDER:
+                line += f"{_fmt(row[c], is_count):<{col_w}}"
+            print(line)
+ 
+    _print_table(stats_df, "Production-Grade Live Execution (Statistic)", is_count=False)
+    _print_table(count_df, "Production-Grade Live Execution (Trade Count)", is_count=True)
+
+from polars.testing import assert_frame_equal
+
+def test_chunking_loss(
+    df_chunked: pl.DataFrame,
+    df_unchunked: pl.DataFrame,
+    key: str = "datetime",
+    float_tolerance: float = 1e-9,
+    max_row_diff: int = 5,            # absolute number of missing/extra rows to tolerate
+    max_row_diff_pct: float = 0.001,  # ...or as a fraction of total rows, whichever is looser
+) -> bool:
+    """
+    Tests if the state space composed from chunked processing matches unchunked
+    processing. Tolerates a small number of missing/extra rows (e.g. chunk-boundary
+    clipping) and, when values differ, reports every offending column instead of
+    stopping at the first one.
+
+    Returns:
+        bool: True if lossless (or within tolerance), False if lossy.
+    """
+    print("Beginning lossy validation check...")
+
+    # 1. Row count check, with tolerance
+    n_chunked, n_unchunked = df_chunked.height, df_unchunked.height
+    row_diff = abs(n_chunked - n_unchunked)
+    row_diff_pct = row_diff / max(n_chunked, n_unchunked)
+
+    if row_diff > max_row_diff and row_diff_pct > max_row_diff_pct:
+        print(f"[FAIL] Row count mismatch too large: Chunked ({n_chunked}) vs "
+              f"Unchunked ({n_unchunked}), diff={row_diff}")
+        return False
+    elif row_diff > 0:
+        print(f"[WARN] Row count differs by {row_diff} "
+              f"({row_diff_pct:.4%}) — within tolerance, checking overlap...")
+
+    # 2. Schema check
+    if df_chunked.schema != df_unchunked.schema:
+        print("[FAIL] Schema mismatch between dataframes.")
+        print(f"  chunked only: {set(df_chunked.schema) - set(df_unchunked.schema)}")
+        print(f"  unchunked only: {set(df_unchunked.schema) - set(df_chunked.schema)}")
+        return False
+
+    # 3. Identify which keys are missing on either side
+    chunked_keys = set(df_chunked[key])
+    unchunked_keys = set(df_unchunked[key])
+    missing_from_chunked = unchunked_keys - chunked_keys
+    missing_from_unchunked = chunked_keys - unchunked_keys
+
+    if missing_from_chunked:
+        print(f"[INFO] {len(missing_from_chunked)} row(s) present in unchunked "
+              f"but missing from chunked, e.g. {sorted(missing_from_chunked)[:5]}")
+    if missing_from_unchunked:
+        print(f"[INFO] {len(missing_from_unchunked)} row(s) present in chunked "
+              f"but missing from unchunked, e.g. {sorted(missing_from_unchunked)[:5]}")
+
+    # 4. Align by key (not position) over the overlap only
+    overlap_keys = chunked_keys & unchunked_keys
+    df_c = df_chunked.filter(pl.col(key).is_in(overlap_keys)).sort(key)
+    df_u = df_unchunked.filter(pl.col(key).is_in(overlap_keys)).sort(key)
+
+    print(f"Comparing {df_c.height} overlapping rows with float tolerance {float_tolerance}...")
+
+    # 5. Check every column, don't stop at the first failure
+    bad_cols = {}
+    for col in df_c.columns:
+        if col == key:
+            continue
+        try:
+            assert_frame_equal(
+                df_c.select(col), df_u.select(col),
+                check_exact=False,
+                rel_tol=float_tolerance,
+                abs_tol=float_tolerance,
+            )
+        except AssertionError:
+            if df_c[col].dtype.is_numeric():
+                diff = (df_c[col] - df_u[col]).abs()
+                bad_cols[col] = {
+                    "max_abs_diff": diff.max(),
+                    "n_mismatched": (diff > float_tolerance).sum(),
+                    "first_bad_idx": diff.arg_max(),
+                }
+            else:
+                mismatched = (df_c[col] != df_u[col])
+                bad_cols[col] = {
+                    "n_mismatched": mismatched.sum(),
+                    "first_bad_idx": mismatched.arg_max(),
+                }
+
+    if bad_cols:
+        print("\n[FAIL] Value mismatches found:")
+        for col, info in bad_cols.items():
+            parts = ", ".join(f"{k}={v:.6g}" if isinstance(v, float) else f"{k}={v}"
+                               for k, v in info.items())
+            print(f"  {col}: {parts}")
+        return False
+
+    if missing_from_chunked or missing_from_unchunked:
+        print(f"[SUCCESS*] Overlapping data matches; {row_diff} row(s) differ in "
+              f"presence, within tolerance ({max_row_diff} rows / {max_row_diff_pct:.3%}).")
+    else:
+        print("[SUCCESS] Data is perfectly lossless. Chunked matches unchunked.")
+    return True
 
 # ============================================================================
 # MAIN: historical state space -> labels -> walk-forward evaluation
@@ -1096,11 +598,25 @@ def build_historical_state_space(sessions: list[tuple[str, str, int]] | None = N
 if __name__ == "__main__":
     # Chunking partitions the finished state space for downstream storage or
     # transport. Feature calculation itself remains session-continuous.
-    df_state_space = build_historical_state_space(
-        chunk_sessions=CHUNK_SESSIONS,
-        chunks_per_session=N_CHUNKS_PER_SESSION,
-    )
-
+    df_state_space = []
+    if DATA_FORMAT == "csv":
+        df_baseline = build_historical_state_space(chunk_sessions=False)
+    
+        df_state_space = build_historical_state_space(
+            chunk_sessions=True,
+            chunks_per_session=N_CHUNKS_PER_SESSION,
+        )
+        is_lossless = test_chunking_loss(df_state_space, df_baseline)
+    
+        if not is_lossless:
+            print("WARNING: Chunking logic is leaking or altering data.")
+        else:
+            print("Proceeding with walk-forward evaluation on validated data...")
+    else:
+        df_state_space = build_historical_state_space(
+            chunk_sessions=CHUNK_SESSIONS,
+            chunks_per_session=N_CHUNKS_PER_SESSION,
+        )
     # ==========================================
     # ADD THESE LINES TO INSPECT YOUR TABLE
     # ==========================================
@@ -1154,10 +670,6 @@ if __name__ == "__main__":
     # ------------------------------------------------------------------
     # STEP 4 — Features / target configuration
     # ------------------------------------------------------------------
-    ORDERFLOW_FEATURE_COLUMNS = [
-        'ofi_z', 'cvd_delta_z', 'cvd_slope_z', 'vpin', 'absorption_z',
-        'tick_autocorr', 'inst_ratio', 'delta_divergence_z', 'depth_imbalance_z',
-    ]
     if USE_ORDERFLOW_FEATURES:
         features = list(FEATURE_COLUMNS) + [
             c for c in ORDERFLOW_FEATURE_COLUMNS if c in df_training_zone.columns
@@ -1255,7 +767,7 @@ if __name__ == "__main__":
         clf = lgb.LGBMClassifier(
             n_estimators=200, learning_rate=0.01, max_depth=3, num_leaves=31,
             min_child_samples=20, subsample=0.8, colsample_bytree=0.8,
-            class_weight='balanced', random_state=42, n_jobs=-1, verbose=-1,
+            class_weight='balanced', random_state=42, n_jobs=1, verbose=-1,
         )
         clf.fit(X_train, y_train)
 
@@ -1323,22 +835,26 @@ if __name__ == "__main__":
             next_available_time = np.datetime64('1677-01-01')  # numpy datetime64 min-ish sentinel
             lockout_enabled = LOCKOUT_SECONDS > 0
 
+            rejected_lockout = rejected_barrier = passed = 0
             for local_idx in signal_indices:
                 global_idx = test_idx[local_idx]
                 actual_global_time = datetimes[global_idx]
-
                 if lockout_enabled and actual_global_time < next_available_time:
+                    rejected_lockout += 1
                     continue
-
                 row_barrier_pct = stop_barrier_arr[global_idx]
                 if not (MIN_BARRIER_PCT <= row_barrier_pct <= MAX_BARRIER_PCT):
+                    rejected_barrier += 1
                     continue
+                passed += 1
 
                 non_overlapping_idx.append(global_idx)
 
                 if lockout_enabled:
                     trade_duration_seconds = int(bars_to_exit_arr[global_idx]) + 1
                     next_available_time = actual_global_time + np.timedelta64(trade_duration_seconds, 's')
+            print(f"t={t:.2f} fold={fold}: raw_crossings={len(signal_indices)} "
+            f"lockout_rejected={rejected_lockout} barrier_pct_rejected={rejected_barrier} passed={passed}")
 
             num_trades = len(non_overlapping_idx)
 
@@ -1430,7 +946,6 @@ if __name__ == "__main__":
     print(f"{'Thresh':<8} | {'Trades':<8} | {'Win%':<8} | {'RR':<6} | {'Overall Exp':<12} | {'Exp CVaR (5%)':<14} | {'Stable (CVaR>0)':<16} | {'Total R'}")
     print("-" * 140)
 
-    ROLLING_WINDOW = 30
 
     for t in thresholds_to_track:
         if len(trade_log[t]) == 0:
@@ -1465,6 +980,7 @@ if __name__ == "__main__":
     print("-" * 140)
     print(f"Note: 'Exp CVaR (5%)' = avg R per trade during worst 5% of {ROLLING_WINDOW}-trade streaks.")
 
+    
     # ------------------------------------------------------------------
     # STEP 10 — Out-of-Sample PnL Chart
     # ------------------------------------------------------------------
@@ -1495,6 +1011,7 @@ if __name__ == "__main__":
     if all_trades_frames:
         master_trade_df = pl.concat(all_trades_frames)
         master_trade_df.write_csv("walk_forward_trade_log_v3.csv")
+
         print("Full trade log saved to: walk_forward_trade_log_v3.csv")
 
     fig.add_hline(y=0, line_dash="dash", line_color="black", opacity=0.5)
@@ -1532,6 +1049,9 @@ if __name__ == "__main__":
             best_rr, best_rr_threshold = rr_arr.mean(), t
     if best_rr_threshold is not None:
         print(f"Best mean out-of-sample RR across folds: {best_rr:.2f} at {prob_label} >= {best_rr_threshold:.2f}")
+        production_threshold = round(float(best_rr_threshold), 2)  # or a fixed CONFIDENCE_THRESHOLD
+        stats_df, count_df = session_regime_breakdown(master_trade_df, threshold=production_threshold)
+        print_regime_report(stats_df, count_df)
 
     for t in thresholds_to_track:
         if len(trade_log[t]) > 0:
@@ -1598,3 +1118,4 @@ if __name__ == "__main__":
         print("Use the walk-forward table above for that; this step only produces")
         print("the artifact executor.py should load.")
         print("=" * 70)
+        
