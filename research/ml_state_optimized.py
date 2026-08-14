@@ -83,6 +83,7 @@ import os
 import json
 import datetime as _dt
 import gc
+import atexit
 from dataclasses import dataclass
 
 import numpy as np
@@ -95,8 +96,8 @@ import lightgbm as lgb
 from sklearn.metrics import precision_score, recall_score, classification_report
 import shap
 from sklearn.inspection import permutation_importance
-from research.ml_state_features import *
-from research.ml_state_features import _session_time_bounds
+from research.ml_state_builder import *
+from research.ml_state_builder import _session_time_bounds
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 if PROJECT_ROOT not in sys.path:
@@ -385,12 +386,14 @@ def build_historical_state_space(sessions: list[tuple[str, str, int]] | None = N
     return df_state_space
 
 def _session_expr() -> pl.Expr:
-    minute_of_day = pl.col("datetime").dt.hour() * 60 + pl.col("datetime").dt.minute()
+    minute_of_day = (
+        pl.col("datetime").dt.hour().cast(pl.Int32) * 60
+        + pl.col("datetime").dt.minute().cast(pl.Int32)
+    )
     expr = pl.when(minute_of_day < SESSION_BOUNDS[0][2]).then(pl.lit(SESSION_BOUNDS[0][0]))
     for label, _, hi in SESSION_BOUNDS[1:]:
         expr = expr.when(minute_of_day < hi).then(pl.lit(label))
     return expr.otherwise(pl.lit(SESSION_BOUNDS[-1][0]))
- 
  
 def _pwe(ret: pl.Series) -> float:
     """Win-rate-weighted expectancy in R. See module docstring point 2."""
@@ -593,9 +596,84 @@ def test_chunking_loss(
     return True
 
 # ============================================================================
+# REPORT LOGGING — mirror everything printed to the console into a single
+# Markdown file, so an AI (or a human) can read the full run later without
+# re-executing it. This is a stdout tee: it does NOT touch any of the
+# print() calls above/below — it just duplicates whatever they write.
+# ============================================================================
+class _TeeToMarkdown:
+    """
+    Wraps the real stdout. Every .write() call is sent to the console AND
+    appended to a Markdown file, inside a single fenced code block so the
+    aligned tables / dataframe reprs / progress lines stay readable as-is.
+    """
+    def __init__(self, filepath: str, console_stream):
+        self.console = console_stream
+        self._closed = False
+        self.filepath = filepath
+        self.md_file = open(filepath, "w", encoding="utf-8")
+        self.md_file.write("# Walk-Forward Backtest Report\n\n")
+        self.md_file.write(f"_Generated: {_dt.datetime.now(_dt.timezone.utc).isoformat()}_\n\n")
+        self.md_file.write(f"_Script: `{os.path.basename(__file__)}`_\n\n")
+        self.md_file.write("```text\n")
+
+    def write(self, text):
+        self.console.write(text)
+        self.md_file.write(text)
+        return len(text)
+
+    def flush(self):
+        self.console.flush()
+        self.md_file.flush()
+
+    def isatty(self):
+        return False
+
+    def close(self):
+        if self._closed:
+            return
+        self._closed = True
+        self.md_file.write("\n```\n")
+        self.md_file.close()
+
+
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def _start_report_capture(filepath: str = None):
+    """Redirect sys.stdout through _TeeToMarkdown. Call once, at the top of
+    the run. Cleanup is registered via atexit so the file is always closed
+    and flushed to disk — including on an uncaught exception or Ctrl-C.
+
+    Defaults to <script's own directory>/backtest_report_v3.md, NOT the
+    current working directory — so it lands next to this .py file no matter
+    where you launch the run from. Override with BACKTEST_REPORT_PATH."""
+    if filepath is None:
+        filepath = os.environ.get(
+            "BACKTEST_REPORT_PATH",
+            os.path.join(_SCRIPT_DIR, "backtest_report_v3.md"),
+        )
+    tee = _TeeToMarkdown(filepath, sys.stdout)
+    sys.stdout = tee
+
+    def _cleanup():
+        sys.stdout = tee.console
+        tee.close()
+        print(f"[report] Full run report written to: {os.path.abspath(filepath)}")
+
+    atexit.register(_cleanup)
+    return tee
+
+
+# ============================================================================
 # MAIN: historical state space -> labels -> walk-forward evaluation
 # ============================================================================
 if __name__ == "__main__":
+    # Everything printed from here on (including polars' own DataFrame
+    # reprs, the walk-forward progress lines, the feature-importance table,
+    # and the final summary) is mirrored into REPORT.md as well as stdout.
+    _start_report_capture()
+
     # Chunking partitions the finished state space for downstream storage or
     # transport. Feature calculation itself remains session-continuous.
     df_state_space = []
@@ -624,6 +702,9 @@ if __name__ == "__main__":
     # 1. Force Polars to show ALL columns instead of truncating them
     pl.Config.set_tbl_cols(-1)
     pl.Config.set_tbl_rows(10) # Show 10 rows
+
+    print("\n--- DEBUG: hour distribution right after state-space build ---")
+    print(df_state_space["datetime"].dt.hour().value_counts().sort("datetime"))
     
     print("\n--- STATE SPACE PREVIEW (FIRST 5 ROWS) ---")
     print(df_state_space.head(5))
@@ -659,6 +740,9 @@ if __name__ == "__main__":
     print(f"Label distribution (full dataset): {label_counts_dict}")
 
     df_training_zone = df_state_space.filter(pl.col(RSI_FILTER_COLUMN) < RSI_FILTER_THRESHOLD)
+
+    print("\n--- DEBUG: hour distribution after RSI hunting-zone filter ---")
+    print(df_training_zone["datetime"].dt.hour().value_counts().sort("datetime"))
     print(f"Total rows in hunting zone: {df_training_zone.height}")
     hz_counts = (
         df_training_zone.group_by("target").len()
@@ -1011,6 +1095,8 @@ if __name__ == "__main__":
     if all_trades_frames:
         master_trade_df = pl.concat(all_trades_frames)
         master_trade_df.write_csv("walk_forward_trade_log_v3.csv")
+        print("\n--- DEBUG: hour distribution in final trade log ---")
+        print(master_trade_df["datetime"].dt.hour().value_counts().sort("datetime"))
 
         print("Full trade log saved to: walk_forward_trade_log_v3.csv")
 
@@ -1042,17 +1128,18 @@ if __name__ == "__main__":
         if len(p_arr) > 0:
             print(f"  {CLASS_NAMES[lbl]:<8} class precision (argmax): {p_arr.mean():.2%} ± {p_arr.std():.2%} across folds")
 
-    best_rr_threshold, best_rr = None, -np.inf
+    best_threshold, most_trades = None, -1
     for t in thresholds_to_track:
-        rr_arr = np.array([r for r in fold_metrics[t]['rrs'] if not np.isnan(r)])
-        if len(rr_arr) > 0 and rr_arr.mean() > best_rr:
-            best_rr, best_rr_threshold = rr_arr.mean(), t
-    if best_rr_threshold is not None:
-        print(f"Best mean out-of-sample RR across folds: {best_rr:.2f} at {prob_label} >= {best_rr_threshold:.2f}")
-        production_threshold = round(float(best_rr_threshold), 2)  # or a fixed CONFIDENCE_THRESHOLD
+        n_trades = len(trade_log[t])
+        if n_trades > most_trades:
+            most_trades, best_threshold = n_trades, t
+
+    if best_threshold is not None:
+        print(f"Threshold with most out-of-sample trades: {most_trades} trades at {prob_label} >= {best_threshold:.2f}")
+        production_threshold = round(float(best_threshold), 2)
         stats_df, count_df = session_regime_breakdown(master_trade_df, threshold=production_threshold)
         print_regime_report(stats_df, count_df)
-
+        
     for t in thresholds_to_track:
         if len(trade_log[t]) > 0:
             returns = np.array([x[1] for x in trade_log[t]], dtype=float)
@@ -1118,4 +1205,3 @@ if __name__ == "__main__":
         print("Use the walk-forward table above for that; this step only produces")
         print("the artifact executor.py should load.")
         print("=" * 70)
-        
