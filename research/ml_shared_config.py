@@ -28,7 +28,7 @@ CHUNK_WARMUP_BARS = max(KNOWN_BAR_WINDOWS) + _CHUNK_WARMUP_SAFETY_BARS
 CHUNK_BUFFER_SECONDS = TIMEFRAME_BARRIER * CHUNK_WARMUP_BARS
 
 BARRIER_CHUNK_SIZE = 50_000
-N_RANDOM_SAMPLES = 15
+N_RANDOM_SAMPLES = 100
 TEST_BLOCK_SIZE = 150
 EMBARGO_SECONDS = LOOKAHEAD_SECONDS
 CLASS_NAMES = {LABEL_LOSS: 'LOSS', LABEL_WIN: 'WIN'}
@@ -51,9 +51,9 @@ ORDERFLOW_FEATURE_COLUMNS = [
 # and the per-chunk load) between parquet and csv input files, instead of
 # editing hardcoded paths in __main__.
 # ============================================================================
-DATA_FORMAT = "csv"  # "parquet" or "csv"
+DATA_FORMAT = "parquet"  # "parquet" or "csv"
 DATA_DIR = "./research/csv"
-CHUNK_SESSIONS = False
+CHUNK_SESSIONS = True
 N_CHUNKS_PER_SESSION = 6
 
 AUTO_CONVERT_CSV_TO_PARQUET = False  # see _ensure_parquet() below
