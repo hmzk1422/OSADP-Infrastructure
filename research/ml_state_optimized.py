@@ -381,7 +381,7 @@ def build_historical_state_space(sessions: list[tuple[str, str, int]] | None = N
 
     # Explicit sort by datetime after concatenating sessions -- matches
     # ml_state_optimized_csv.py's pd.concat([...]).sort_index() exactly.
-    df_state_space = pl.concat([pl.scan_parquet(f).collect() for f in chunk_files]).sort("datetime")
+    df_state_space = pl.concat([pl.scan_parquet(f) for f in chunk_files]).sort("datetime").collect()
     print(f"Combined state space: {df_state_space.height} rows across {len(sessions)} session(s)")
     return df_state_space
 
@@ -740,6 +740,42 @@ if __name__ == "__main__":
     print(f"Label distribution (full dataset): {label_counts_dict}")
 
     df_training_zone = df_state_space.filter(pl.col(RSI_FILTER_COLUMN) < RSI_FILTER_THRESHOLD)
+    # --------------------------------------------------------------------
+    # Two-sided directional hunting zone (layered on top of the model):
+    #   LONG setup : RSI(2) < 30            AND ma_accel_EWA3 > 0
+    #   SHORT setup: RSI(2) > 70 (=100-30)  AND ma_accel_EWA3 < 0
+    # Once the zone is resolved, TRADE_DIRECTION inverts the whole rule:
+    #   'short' flips a LONG setup to an actual SHORT and a SHORT setup to a
+    #   LONG (mirrors the executor's fade/snapback inversion).
+    rsi_high_thr = 100 - RSI_FILTER_THRESHOLD  # 70
+    if ENABLE_RSI_ACCEL_FILTER:
+        # NEW: two-sided directional hunting zone (RSI + ma_accel_EWA3), direction
+        # per zone; TRADE_DIRECTION inverts the whole rule.
+        df_training_zone = (
+            df_state_space
+            .with_columns(
+                pl.when((pl.col(RSI_FILTER_COLUMN) < RSI_FILTER_THRESHOLD) & (pl.col("ma_accel_ewma3") > 0)).then(1)
+                  .when((pl.col(RSI_FILTER_COLUMN) > rsi_high_thr) & (pl.col("ma_accel_ewma3") < 0)).then(-1)
+                  .otherwise(0).alias("zone_side")
+            )
+            .filter(pl.col("zone_side") != 0)
+            .with_columns(
+                (pl.col("zone_side") * (-1 if TRADE_DIRECTION == 'short' else 1)).alias("traded_side")
+            )
+            .drop("zone_side")
+        )
+    else:
+        # ORIGINAL (very first) behaviour: single-zone RSI(2)<30 filter only —
+        # no ma_accel, no RSI>70 short zone. traded_side encodes the GLOBAL
+        # direction (+1 = long/snapback, -1 = fade) per TRADE_DIRECTION, and the
+        # walk-forward gate stays on the unconditional P(WIN)>=threshold.
+        df_training_zone = (
+            df_state_space
+            .filter(pl.col(RSI_FILTER_COLUMN) < RSI_FILTER_THRESHOLD)
+            .with_columns(
+                pl.lit(-1 if TRADE_DIRECTION == 'short' else 1).alias("traded_side")
+            )
+        )
 
     print("\n--- DEBUG: hour distribution after RSI hunting-zone filter ---")
     print(df_training_zone["datetime"].dt.hour().value_counts().sort("datetime"))
@@ -771,6 +807,7 @@ if __name__ == "__main__":
     datetimes = df_training_zone["datetime"].to_numpy()
     X = df_training_zone.select(features).to_numpy()
     y = df_training_zone["target"].to_numpy()
+    side_arr = df_training_zone["traded_side"].to_numpy()
     stop_barrier_arr = df_training_zone["stop_barrier"].to_numpy()
     bars_to_exit_arr = df_training_zone["bars_to_exit"].to_numpy()
     is_timeout_arr = df_training_zone["is_timeout"].to_numpy()
@@ -912,8 +949,22 @@ if __name__ == "__main__":
         target_idx = list(clf.classes_).index(TARGET_TRADE_CLASS)
         y_proba = clf.predict_proba(X_test)[:, target_idx]
 
+        # Per-test-bar traded side (+1 = LONG / -1 = SHORT; TRADE_DIRECTION
+        # already folded into traded_side) and the per-side win probability
+        # used as the entry gate: a LONG trades the model's P(up); a SHORT
+        # trades P(down) = 1 - P(up). Threshold stays on per-side win prob.
+        test_side = side_arr[test_idx]
+        if ENABLE_RSI_ACCEL_FILTER:
+            # NEW: per-side win probability — a LONG trades the model's P(up); a
+            # SHORT trades P(down) = 1 - P(up).
+            trade_conf = np.where(test_side > 0, y_proba, 1.0 - y_proba)
+        else:
+            # ORIGINAL: gate on the unconditional P(WIN) = P(up); direction and
+            # inversion are already baked into traded_side (global fade/snapback).
+            trade_conf = y_proba
+
         for t in thresholds_to_track:
-            signal_indices = find_debounced_signals(y_proba, t, HYSTERESIS_BUFFER)
+            signal_indices = find_debounced_signals(trade_conf, t, HYSTERESIS_BUFFER)
 
             non_overlapping_idx = []          # positions within X_test/test_idx
             next_available_time = np.datetime64('1677-01-01')  # numpy datetime64 min-ish sentinel
@@ -944,18 +995,13 @@ if __name__ == "__main__":
 
             if num_trades > 0:
                 traded_idx = np.array(non_overlapping_idx)
-                traded_targets = y[traded_idx]
 
-                traded_returns = normalized_return[traded_idx].copy()
-                if INVERT_RETURNS:
-                    traded_returns = -traded_returns
+                traded_returns = (normalized_return[traded_idx] * side_arr[traded_idx]).copy()
 
                 trade_log[t].extend(zip(datetimes[traded_idx], traded_returns))
 
-                num_original_wins = int((traded_targets == LABEL_WIN).sum())
-                num_original_losses = int((traded_targets == LABEL_LOSS).sum())
-                strategy_wins = num_original_losses if INVERT_RETURNS else num_original_wins
-                strategy_losses = num_original_wins if INVERT_RETURNS else num_original_losses
+                strategy_wins = int((traded_returns > 0).sum())
+                strategy_losses = int((traded_returns < 0).sum())
                 win_rate = strategy_wins / num_trades
 
                 win_returns = traded_returns[traded_returns > 0]
@@ -967,7 +1013,7 @@ if __name__ == "__main__":
                 else:
                     rr = np.nan
 
-                prec = precision_score(y[traded_idx] == TARGET_TRADE_CLASS, np.ones(num_trades), zero_division=0)
+                prec = win_rate  # strategy precision = fraction of winning (side-aware) trades
 
                 fold_metrics[t]['precisions'].append(prec)
                 fold_metrics[t]['win_rates'].append(win_rate)

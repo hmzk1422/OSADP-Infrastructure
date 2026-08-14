@@ -20,6 +20,17 @@ RSI_FILTER_THRESHOLD = 30        # Only trade when RSI(2) < 30
 CONFIDENCE_THRESHOLD = 0.5       # P(WIN) must be >= this to fire a trade
 # Research tests thresholds 0.50-0.95. Start at 0.50 for more trades.
 
+# --- RSI + acceleration (momentum) entry filter toggle ---
+# True  = NEW two-sided directional zone:
+#         (RSI(2)<30 & ma_accel_EWA3>0) -> long candidate
+#         OR (RSI(2)>70 & ma_accel_EWA3<0) -> short candidate
+#         direction is inverted by TRADE_DIRECTION.
+# False = ORIGINAL single-zone filter (the very first condition): RSI(2)<30 only,
+#         no ma_accel filter, original P(WIN)>=threshold gate + global invert.
+# The ma_accel_ewma3 column is always computed in feature_builder; it is only
+# USED to filter entries when this flag is True.
+ENABLE_RSI_ACCEL_FILTER = False
+
 # --- Trade Direction ---
 # 'short' = fade (current behavior) — bet AGAINST the model's P(WIN) prediction
 # 'long'  = snapback — bet WITH the model's P(WIN) prediction (price bounces up)
