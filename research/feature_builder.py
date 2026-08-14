@@ -130,6 +130,7 @@ def compute_orderflow_features(df_trades: pl.DataFrame, df_orderbook: pl.DataFra
     ofi_1s = dense_resample(ob, "1s", [pl.col("ofi_raw").sum()], zero_fill_cols=["ofi_raw"])
     ofi_1m = dense_resample(ofi_1s, BAR_FREQ, [pl.col("ofi_raw").sum().alias("ofi_1m")], zero_fill_cols=["ofi_1m"])
     ofi_1m = ofi_1m.with_columns(pl.col("ofi_1m").diff().fill_null(0).alias("ofi_diff"))
+    del ofi_1s  # 1s intermediate, not returned — free before it compounds
 
     trades = df_trades.sort(["datetime", "timestamp"], maintain_order=True).with_columns([
         pl.when(pl.col("side") == "buy").then(pl.col("amount")).otherwise(0.0).alias("buy_vol"),
@@ -182,6 +183,7 @@ def compute_orderflow_features(df_trades: pl.DataFrame, df_orderbook: pl.DataFra
                )
                .select(["datetime", "tick_autocorr"])
     )
+    del tick_1s  # 1s intermediate, not returned — free before it compounds
 
     trades_sorted = trades.sort(["datetime", "timestamp"], maintain_order=True)
     session_volume = total_session_volume if total_session_volume is not None else trades_sorted["amount"].sum()
@@ -229,6 +231,7 @@ def compute_orderflow_features(df_trades: pl.DataFrame, df_orderbook: pl.DataFra
     vpin_lookup = dense_resample(
         vpin_by_bucket_close, BAR_FREQ, [pl.col("vpin_smoothed").last()]
     ).with_columns(pl.col("vpin_smoothed").forward_fill())
+    del trades_sorted, vpin_buckets, vpin_by_bucket_close  # not returned — free VPIN workspace
 
     trade_size = dense_resample(
         trades.with_columns([
@@ -276,6 +279,12 @@ def compute_orderflow_features(df_trades: pl.DataFrame, df_orderbook: pl.DataFra
         [pl.col("depth_imbalance").last(), pl.col("depth_imbalance_roc").last(), pl.col("spread_bps").last()],
     )
 
+    # Memory hygiene: the two giant raw event frames and the now-unused bucket
+    # workspace are freed right before returning. None of them are part of the
+    # returned dict, so this is strictly lossless — outputs are bit-identical.
+    del ob, trades
+    gc.collect()
+
     return {
         "ofi_1m": ofi_1m.select(["datetime", "ofi_diff"]),
         "cvd_1m": cvd_1m.select(["datetime", "cvd_delta_1m", "cvd_slope_5"]),
@@ -316,6 +325,14 @@ def compute_price_features(price_and_volume: pl.DataFrame, rsi_features: pl.Data
     df = df.with_columns(
         pl.when(pl.col("ma_accel") > 0).then(1).when(pl.col("ma_accel") < 0).then(-1).otherwise(0)
           .alias("ma_accel_regime")
+    )
+    # EWA(3)-smoothed acceleration ("third/momentum derivative" filter signal).
+    # Exponential weighted average, span=3 (alpha = 2/(3+1) = 0.5), causal.
+    # Point-in-time safe WITHOUT any shift here: ml_state_builder shift(1)-lags
+    # the whole macro frame and then asof(backward)-broadcasts it, so any bar
+    # only ever sees this value as it stood at the previous bar's close.
+    df = df.with_columns(
+        pl.col("ma_accel").ewm_mean(span=3, adjust=True).fill_null(0).alias("ma_accel_ewma3")
     )
     df = df.with_columns(pl.col("close").pct_change(PRICE_ROC_WINDOW_3).alias("price_roc_3"))
 
