@@ -153,12 +153,12 @@ def get_session_paths(data_format: str = DATA_FORMAT) -> list[tuple[str, str, in
     session_suffixes = ["", "_2", "_3"]
     sessions = []
     for session_id, suffix in enumerate(session_suffixes):
-        orderbook_path = f"{DATA_DIR}/BTCUSDT_orderbook{suffix}.{data_format}"
-        trades_path = f"{DATA_DIR}/BTCUSDT_trades{suffix}.{data_format}"
+        orderbook_path = f"{DATA_DIR}/{SYMBOL_HIST}_orderbook{suffix}.{data_format}"
+        trades_path = f"{DATA_DIR}/{SYMBOL_HIST}_trades{suffix}.{data_format}"
 
         if data_format == "parquet" and AUTO_CONVERT_CSV_TO_PARQUET:
-            orderbook_path = _ensure_parquet(orderbook_path, f"{DATA_DIR}/BTCUSDT_orderbook{suffix}.csv")
-            trades_path = _ensure_parquet(trades_path, f"{DATA_DIR}/BTCUSDT_trades{suffix}.csv")
+            orderbook_path = _ensure_parquet(orderbook_path, f"{DATA_DIR}/{SYMBOL_HIST}_orderbook{suffix}.csv")
+            trades_path = _ensure_parquet(trades_path, f"{DATA_DIR}/{SYMBOL_HIST}_trades{suffix}.csv")
 
         if os.path.exists(orderbook_path) and os.path.exists(trades_path):
             sessions.append((orderbook_path, trades_path, session_id))

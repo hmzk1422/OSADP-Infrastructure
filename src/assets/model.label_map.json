@@ -1,0 +1,8 @@
+{
+  "0": "LOSS",
+  "1": "WIN",
+  "class_labels_ordered": [
+    "LOSS",
+    "WIN"
+  ]
+}

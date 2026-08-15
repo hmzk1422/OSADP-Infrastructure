@@ -700,8 +700,8 @@ if __name__ == "__main__":
     is_win = df_training_zone['target'] == LABEL_WIN
     is_loss = df_training_zone['target'] == LABEL_LOSS
 
-    normalized_return[is_win & ~is_timeout] = RR_RATIO
-    normalized_return[is_loss & ~is_timeout] = -1.0
+    normalized_return[is_win & ~is_timeout] = 1.0
+    normalized_return[is_loss & ~is_timeout] = -1.0 / RR_RATIO
 
     normalized_return[is_timeout] = (
         df_training_zone.loc[is_timeout, 'exit_ret'] /
@@ -836,7 +836,7 @@ if __name__ == "__main__":
                 armed = True
         return np.array(out, dtype=int)
 
-    thresholds_to_track = np.arange(0.20, 0.96, 0.05)
+    thresholds_to_track = np.arange(0.50, 0.96, 0.05)
     fold_metrics = {t: {'precisions': [], 'win_rates': [], 'rrs': [], 'trades': []} for t in thresholds_to_track}
     fold_importances = []
     trade_log = {t: [] for t in thresholds_to_track}

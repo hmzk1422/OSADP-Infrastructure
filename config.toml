@@ -1,0 +1,58 @@
+# Rust executor configuration — mirrors main/config.py.
+# Flat layout maps 1:1 to the kebab-case fields of src/config.rs::Config.
+# (Run: cargo run -- config.toml   — the path arg is optional.)
+
+# --- Exchange / data feed (Rust connects to the Python CCXT sidecar) ---
+symbol = "BTC/USDT:USDT"
+sidecar-host = "127.0.0.1"
+sidecar-port = 9100
+sidecar-python = "python"
+seed-bars = 500
+seed-interval = "5m"
+
+# --- Strategy parameters ---
+trade-direction = "short"            # "short" = fade, "long" = snapback
+confidence-threshold = 0.5           # P(WIN) must be >= this to fire
+rsi-filter-threshold = 30.0          # only trade inside the RSI(2) hunting zone
+enable-rsi-accel-filter = false
+lookahead-seconds = 6000             # barrier horizon / position TTL
+barrier-multiplier = 3.0
+rr-ratio = 0.1
+min-barrier-pct = 0.0                # vol filter floor (market too dead)
+max-barrier-pct = 0.05               # vol filter ceiling (market too wild)
+timeframe-barrier = 300              # macro-bar length in seconds (5m)
+barrier-vol-bar-window = 20
+hysteresis-buffer = 0.0            # P(WIN) re-arm margin after a trade
+lockout-seconds = 1000             # re-entry lockout after an exit
+max-trades-per-hour = 300
+
+# --- Risk / position sizing ---
+stop-loss-bps = 5.0
+take-profit-bps = 5.0
+max-position-usd = 100.0
+min-order-size = 0.001
+fee-bps = 0.0
+enable-slippage = false
+
+# --- Feature windows ---
+use-orderflow = true
+rsi-14-window = 14
+rsi-2-window = 2
+sma-14-window = 14
+ma-slope-window = 5
+price-roc-window-3 = 3
+deeplob-z-window = 10
+rsi-z-window = 10
+orderflow-z-window = 10
+retail-threshold = 0.05
+vpin-target-buckets = 50
+vpin-window-buckets = 10
+vpin-min-periods = 5
+vpin-lookback-seconds = 86400
+
+# --- Model ---
+model-path = "src/assets/model.onnx"
+model-manifest-path = "src/assets/model.features.json"
+
+# --- Execution ---
+dry-run = true
