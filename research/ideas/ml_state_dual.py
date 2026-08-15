@@ -333,8 +333,8 @@ def get_macro_oos(df_macro, n_folds=None, block_size=None):
     norm = pd.Series(index=df_macro.index, dtype=float)
     is_timeout = df_macro['is_timeout']
     is_win = df_macro['target'] == LABEL_WIN
-    norm[is_win & ~is_timeout] = RR_RATIO
-    norm[is_loss := ~is_win & ~is_timeout] = -1.0
+    norm[is_win & ~is_timeout] = 1.0
+    norm[is_loss := ~is_win & ~is_timeout] = -1.0 / RR_RATIO
     norm[is_timeout] = (
         df_macro.loc[is_timeout, 'exit_ret'] /
         (df_macro.loc[is_timeout, 'stop_barrier'] + EPS)

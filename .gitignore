@@ -21,3 +21,4 @@ binance_cache/
 *.parquet
 main/logs/
 *.log
+target/

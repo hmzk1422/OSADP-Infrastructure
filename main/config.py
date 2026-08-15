@@ -13,8 +13,8 @@ API_KEY = "..."                   # Your real Bybit API key (read-only is fine f
 API_SECRET = "..."                # Your real Bybit API secret
 
 # --- Strategy Parameters (VERIFIED against research/ml_state_optimized.py) ---
-LOOKAHEAD_SECONDS    = 30000      # 10-min barrier horizon (research: 600s)
-BARRIER_MULTIPLIER   = 1.0       # Volatility-scaled barrier width (research: 3.0)
+LOOKAHEAD_SECONDS    = 6000      # 10-min barrier horizon (research: 600s)
+BARRIER_MULTIPLIER   = 0.3       # Volatility-scaled barrier width (research: 3.0)
 RSI_FILTER_COLUMN    = 'rsi_2'   # Research uses rsi_2 for filter
 RSI_FILTER_THRESHOLD = 30        # Only trade when RSI(2) < 30
 CONFIDENCE_THRESHOLD = 0.5       # P(WIN) must be >= this to fire a trade
@@ -43,7 +43,7 @@ STOP_LOSS_BPS        = 5        # Fallback stop if barrier logic fails
 TAKE_PROFIT_BPS      = 5
 MAX_POSITION_USD     = 100       # Max notional per position (~0.0017 BTC at $60k)
 MIN_ORDER_SIZE       = 0.001     # Minimum contract size
-RR_RATIO             = 0.1       # Risk:Reward ratio (2.0 = 1:2, profit target = 2x stop distance)
+RR_RATIO             = 10       # Risk:Reward ratio (2.0 = 1:2, profit target = 2x stop distance)
 
 # --- Volatility / Barrier-Size Filter ---
 # Reject entries when the volatility-scaled barrier is outside this range.
@@ -130,7 +130,7 @@ FEATURE_COLUMNS = [
 # (features.py) actually emits. It must match the USE_ORDERFLOW_FEATURES the
 # model was exported with (see <model>.features.json "includes_orderflow"),
 # or executor.py's feature-count guard will refuse to trade every tick.
-USE_ORDERFLOW_FEATURES = True
+USE_ORDERFLOW_FEATURES = False
 
 # Exact same 9 names, same order, as ORDERFLOW_FEATURE_COLUMNS in
 # ml_state_optimized.py — order matters, it's the column order the model was

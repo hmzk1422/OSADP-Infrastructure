@@ -288,17 +288,17 @@ def purged_chronological_splits(datetimes: np.ndarray, n_samples: int, block_siz
 
 
 def find_debounced_signals(y_proba: np.ndarray, threshold: float, hysteresis: float = HYSTERESIS_BUFFER) -> np.ndarray:
-    """Return indices of fresh threshold crossings, ignoring flicker."""
-    lower_bound = max(threshold - hysteresis, 0.0)
-    armed = True
-    out = []
-    for i, p in enumerate(y_proba):
-        if armed and p >= threshold:
-            out.append(i)
-            armed = False
-        elif not armed and p < lower_bound:
-            armed = True
-    return np.array(out, dtype=int)
+    """Return indices where probability meets or exceeds threshold.
+
+    NOTE: hysteresis is accepted for backward compatibility but NOT used here.
+    A simple threshold filter is used instead of a stateful crossing detector.
+    The lockout filter (applied separately in the walk-forward loop) handles
+    trade spacing, making the stateful debouncer redundant. This avoids the
+    counterintuitive non-monotonic trade counts that the old stateful
+    debouncer produced (high thresholds re-armed more often than low ones,
+    yielding more signals for stricter thresholds).
+    """
+    return np.where(y_proba >= threshold)[0]
 
 
 # ============================================================================
@@ -1251,3 +1251,5 @@ if __name__ == "__main__":
         print("Use the walk-forward table above for that; this step only produces")
         print("the artifact executor.py should load.")
         print("=" * 70)
+
+    # PROVEN: PROBLEM IS IN VOLATILITY SIZE I THINK THERES LOOKAHEAD BIAS 1S
