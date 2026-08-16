@@ -245,7 +245,6 @@ import polars.selectors as cs
 ============================================================================
 STEP 1b — PER-SESSION FEATURE PIPELINE
 - This section deals primarily with recursive features as abstraction
-- 
 ============================================================================
 """
 

@@ -76,6 +76,13 @@ anything live, run both the original and this port on the SAME real
 session data and diff every column — the `dense_resample`/asof-join
 patterns above are exactly the kind of thing that can look right and
 still be subtly wrong on data shaped differently than what I tested.
+
+------------------------------------------------------------------------
+2026-08-16 PATCH NOTE (see chat): normalized_return had a long-only bias
+baked into the triple-barrier labeling, not just in the R-multiple
+mapping. See _sequential_triple_barrier's docstring and STEP 5 below for
+the fix and why it had to happen in both places.
+------------------------------------------------------------------------
 """
 
 import sys
@@ -122,10 +129,58 @@ from research.ml_shared_config import *
 # STEP 3 — TRIPLE BARRIER LABELING (pure numpy — unchanged by the polars
 # switch; sliding_window_view operates on plain numpy arrays either way)
 # ============================================================================
-def _sequential_triple_barrier(price, profit_thresh, stop_thresh, lookahead, chunk_size=BARRIER_CHUNK_SIZE):
+def _infer_trade_side(df: pl.DataFrame) -> pl.Series:
+    """Per-row trade side used to orient the triple barrier (+1 = long,
+    -1 = short). MUST mirror the zone/direction logic in __main__ STEP 4
+    exactly (ENABLE_RSI_ACCEL_FILTER two-sided zone, or the single global
+    TRADE_DIRECTION fade/snapback flip) -- keep these two in sync if you
+    ever change the hunting-zone rule.
+
+    This runs BEFORE the hunting-zone filter, on every row (not just rows
+    that end up traded), so rows outside any zone need *some* side value
+    even though it's never used -- they get dropped from df_training_zone
+    downstream regardless of what side they were assigned here.
+    """
+    rsi_high_thr = 100 - RSI_FILTER_THRESHOLD
+    if ENABLE_RSI_ACCEL_FILTER:
+        zone_side = (
+            pl.when((pl.col(RSI_FILTER_COLUMN) < RSI_FILTER_THRESHOLD) & (pl.col("ma_accel_ewma3") > 0)).then(1)
+              .when((pl.col(RSI_FILTER_COLUMN) > rsi_high_thr) & (pl.col("ma_accel_ewma3") < 0)).then(-1)
+              .otherwise(1)  # non-zone rows: arbitrary, filtered out downstream
+        )
+        side_expr = zone_side * (-1 if TRADE_DIRECTION == 'short' else 1)
+    else:
+        # NOTE: pl.lit(x) alone does NOT broadcast to df's row count inside
+        # select() -- it silently returns a 1-row Series regardless of len(df).
+        # This was the source of the (0,)-shape crash inside
+        # _sequential_triple_barrier: side_np came back as length 1, which
+        # NumPy silently broadcasts against p0 in the first chunk, then
+        # collapses to a genuinely empty array once c0 in the chunk loop
+        # exceeds 1. pl.repeat(..., n=pl.len()) ties it to the frame's
+        # actual height instead.
+        side_expr = pl.repeat(-1 if TRADE_DIRECTION == 'short' else 1, n=pl.len())
+    return df.select(side_expr.alias("_side"))["_side"]
+
+
+def _sequential_triple_barrier(price, profit_thresh, stop_thresh, lookahead, side, chunk_size=BARRIER_CHUNK_SIZE):
+    """side: +1 for a long-direction row, -1 for a short-direction row
+    (see _infer_trade_side). Determines which raw price direction gets
+    the RR_RATIO-scaled TARGET barrier and which gets the 1x STOP barrier.
+
+    FIX (see chat): this previously always placed the RR_RATIO barrier
+    above price ("upper") and the 1x barrier below ("lower"), regardless
+    of side -- i.e. it silently assumed every row was a long. For a short
+    row that put the real stop RR_RATIO x farther away than the real
+    target, which inverts the intended win:loss R-multiple once
+    TRADE_DIRECTION/side gets applied downstream (10R win / 1R loss on
+    paper became 1R win / 10R loss in practice for short-side rows).
+    WIN now consistently means "this row's own trade direction reached
+    its target first", for both long and short rows.
+    """
     price = np.asarray(price, dtype=float)
     profit_thresh = np.asarray(profit_thresh, dtype=float)
     stop_thresh = np.asarray(stop_thresh, dtype=float)
+    side = np.asarray(side, dtype=float)
     n = len(price)
 
     label = np.full(n, LABEL_LOSS, dtype=int)
@@ -144,26 +199,35 @@ def _sequential_triple_barrier(price, profit_thresh, stop_thresh, lookahead, chu
         p0 = price[c0:c1]
         pt = profit_thresh[c0:c1]
         st = stop_thresh[c0:c1]
+        sd = side[c0:c1]
+        is_long = sd >= 0
 
-        upper = p0 * (1.0 + (pt * RR_RATIO))
-        lower = p0 * (1.0 - st)
+        # target = favourable-direction barrier, RR_RATIO x away.
+        # stop   = adverse-direction barrier, 1x away.
+        # Long rows: target above price, stop below (old, only, behaviour).
+        # Short rows: target below price, stop above (mirror image).
+        target = np.where(is_long, p0 * (1.0 + pt * RR_RATIO), p0 * (1.0 - pt * RR_RATIO))
+        stop = np.where(is_long, p0 * (1.0 - st), p0 * (1.0 + st))
 
         window = sliding_window_view(price[c0 + 1: c1 + lookahead], lookahead)
 
-        hit_upper = window >= upper[:, None]
-        hit_lower = window <= lower[:, None]
+        hit_target = np.where(is_long[:, None], window >= target[:, None], window <= target[:, None])
+        hit_stop = np.where(is_long[:, None], window <= stop[:, None], window >= stop[:, None])
 
-        has_upper = hit_upper.any(axis=1)
-        has_lower = hit_lower.any(axis=1)
-        first_upper = np.argmax(hit_upper, axis=1)
-        first_lower = np.argmax(hit_lower, axis=1)
+        has_target = hit_target.any(axis=1)
+        has_stop = hit_stop.any(axis=1)
+        first_target = np.argmax(hit_target, axis=1)
+        first_stop = np.argmax(hit_stop, axis=1)
 
-        win_mask = has_upper & (~has_lower | (first_upper < first_lower))
-        loss_mask = has_lower & (~has_upper | (first_lower < first_upper))
+        win_mask = has_target & (~has_stop | (first_target < first_stop))
+        loss_mask = has_stop & (~has_target | (first_stop < first_target))
 
         timeout_mask = ~(win_mask | loss_mask)
-        timeout_win_mask = timeout_mask & (window[:, -1] > p0)
-        timeout_loss_mask = timeout_mask & (window[:, -1] <= p0)
+        # Timeout tie-break: was the final bar favourable for THIS row's
+        # own direction (up for longs, down for shorts)?
+        final_favorable = np.where(is_long, window[:, -1] > p0, window[:, -1] < p0)
+        timeout_win_mask = timeout_mask & final_favorable
+        timeout_loss_mask = timeout_mask & ~final_favorable
 
         thresholds_ok = ~np.isnan(pt) & ~np.isnan(st)
 
@@ -172,13 +236,16 @@ def _sequential_triple_barrier(price, profit_thresh, stop_thresh, lookahead, chu
         lab[loss_mask | timeout_loss_mask] = LABEL_LOSS
 
         off = np.full(c1 - c0, lookahead - 1, dtype=int)
-        off[win_mask] = first_upper[win_mask]
-        off[loss_mask] = first_lower[loss_mask]
+        off[win_mask] = first_target[win_mask]
+        off[loss_mask] = first_stop[loss_mask]
 
         exit_price = window[np.arange(c1 - c0), off]
 
         label[c0:c1] = lab
         exit_offset[c0:c1] = off
+        # exit_ret / terminal_ret stay RAW (unsigned, price-direction)
+        # returns, exactly as before -- only the barrier PLACEMENT above
+        # is now side-aware. Side is applied once, in STEP 5 below.
         exit_ret[c0:c1] = (exit_price - p0) / p0
         terminal_ret[c0:c1] = (window[:, -1] - p0) / p0
         is_timeout[c0:c1] = timeout_mask
@@ -217,9 +284,19 @@ def add_barrier_labels(df: pl.DataFrame, lookahead_seconds: int = LOOKAHEAD_SECO
             (pl.col("_bvs") * barrier_mult).alias("stop_barrier"),
         ]).drop("_bvs")
 
+        # FIX (see chat): side must be known BEFORE labeling, so the
+        # RR_RATIO barrier can be placed on the correct side of price for
+        # short-direction rows too. See _infer_trade_side / STEP 4.
+        side_np = _infer_trade_side(g).to_numpy()
+        assert len(side_np) == len(g), (
+            f"_infer_trade_side returned {len(side_np)} rows for a "
+            f"{len(g)}-row group (session_id={g['session_id'][0]!r}) -- "
+            "likely a pl.lit() broadcasting bug, see _infer_trade_side."
+        )
+
         label, exit_offset, exit_ret, terminal_ret, is_timeout, valid = _sequential_triple_barrier(
             g["execution_price"].to_numpy(), g["profit_barrier"].to_numpy(),
-            g["stop_barrier"].to_numpy(), lookahead_seconds
+            g["stop_barrier"].to_numpy(), lookahead_seconds, side_np
         )
 
         g = g.with_columns([
@@ -747,6 +824,10 @@ if __name__ == "__main__":
     # Once the zone is resolved, TRADE_DIRECTION inverts the whole rule:
     #   'short' flips a LONG setup to an actual SHORT and a SHORT setup to a
     #   LONG (mirrors the executor's fade/snapback inversion).
+    #
+    # NOTE: this exact rule is duplicated in _infer_trade_side() above,
+    # which now runs BEFORE barrier labeling so the triple barrier itself
+    # can be side-aware. If you change this block, update that one too.
     rsi_high_thr = 100 - RSI_FILTER_THRESHOLD  # 70
     if ENABLE_RSI_ACCEL_FILTER:
         # NEW: two-sided directional hunting zone (RSI + ma_accel_EWA3), direction
@@ -820,13 +901,30 @@ if __name__ == "__main__":
     # ------------------------------------------------------------------
     # STEP 5 — Risk-Normalized Return
     # ------------------------------------------------------------------
+    # FIX (see chat): normalized_return is now computed to ALREADY be
+    # correct from the trade's own point of view (positive = good for
+    # THIS row's side), for all three branches:
+    #   - WIN / LOSS (non-timeout): hardcoded +RR_RATIO / -1.0 as before.
+    #     This is now correct as-is because add_barrier_labels/
+    #     _sequential_triple_barrier place the target/stop barriers on
+    #     the correct side of price per row (see fix above) -- WIN means
+    #     "this row's own direction won", not "price went up".
+    #   - TIMEOUT: exit_ret_arr is still a RAW (unsigned, price-direction)
+    #     return out of the barrier function, so it needs side_arr applied
+    #     HERE to convert it into the trade's own R, unlike before.
+    # Because normalized_return is now fully side-adjusted at this point,
+    # do NOT multiply by side_arr again downstream (see STEP 6 fix) --
+    # doing so would double-apply the direction and re-invert short trades.
     is_win = y == LABEL_WIN
     is_loss = y == LABEL_LOSS
 
     normalized_return = np.full(len(y), np.nan)
     normalized_return[is_win & ~is_timeout_arr] = RR_RATIO
     normalized_return[is_loss & ~is_timeout_arr] = -1.0
-    normalized_return[is_timeout_arr] = exit_ret_arr[is_timeout_arr] / (stop_barrier_arr[is_timeout_arr] + EPS)
+    normalized_return[is_timeout_arr] = (
+        (exit_ret_arr[is_timeout_arr] * side_arr[is_timeout_arr])
+        / (stop_barrier_arr[is_timeout_arr] + EPS)
+    )
 
     fee_in_r = (2.0 * FEE_BPS / 10000.0) / (stop_barrier_arr + EPS)
     normalized_return = normalized_return - fee_in_r
@@ -996,7 +1094,12 @@ if __name__ == "__main__":
             if num_trades > 0:
                 traded_idx = np.array(non_overlapping_idx)
 
-                traded_returns = (normalized_return[traded_idx] * side_arr[traded_idx]).copy()
+                # FIX (see chat): normalized_return is already side-correct
+                # (see STEP 5) -- do NOT multiply by side_arr again here.
+                # The old `* side_arr[traded_idx]` double-applied direction
+                # on top of the (now-fixed) barrier placement and re-flipped
+                # short trades back to the broken 1R-win/RR_RATIO-loss shape.
+                traded_returns = normalized_return[traded_idx].copy()
 
                 trade_log[t].extend(zip(datetimes[traded_idx], traded_returns))
 
@@ -1251,5 +1354,3 @@ if __name__ == "__main__":
         print("Use the walk-forward table above for that; this step only produces")
         print("the artifact executor.py should load.")
         print("=" * 70)
-
-    # PROVEN: PROBLEM IS IN VOLATILITY SIZE I THINK THERES LOOKAHEAD BIAS 1S

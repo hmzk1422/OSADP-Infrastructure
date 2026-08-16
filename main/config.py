@@ -34,7 +34,7 @@ ENABLE_RSI_ACCEL_FILTER = False
 # --- Trade Direction ---
 # 'short' = fade (current behavior) — bet AGAINST the model's P(WIN) prediction
 # 'long'  = snapback — bet WITH the model's P(WIN) prediction (price bounces up)
-TRADE_DIRECTION = 'short'        # 'short' or 'long'
+TRADE_DIRECTION = 'long'        # 'short' or 'long'
 
 # note for myself: based on result, inversing signal for macro asset dont work. only for small asset.
 
@@ -175,7 +175,7 @@ MODEL_PATH = "main/models/lgb_model.txt"
 # --- Execution ---
 DRY_RUN = True                    # Set False to place real orders!
 MAX_TRADES_PER_HOUR = 300
-FEE_BPS = 0                   # Binance/Bybit taker fee ~0.055%
+FEE_BPS = 0.1                   # Binance/Bybit taker fee ~0.055%
 
 # --- Signal Debounce & Re-entry Lockout (matches research walk-forward) ---
 # Research (ml_state_optimized.py) uses a hysteresis buffer to collapse

@@ -1,0 +1,7 @@
+[workspace]
+members = [
+    "engine",
+    "live-test",
+    "live-trade",
+]
+resolver = "2"

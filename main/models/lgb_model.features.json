@@ -38,14 +38,14 @@
     "sma_14"
   ],
   "trained_rows": 16921,
-  "trained_at_utc": "2026-08-15T18:46:13.811600+00:00",
+  "trained_at_utc": "2026-08-16T03:25:25.802345+00:00",
   "label_counts": {
-    "LOSS": 15141,
-    "WIN": 1780
+    "LOSS": 15085,
+    "WIN": 1836
   },
   "rr_ratio": 10,
   "lookahead_seconds": 6000,
   "barrier_multiplier": 0.3,
-  "trade_direction": "short",
+  "trade_direction": "long",
   "confidence_threshold_note": "This manifest does not set CONFIDENCE_THRESHOLD \u2014 that stays a config.py / CLI setting. See the per-threshold table above (now computed from non-overlapping folds) before trusting a threshold."
 }
