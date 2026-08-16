@@ -1,6 +1,6 @@
 # Walk-Forward Backtest Report
 
-_Generated: 2026-08-15T18:36:09.005312+00:00_
+_Generated: 2026-08-16T03:16:36.276831+00:00_
 
 _Script: `ml_state_optimized.py`_
 
@@ -248,7 +248,7 @@ None
 
 State space before dedup: 15714299 rows
 State space after dedup (bar-level): 52381 rows
-Label distribution (full dataset): {'LOSS': 46612, 'WIN': 5769}
+Label distribution (full dataset): {'LOSS': 46942, 'WIN': 5439}
 
 --- DEBUG: hour distribution after RSI hunting-zone filter ---
 shape: (24, 2)
@@ -270,7 +270,7 @@ shape: (24, 2)
 │ 23       ┆ 755   │
 └──────────┴───────┘
 Total rows in hunting zone: 16921
-Label distribution (hunting zone): {'WIN': 1780, 'LOSS': 15141}
+Label distribution (hunting zone): {'LOSS': 15085, 'WIN': 1836}
 
 Features (15 total):
   - spread_bps_z
@@ -294,18 +294,18 @@ STOP BARRIER METRICS
 ==================================================
 Average Stop Barrier Size (%): 0.0519%
 ==================================================
-TRADE_DIRECTION='short' -> INVERT_RETURNS=True (mirrors executor.py's actual fade/snapback semantics)
+TRADE_DIRECTION='long' -> INVERT_RETURNS=False (mirrors executor.py's actual fade/snapback semantics)
 
---- Starting Walk-Forward (requested up to 400 non-overlapping folds; see [FOLD COUNT ADJUSTED] above if fewer independent windows fit the data) | Targeting: WIN | Inverting Trades: True ---
+--- Starting Walk-Forward (requested up to 400 non-overlapping folds; see [FOLD COUNT ADJUSTED] above if fewer independent windows fit the data) | Targeting: WIN | Inverting Trades: False ---
 [FOLD OVERLAP WARNING] step_intervals=27 < block_size=150 -> consecutive test folds overlap by ~82% of their length. Trade counts/expectancy pooled across folds are NOT independent draws.
-t=0.20 fold=1: raw_crossings=150 lockout_rejected=50 barrier_pct_rejected=0 passed=100
-t=0.25 fold=1: raw_crossings=150 lockout_rejected=50 barrier_pct_rejected=0 passed=100
-t=0.30 fold=1: raw_crossings=150 lockout_rejected=50 barrier_pct_rejected=0 passed=100
-t=0.35 fold=1: raw_crossings=149 lockout_rejected=49 barrier_pct_rejected=0 passed=100
-t=0.40 fold=1: raw_crossings=148 lockout_rejected=48 barrier_pct_rejected=0 passed=100
-t=0.45 fold=1: raw_crossings=133 lockout_rejected=39 barrier_pct_rejected=0 passed=94
-t=0.50 fold=1: raw_crossings=70 lockout_rejected=11 barrier_pct_rejected=0 passed=59
-t=0.55 fold=1: raw_crossings=6 lockout_rejected=1 barrier_pct_rejected=0 passed=5
+t=0.20 fold=1: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
+t=0.25 fold=1: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
+t=0.30 fold=1: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
+t=0.35 fold=1: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
+t=0.40 fold=1: raw_crossings=143 lockout_rejected=41 barrier_pct_rejected=0 passed=102
+t=0.45 fold=1: raw_crossings=127 lockout_rejected=28 barrier_pct_rejected=0 passed=99
+t=0.50 fold=1: raw_crossings=49 lockout_rejected=5 barrier_pct_rejected=0 passed=44
+t=0.55 fold=1: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
 t=0.60 fold=1: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=1: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=1: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -315,14 +315,14 @@ t=0.85 fold=1: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=
 t=0.90 fold=1: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=1: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 01 | Train Rows: 5903   | Tested on forward 150 rows. Purged: 19
-t=0.20 fold=2: raw_crossings=150 lockout_rejected=50 barrier_pct_rejected=0 passed=100
-t=0.25 fold=2: raw_crossings=150 lockout_rejected=50 barrier_pct_rejected=0 passed=100
-t=0.30 fold=2: raw_crossings=149 lockout_rejected=49 barrier_pct_rejected=0 passed=100
-t=0.35 fold=2: raw_crossings=146 lockout_rejected=47 barrier_pct_rejected=0 passed=99
-t=0.40 fold=2: raw_crossings=143 lockout_rejected=45 barrier_pct_rejected=0 passed=98
-t=0.45 fold=2: raw_crossings=123 lockout_rejected=36 barrier_pct_rejected=0 passed=87
-t=0.50 fold=2: raw_crossings=62 lockout_rejected=13 barrier_pct_rejected=0 passed=49
-t=0.55 fold=2: raw_crossings=10 lockout_rejected=2 barrier_pct_rejected=0 passed=8
+t=0.20 fold=2: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
+t=0.25 fold=2: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
+t=0.30 fold=2: raw_crossings=147 lockout_rejected=37 barrier_pct_rejected=0 passed=110
+t=0.35 fold=2: raw_crossings=145 lockout_rejected=37 barrier_pct_rejected=0 passed=108
+t=0.40 fold=2: raw_crossings=138 lockout_rejected=37 barrier_pct_rejected=0 passed=101
+t=0.45 fold=2: raw_crossings=125 lockout_rejected=32 barrier_pct_rejected=0 passed=93
+t=0.50 fold=2: raw_crossings=51 lockout_rejected=5 barrier_pct_rejected=0 passed=46
+t=0.55 fold=2: raw_crossings=9 lockout_rejected=0 barrier_pct_rejected=0 passed=9
 t=0.60 fold=2: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=2: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=2: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -332,13 +332,13 @@ t=0.85 fold=2: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=
 t=0.90 fold=2: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=2: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 02 | Train Rows: 5938   | Tested on forward 150 rows. Purged: 11
-t=0.20 fold=3: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
-t=0.25 fold=3: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
-t=0.30 fold=3: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
-t=0.35 fold=3: raw_crossings=148 lockout_rejected=45 barrier_pct_rejected=0 passed=103
-t=0.40 fold=3: raw_crossings=139 lockout_rejected=37 barrier_pct_rejected=0 passed=102
-t=0.45 fold=3: raw_crossings=123 lockout_rejected=31 barrier_pct_rejected=0 passed=92
-t=0.50 fold=3: raw_crossings=66 lockout_rejected=10 barrier_pct_rejected=0 passed=56
+t=0.20 fold=3: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.25 fold=3: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.30 fold=3: raw_crossings=146 lockout_rejected=33 barrier_pct_rejected=0 passed=113
+t=0.35 fold=3: raw_crossings=142 lockout_rejected=32 barrier_pct_rejected=0 passed=110
+t=0.40 fold=3: raw_crossings=128 lockout_rejected=29 barrier_pct_rejected=0 passed=99
+t=0.45 fold=3: raw_crossings=116 lockout_rejected=25 barrier_pct_rejected=0 passed=91
+t=0.50 fold=3: raw_crossings=52 lockout_rejected=5 barrier_pct_rejected=0 passed=47
 t=0.55 fold=3: raw_crossings=7 lockout_rejected=0 barrier_pct_rejected=0 passed=7
 t=0.60 fold=3: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=3: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -349,14 +349,14 @@ t=0.85 fold=3: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=
 t=0.90 fold=3: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=3: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 03 | Train Rows: 5967   | Tested on forward 150 rows. Purged: 9
-t=0.20 fold=4: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.25 fold=4: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.30 fold=4: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.35 fold=4: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.40 fold=4: raw_crossings=143 lockout_rejected=38 barrier_pct_rejected=0 passed=105
-t=0.45 fold=4: raw_crossings=126 lockout_rejected=29 barrier_pct_rejected=0 passed=97
-t=0.50 fold=4: raw_crossings=64 lockout_rejected=8 barrier_pct_rejected=0 passed=56
-t=0.55 fold=4: raw_crossings=6 lockout_rejected=0 barrier_pct_rejected=0 passed=6
+t=0.20 fold=4: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.25 fold=4: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.30 fold=4: raw_crossings=147 lockout_rejected=29 barrier_pct_rejected=0 passed=118
+t=0.35 fold=4: raw_crossings=140 lockout_rejected=28 barrier_pct_rejected=0 passed=112
+t=0.40 fold=4: raw_crossings=132 lockout_rejected=28 barrier_pct_rejected=0 passed=104
+t=0.45 fold=4: raw_crossings=123 lockout_rejected=28 barrier_pct_rejected=0 passed=95
+t=0.50 fold=4: raw_crossings=54 lockout_rejected=6 barrier_pct_rejected=0 passed=48
+t=0.55 fold=4: raw_crossings=5 lockout_rejected=0 barrier_pct_rejected=0 passed=5
 t=0.60 fold=4: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=4: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=4: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -366,14 +366,14 @@ t=0.85 fold=4: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=
 t=0.90 fold=4: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=4: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 04 | Train Rows: 5993   | Tested on forward 150 rows. Purged: 10
-t=0.20 fold=5: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.25 fold=5: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.30 fold=5: raw_crossings=149 lockout_rejected=43 barrier_pct_rejected=0 passed=106
-t=0.35 fold=5: raw_crossings=148 lockout_rejected=42 barrier_pct_rejected=0 passed=106
-t=0.40 fold=5: raw_crossings=142 lockout_rejected=36 barrier_pct_rejected=0 passed=106
-t=0.45 fold=5: raw_crossings=123 lockout_rejected=30 barrier_pct_rejected=0 passed=93
-t=0.50 fold=5: raw_crossings=50 lockout_rejected=6 barrier_pct_rejected=0 passed=44
-t=0.55 fold=5: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=5: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
+t=0.25 fold=5: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
+t=0.30 fold=5: raw_crossings=146 lockout_rejected=30 barrier_pct_rejected=0 passed=116
+t=0.35 fold=5: raw_crossings=137 lockout_rejected=29 barrier_pct_rejected=0 passed=108
+t=0.40 fold=5: raw_crossings=130 lockout_rejected=29 barrier_pct_rejected=0 passed=101
+t=0.45 fold=5: raw_crossings=122 lockout_rejected=27 barrier_pct_rejected=0 passed=95
+t=0.50 fold=5: raw_crossings=52 lockout_rejected=4 barrier_pct_rejected=0 passed=48
+t=0.55 fold=5: raw_crossings=6 lockout_rejected=0 barrier_pct_rejected=0 passed=6
 t=0.60 fold=5: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=5: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=5: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -383,14 +383,14 @@ t=0.85 fold=5: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=
 t=0.90 fold=5: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=5: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 05 | Train Rows: 6022   | Tested on forward 150 rows. Purged: 8
-t=0.20 fold=6: raw_crossings=150 lockout_rejected=50 barrier_pct_rejected=0 passed=100
-t=0.25 fold=6: raw_crossings=150 lockout_rejected=50 barrier_pct_rejected=0 passed=100
-t=0.30 fold=6: raw_crossings=149 lockout_rejected=49 barrier_pct_rejected=0 passed=100
-t=0.35 fold=6: raw_crossings=144 lockout_rejected=45 barrier_pct_rejected=0 passed=99
-t=0.40 fold=6: raw_crossings=137 lockout_rejected=41 barrier_pct_rejected=0 passed=96
-t=0.45 fold=6: raw_crossings=116 lockout_rejected=30 barrier_pct_rejected=0 passed=86
-t=0.50 fold=6: raw_crossings=52 lockout_rejected=7 barrier_pct_rejected=0 passed=45
-t=0.55 fold=6: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.20 fold=6: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
+t=0.25 fold=6: raw_crossings=148 lockout_rejected=31 barrier_pct_rejected=0 passed=117
+t=0.30 fold=6: raw_crossings=147 lockout_rejected=31 barrier_pct_rejected=0 passed=116
+t=0.35 fold=6: raw_crossings=139 lockout_rejected=30 barrier_pct_rejected=0 passed=109
+t=0.40 fold=6: raw_crossings=129 lockout_rejected=30 barrier_pct_rejected=0 passed=99
+t=0.45 fold=6: raw_crossings=122 lockout_rejected=29 barrier_pct_rejected=0 passed=93
+t=0.50 fold=6: raw_crossings=51 lockout_rejected=6 barrier_pct_rejected=0 passed=45
+t=0.55 fold=6: raw_crossings=7 lockout_rejected=0 barrier_pct_rejected=0 passed=7
 t=0.60 fold=6: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=6: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=6: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -400,14 +400,14 @@ t=0.85 fold=6: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=
 t=0.90 fold=6: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=6: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 06 | Train Rows: 6044   | Tested on forward 150 rows. Purged: 13
-t=0.20 fold=7: raw_crossings=150 lockout_rejected=48 barrier_pct_rejected=0 passed=102
-t=0.25 fold=7: raw_crossings=150 lockout_rejected=48 barrier_pct_rejected=0 passed=102
-t=0.30 fold=7: raw_crossings=150 lockout_rejected=48 barrier_pct_rejected=0 passed=102
-t=0.35 fold=7: raw_crossings=147 lockout_rejected=43 barrier_pct_rejected=0 passed=104
-t=0.40 fold=7: raw_crossings=145 lockout_rejected=42 barrier_pct_rejected=0 passed=103
-t=0.45 fold=7: raw_crossings=130 lockout_rejected=35 barrier_pct_rejected=0 passed=95
-t=0.50 fold=7: raw_crossings=55 lockout_rejected=8 barrier_pct_rejected=0 passed=47
-t=0.55 fold=7: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=7: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
+t=0.25 fold=7: raw_crossings=149 lockout_rejected=38 barrier_pct_rejected=0 passed=111
+t=0.30 fold=7: raw_crossings=147 lockout_rejected=37 barrier_pct_rejected=0 passed=110
+t=0.35 fold=7: raw_crossings=138 lockout_rejected=36 barrier_pct_rejected=0 passed=102
+t=0.40 fold=7: raw_crossings=131 lockout_rejected=36 barrier_pct_rejected=0 passed=95
+t=0.45 fold=7: raw_crossings=125 lockout_rejected=35 barrier_pct_rejected=0 passed=90
+t=0.50 fold=7: raw_crossings=60 lockout_rejected=11 barrier_pct_rejected=0 passed=49
+t=0.55 fold=7: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
 t=0.60 fold=7: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=7: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=7: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -417,14 +417,14 @@ t=0.85 fold=7: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=
 t=0.90 fold=7: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=7: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 07 | Train Rows: 6066   | Tested on forward 150 rows. Purged: 18
-t=0.20 fold=8: raw_crossings=150 lockout_rejected=48 barrier_pct_rejected=0 passed=102
-t=0.25 fold=8: raw_crossings=150 lockout_rejected=48 barrier_pct_rejected=0 passed=102
-t=0.30 fold=8: raw_crossings=150 lockout_rejected=48 barrier_pct_rejected=0 passed=102
-t=0.35 fold=8: raw_crossings=150 lockout_rejected=48 barrier_pct_rejected=0 passed=102
-t=0.40 fold=8: raw_crossings=148 lockout_rejected=48 barrier_pct_rejected=0 passed=100
-t=0.45 fold=8: raw_crossings=132 lockout_rejected=39 barrier_pct_rejected=0 passed=93
+t=0.20 fold=8: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
+t=0.25 fold=8: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
+t=0.30 fold=8: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
+t=0.35 fold=8: raw_crossings=149 lockout_rejected=41 barrier_pct_rejected=0 passed=108
+t=0.40 fold=8: raw_crossings=148 lockout_rejected=41 barrier_pct_rejected=0 passed=107
+t=0.45 fold=8: raw_crossings=144 lockout_rejected=38 barrier_pct_rejected=0 passed=106
 t=0.50 fold=8: raw_crossings=58 lockout_rejected=6 barrier_pct_rejected=0 passed=52
-t=0.55 fold=8: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.55 fold=8: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
 t=0.60 fold=8: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=8: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=8: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -434,15 +434,15 @@ t=0.85 fold=8: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=
 t=0.90 fold=8: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=8: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 08 | Train Rows: 6084   | Tested on forward 150 rows. Purged: 27
-t=0.20 fold=9: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.25 fold=9: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.30 fold=9: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.35 fold=9: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.40 fold=9: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.45 fold=9: raw_crossings=141 lockout_rejected=42 barrier_pct_rejected=0 passed=99
-t=0.50 fold=9: raw_crossings=49 lockout_rejected=10 barrier_pct_rejected=0 passed=39
-t=0.55 fold=9: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
-t=0.60 fold=9: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=9: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
+t=0.25 fold=9: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
+t=0.30 fold=9: raw_crossings=149 lockout_rejected=40 barrier_pct_rejected=0 passed=109
+t=0.35 fold=9: raw_crossings=149 lockout_rejected=40 barrier_pct_rejected=0 passed=109
+t=0.40 fold=9: raw_crossings=146 lockout_rejected=39 barrier_pct_rejected=0 passed=107
+t=0.45 fold=9: raw_crossings=145 lockout_rejected=39 barrier_pct_rejected=0 passed=106
+t=0.50 fold=9: raw_crossings=55 lockout_rejected=6 barrier_pct_rejected=0 passed=49
+t=0.55 fold=9: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.60 fold=9: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=9: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=9: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=9: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -451,14 +451,14 @@ t=0.85 fold=9: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=
 t=0.90 fold=9: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=9: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 09 | Train Rows: 6122   | Tested on forward 150 rows. Purged: 16
-t=0.20 fold=10: raw_crossings=150 lockout_rejected=40 barrier_pct_rejected=0 passed=110
-t=0.25 fold=10: raw_crossings=150 lockout_rejected=40 barrier_pct_rejected=0 passed=110
-t=0.30 fold=10: raw_crossings=150 lockout_rejected=40 barrier_pct_rejected=0 passed=110
-t=0.35 fold=10: raw_crossings=150 lockout_rejected=40 barrier_pct_rejected=0 passed=110
-t=0.40 fold=10: raw_crossings=150 lockout_rejected=40 barrier_pct_rejected=0 passed=110
-t=0.45 fold=10: raw_crossings=145 lockout_rejected=39 barrier_pct_rejected=0 passed=106
-t=0.50 fold=10: raw_crossings=44 lockout_rejected=7 barrier_pct_rejected=0 passed=37
-t=0.55 fold=10: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=10: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
+t=0.25 fold=10: raw_crossings=149 lockout_rejected=34 barrier_pct_rejected=0 passed=115
+t=0.30 fold=10: raw_crossings=149 lockout_rejected=34 barrier_pct_rejected=0 passed=115
+t=0.35 fold=10: raw_crossings=147 lockout_rejected=33 barrier_pct_rejected=0 passed=114
+t=0.40 fold=10: raw_crossings=145 lockout_rejected=32 barrier_pct_rejected=0 passed=113
+t=0.45 fold=10: raw_crossings=143 lockout_rejected=31 barrier_pct_rejected=0 passed=112
+t=0.50 fold=10: raw_crossings=58 lockout_rejected=6 barrier_pct_rejected=0 passed=52
+t=0.55 fold=10: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
 t=0.60 fold=10: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=10: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=10: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -468,14 +468,14 @@ t=0.85 fold=10: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=10: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=10: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 10 | Train Rows: 6147   | Tested on forward 150 rows. Purged: 18
-t=0.20 fold=11: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
-t=0.25 fold=11: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
-t=0.30 fold=11: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
-t=0.35 fold=11: raw_crossings=149 lockout_rejected=33 barrier_pct_rejected=0 passed=116
-t=0.40 fold=11: raw_crossings=149 lockout_rejected=33 barrier_pct_rejected=0 passed=116
-t=0.45 fold=11: raw_crossings=142 lockout_rejected=29 barrier_pct_rejected=0 passed=113
-t=0.50 fold=11: raw_crossings=49 lockout_rejected=7 barrier_pct_rejected=0 passed=42
-t=0.55 fold=11: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=11: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
+t=0.25 fold=11: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
+t=0.30 fold=11: raw_crossings=148 lockout_rejected=30 barrier_pct_rejected=0 passed=118
+t=0.35 fold=11: raw_crossings=147 lockout_rejected=29 barrier_pct_rejected=0 passed=118
+t=0.40 fold=11: raw_crossings=145 lockout_rejected=28 barrier_pct_rejected=0 passed=117
+t=0.45 fold=11: raw_crossings=142 lockout_rejected=28 barrier_pct_rejected=0 passed=114
+t=0.50 fold=11: raw_crossings=63 lockout_rejected=9 barrier_pct_rejected=0 passed=54
+t=0.55 fold=11: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
 t=0.60 fold=11: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=11: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=11: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -485,14 +485,14 @@ t=0.85 fold=11: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=11: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=11: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 11 | Train Rows: 6186   | Tested on forward 150 rows. Purged: 6
-t=0.20 fold=12: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
-t=0.25 fold=12: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
-t=0.30 fold=12: raw_crossings=149 lockout_rejected=31 barrier_pct_rejected=0 passed=118
-t=0.35 fold=12: raw_crossings=149 lockout_rejected=31 barrier_pct_rejected=0 passed=118
-t=0.40 fold=12: raw_crossings=148 lockout_rejected=31 barrier_pct_rejected=0 passed=117
-t=0.45 fold=12: raw_crossings=139 lockout_rejected=25 barrier_pct_rejected=0 passed=114
-t=0.50 fold=12: raw_crossings=42 lockout_rejected=2 barrier_pct_rejected=0 passed=40
-t=0.55 fold=12: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.20 fold=12: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
+t=0.25 fold=12: raw_crossings=149 lockout_rejected=23 barrier_pct_rejected=0 passed=126
+t=0.30 fold=12: raw_crossings=148 lockout_rejected=22 barrier_pct_rejected=0 passed=126
+t=0.35 fold=12: raw_crossings=146 lockout_rejected=20 barrier_pct_rejected=0 passed=126
+t=0.40 fold=12: raw_crossings=145 lockout_rejected=20 barrier_pct_rejected=0 passed=125
+t=0.45 fold=12: raw_crossings=142 lockout_rejected=20 barrier_pct_rejected=0 passed=122
+t=0.50 fold=12: raw_crossings=59 lockout_rejected=4 barrier_pct_rejected=0 passed=55
+t=0.55 fold=12: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
 t=0.60 fold=12: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=12: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=12: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -502,13 +502,13 @@ t=0.85 fold=12: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=12: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=12: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 12 | Train Rows: 6206   | Tested on forward 150 rows. Purged: 13
-t=0.20 fold=13: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.25 fold=13: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.30 fold=13: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.35 fold=13: raw_crossings=149 lockout_rejected=41 barrier_pct_rejected=0 passed=108
-t=0.40 fold=13: raw_crossings=145 lockout_rejected=40 barrier_pct_rejected=0 passed=105
-t=0.45 fold=13: raw_crossings=134 lockout_rejected=28 barrier_pct_rejected=0 passed=106
-t=0.50 fold=13: raw_crossings=43 lockout_rejected=2 barrier_pct_rejected=0 passed=41
+t=0.20 fold=13: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
+t=0.25 fold=13: raw_crossings=149 lockout_rejected=23 barrier_pct_rejected=0 passed=126
+t=0.30 fold=13: raw_crossings=148 lockout_rejected=23 barrier_pct_rejected=0 passed=125
+t=0.35 fold=13: raw_crossings=147 lockout_rejected=22 barrier_pct_rejected=0 passed=125
+t=0.40 fold=13: raw_crossings=146 lockout_rejected=22 barrier_pct_rejected=0 passed=124
+t=0.45 fold=13: raw_crossings=142 lockout_rejected=20 barrier_pct_rejected=0 passed=122
+t=0.50 fold=13: raw_crossings=56 lockout_rejected=5 barrier_pct_rejected=0 passed=51
 t=0.55 fold=13: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
 t=0.60 fold=13: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=13: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -519,14 +519,14 @@ t=0.85 fold=13: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=13: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=13: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 13 | Train Rows: 6234   | Tested on forward 150 rows. Purged: 12
-t=0.20 fold=14: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
-t=0.25 fold=14: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
-t=0.30 fold=14: raw_crossings=149 lockout_rejected=33 barrier_pct_rejected=0 passed=116
-t=0.35 fold=14: raw_crossings=148 lockout_rejected=32 barrier_pct_rejected=0 passed=116
-t=0.40 fold=14: raw_crossings=143 lockout_rejected=31 barrier_pct_rejected=0 passed=112
-t=0.45 fold=14: raw_crossings=132 lockout_rejected=27 barrier_pct_rejected=0 passed=105
-t=0.50 fold=14: raw_crossings=38 lockout_rejected=1 barrier_pct_rejected=0 passed=37
-t=0.55 fold=14: raw_crossings=5 lockout_rejected=0 barrier_pct_rejected=0 passed=5
+t=0.20 fold=14: raw_crossings=150 lockout_rejected=18 barrier_pct_rejected=0 passed=132
+t=0.25 fold=14: raw_crossings=149 lockout_rejected=18 barrier_pct_rejected=0 passed=131
+t=0.30 fold=14: raw_crossings=148 lockout_rejected=18 barrier_pct_rejected=0 passed=130
+t=0.35 fold=14: raw_crossings=147 lockout_rejected=17 barrier_pct_rejected=0 passed=130
+t=0.40 fold=14: raw_crossings=145 lockout_rejected=16 barrier_pct_rejected=0 passed=129
+t=0.45 fold=14: raw_crossings=139 lockout_rejected=15 barrier_pct_rejected=0 passed=124
+t=0.50 fold=14: raw_crossings=74 lockout_rejected=7 barrier_pct_rejected=0 passed=67
+t=0.55 fold=14: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
 t=0.60 fold=14: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=14: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=14: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -536,14 +536,14 @@ t=0.85 fold=14: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=14: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=14: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 14 | Train Rows: 6264   | Tested on forward 150 rows. Purged: 9
-t=0.20 fold=15: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.25 fold=15: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.30 fold=15: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.35 fold=15: raw_crossings=148 lockout_rejected=37 barrier_pct_rejected=0 passed=111
-t=0.40 fold=15: raw_crossings=144 lockout_rejected=35 barrier_pct_rejected=0 passed=109
-t=0.45 fold=15: raw_crossings=133 lockout_rejected=30 barrier_pct_rejected=0 passed=103
-t=0.50 fold=15: raw_crossings=48 lockout_rejected=4 barrier_pct_rejected=0 passed=44
-t=0.55 fold=15: raw_crossings=6 lockout_rejected=0 barrier_pct_rejected=0 passed=6
+t=0.20 fold=15: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
+t=0.25 fold=15: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
+t=0.30 fold=15: raw_crossings=148 lockout_rejected=23 barrier_pct_rejected=0 passed=125
+t=0.35 fold=15: raw_crossings=147 lockout_rejected=23 barrier_pct_rejected=0 passed=124
+t=0.40 fold=15: raw_crossings=146 lockout_rejected=23 barrier_pct_rejected=0 passed=123
+t=0.45 fold=15: raw_crossings=143 lockout_rejected=23 barrier_pct_rejected=0 passed=120
+t=0.50 fold=15: raw_crossings=63 lockout_rejected=7 barrier_pct_rejected=0 passed=56
+t=0.55 fold=15: raw_crossings=5 lockout_rejected=0 barrier_pct_rejected=0 passed=5
 t=0.60 fold=15: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=15: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=15: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -553,14 +553,14 @@ t=0.85 fold=15: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=15: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=15: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 15 | Train Rows: 6288   | Tested on forward 150 rows. Purged: 12
-t=0.20 fold=16: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
-t=0.25 fold=16: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
-t=0.30 fold=16: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
-t=0.35 fold=16: raw_crossings=149 lockout_rejected=36 barrier_pct_rejected=0 passed=113
-t=0.40 fold=16: raw_crossings=145 lockout_rejected=35 barrier_pct_rejected=0 passed=110
-t=0.45 fold=16: raw_crossings=131 lockout_rejected=30 barrier_pct_rejected=0 passed=101
-t=0.50 fold=16: raw_crossings=52 lockout_rejected=5 barrier_pct_rejected=0 passed=47
-t=0.55 fold=16: raw_crossings=6 lockout_rejected=0 barrier_pct_rejected=0 passed=6
+t=0.20 fold=16: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
+t=0.25 fold=16: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
+t=0.30 fold=16: raw_crossings=149 lockout_rejected=30 barrier_pct_rejected=0 passed=119
+t=0.35 fold=16: raw_crossings=147 lockout_rejected=30 barrier_pct_rejected=0 passed=117
+t=0.40 fold=16: raw_crossings=146 lockout_rejected=30 barrier_pct_rejected=0 passed=116
+t=0.45 fold=16: raw_crossings=141 lockout_rejected=29 barrier_pct_rejected=0 passed=112
+t=0.50 fold=16: raw_crossings=65 lockout_rejected=9 barrier_pct_rejected=0 passed=56
+t=0.55 fold=16: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
 t=0.60 fold=16: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=16: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=16: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -570,14 +570,14 @@ t=0.85 fold=16: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=16: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=16: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 16 | Train Rows: 6315   | Tested on forward 150 rows. Purged: 12
-t=0.20 fold=17: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.25 fold=17: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.30 fold=17: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.35 fold=17: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.40 fold=17: raw_crossings=144 lockout_rejected=33 barrier_pct_rejected=0 passed=111
-t=0.45 fold=17: raw_crossings=130 lockout_rejected=29 barrier_pct_rejected=0 passed=101
-t=0.50 fold=17: raw_crossings=50 lockout_rejected=6 barrier_pct_rejected=0 passed=44
-t=0.55 fold=17: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.20 fold=17: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.25 fold=17: raw_crossings=149 lockout_rejected=33 barrier_pct_rejected=0 passed=116
+t=0.30 fold=17: raw_crossings=148 lockout_rejected=33 barrier_pct_rejected=0 passed=115
+t=0.35 fold=17: raw_crossings=146 lockout_rejected=33 barrier_pct_rejected=0 passed=113
+t=0.40 fold=17: raw_crossings=144 lockout_rejected=32 barrier_pct_rejected=0 passed=112
+t=0.45 fold=17: raw_crossings=136 lockout_rejected=27 barrier_pct_rejected=0 passed=109
+t=0.50 fold=17: raw_crossings=57 lockout_rejected=7 barrier_pct_rejected=0 passed=50
+t=0.55 fold=17: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.60 fold=17: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=17: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=17: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -587,14 +587,14 @@ t=0.85 fold=17: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=17: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=17: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 17 | Train Rows: 6342   | Tested on forward 150 rows. Purged: 12
-t=0.20 fold=18: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
-t=0.25 fold=18: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
-t=0.30 fold=18: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
-t=0.35 fold=18: raw_crossings=148 lockout_rejected=25 barrier_pct_rejected=0 passed=123
-t=0.40 fold=18: raw_crossings=146 lockout_rejected=25 barrier_pct_rejected=0 passed=121
-t=0.45 fold=18: raw_crossings=130 lockout_rejected=22 barrier_pct_rejected=0 passed=108
-t=0.50 fold=18: raw_crossings=50 lockout_rejected=4 barrier_pct_rejected=0 passed=46
-t=0.55 fold=18: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.20 fold=18: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
+t=0.25 fold=18: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
+t=0.30 fold=18: raw_crossings=147 lockout_rejected=36 barrier_pct_rejected=0 passed=111
+t=0.35 fold=18: raw_crossings=144 lockout_rejected=36 barrier_pct_rejected=0 passed=108
+t=0.40 fold=18: raw_crossings=142 lockout_rejected=35 barrier_pct_rejected=0 passed=107
+t=0.45 fold=18: raw_crossings=132 lockout_rejected=26 barrier_pct_rejected=0 passed=106
+t=0.50 fold=18: raw_crossings=45 lockout_rejected=5 barrier_pct_rejected=0 passed=40
+t=0.55 fold=18: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
 t=0.60 fold=18: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=18: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=18: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -604,14 +604,14 @@ t=0.85 fold=18: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=18: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=18: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 18 | Train Rows: 6360   | Tested on forward 150 rows. Purged: 21
-t=0.20 fold=19: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
-t=0.25 fold=19: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
-t=0.30 fold=19: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
-t=0.35 fold=19: raw_crossings=147 lockout_rejected=31 barrier_pct_rejected=0 passed=116
-t=0.40 fold=19: raw_crossings=147 lockout_rejected=31 barrier_pct_rejected=0 passed=116
-t=0.45 fold=19: raw_crossings=124 lockout_rejected=24 barrier_pct_rejected=0 passed=100
-t=0.50 fold=19: raw_crossings=44 lockout_rejected=5 barrier_pct_rejected=0 passed=39
-t=0.55 fold=19: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.20 fold=19: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
+t=0.25 fold=19: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
+t=0.30 fold=19: raw_crossings=149 lockout_rejected=41 barrier_pct_rejected=0 passed=108
+t=0.35 fold=19: raw_crossings=144 lockout_rejected=41 barrier_pct_rejected=0 passed=103
+t=0.40 fold=19: raw_crossings=142 lockout_rejected=39 barrier_pct_rejected=0 passed=103
+t=0.45 fold=19: raw_crossings=134 lockout_rejected=32 barrier_pct_rejected=0 passed=102
+t=0.50 fold=19: raw_crossings=46 lockout_rejected=6 barrier_pct_rejected=0 passed=40
+t=0.55 fold=19: raw_crossings=7 lockout_rejected=0 barrier_pct_rejected=0 passed=7
 t=0.60 fold=19: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=19: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=19: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -621,16 +621,16 @@ t=0.85 fold=19: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=19: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=19: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 19 | Train Rows: 6396   | Tested on forward 150 rows. Purged: 12
-t=0.20 fold=20: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
-t=0.25 fold=20: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
-t=0.30 fold=20: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
-t=0.35 fold=20: raw_crossings=148 lockout_rejected=45 barrier_pct_rejected=0 passed=103
-t=0.40 fold=20: raw_crossings=145 lockout_rejected=43 barrier_pct_rejected=0 passed=102
-t=0.45 fold=20: raw_crossings=118 lockout_rejected=38 barrier_pct_rejected=0 passed=80
-t=0.50 fold=20: raw_crossings=35 lockout_rejected=8 barrier_pct_rejected=0 passed=27
-t=0.55 fold=20: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
-t=0.60 fold=20: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
-t=0.65 fold=20: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.20 fold=20: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
+t=0.25 fold=20: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
+t=0.30 fold=20: raw_crossings=146 lockout_rejected=44 barrier_pct_rejected=0 passed=102
+t=0.35 fold=20: raw_crossings=142 lockout_rejected=42 barrier_pct_rejected=0 passed=100
+t=0.40 fold=20: raw_crossings=138 lockout_rejected=39 barrier_pct_rejected=0 passed=99
+t=0.45 fold=20: raw_crossings=128 lockout_rejected=32 barrier_pct_rejected=0 passed=96
+t=0.50 fold=20: raw_crossings=50 lockout_rejected=10 barrier_pct_rejected=0 passed=40
+t=0.55 fold=20: raw_crossings=11 lockout_rejected=0 barrier_pct_rejected=0 passed=11
+t=0.60 fold=20: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
+t=0.65 fold=20: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.70 fold=20: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=20: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.80 fold=20: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -638,16 +638,16 @@ t=0.85 fold=20: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=20: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=20: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 20 | Train Rows: 6423   | Tested on forward 150 rows. Purged: 12
-t=0.20 fold=21: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.25 fold=21: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.30 fold=21: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.35 fold=21: raw_crossings=149 lockout_rejected=39 barrier_pct_rejected=0 passed=110
-t=0.40 fold=21: raw_crossings=139 lockout_rejected=34 barrier_pct_rejected=0 passed=105
-t=0.45 fold=21: raw_crossings=119 lockout_rejected=35 barrier_pct_rejected=0 passed=84
-t=0.50 fold=21: raw_crossings=32 lockout_rejected=4 barrier_pct_rejected=0 passed=28
-t=0.55 fold=21: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
-t=0.60 fold=21: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
-t=0.65 fold=21: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.20 fold=21: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
+t=0.25 fold=21: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
+t=0.30 fold=21: raw_crossings=149 lockout_rejected=41 barrier_pct_rejected=0 passed=108
+t=0.35 fold=21: raw_crossings=143 lockout_rejected=40 barrier_pct_rejected=0 passed=103
+t=0.40 fold=21: raw_crossings=137 lockout_rejected=34 barrier_pct_rejected=0 passed=103
+t=0.45 fold=21: raw_crossings=123 lockout_rejected=26 barrier_pct_rejected=0 passed=97
+t=0.50 fold=21: raw_crossings=51 lockout_rejected=7 barrier_pct_rejected=0 passed=44
+t=0.55 fold=21: raw_crossings=11 lockout_rejected=0 barrier_pct_rejected=0 passed=11
+t=0.60 fold=21: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.65 fold=21: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.70 fold=21: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=21: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.80 fold=21: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -655,16 +655,16 @@ t=0.85 fold=21: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=21: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=21: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 21 | Train Rows: 6448   | Tested on forward 150 rows. Purged: 14
-t=0.20 fold=22: raw_crossings=150 lockout_rejected=46 barrier_pct_rejected=0 passed=104
-t=0.25 fold=22: raw_crossings=150 lockout_rejected=46 barrier_pct_rejected=0 passed=104
-t=0.30 fold=22: raw_crossings=150 lockout_rejected=46 barrier_pct_rejected=0 passed=104
-t=0.35 fold=22: raw_crossings=149 lockout_rejected=46 barrier_pct_rejected=0 passed=103
-t=0.40 fold=22: raw_crossings=144 lockout_rejected=45 barrier_pct_rejected=0 passed=99
-t=0.45 fold=22: raw_crossings=127 lockout_rejected=38 barrier_pct_rejected=0 passed=89
-t=0.50 fold=22: raw_crossings=34 lockout_rejected=3 barrier_pct_rejected=0 passed=31
-t=0.55 fold=22: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
-t=0.60 fold=22: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
-t=0.65 fold=22: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.20 fold=22: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
+t=0.25 fold=22: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
+t=0.30 fold=22: raw_crossings=144 lockout_rejected=35 barrier_pct_rejected=0 passed=109
+t=0.35 fold=22: raw_crossings=140 lockout_rejected=33 barrier_pct_rejected=0 passed=107
+t=0.40 fold=22: raw_crossings=136 lockout_rejected=28 barrier_pct_rejected=0 passed=108
+t=0.45 fold=22: raw_crossings=126 lockout_rejected=25 barrier_pct_rejected=0 passed=101
+t=0.50 fold=22: raw_crossings=53 lockout_rejected=8 barrier_pct_rejected=0 passed=45
+t=0.55 fold=22: raw_crossings=8 lockout_rejected=0 barrier_pct_rejected=0 passed=8
+t=0.60 fold=22: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.65 fold=22: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.70 fold=22: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=22: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.80 fold=22: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -672,16 +672,16 @@ t=0.85 fold=22: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=22: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=22: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 22 | Train Rows: 6475   | Tested on forward 150 rows. Purged: 14
-t=0.20 fold=23: raw_crossings=150 lockout_rejected=51 barrier_pct_rejected=0 passed=99
-t=0.25 fold=23: raw_crossings=150 lockout_rejected=51 barrier_pct_rejected=0 passed=99
-t=0.30 fold=23: raw_crossings=149 lockout_rejected=51 barrier_pct_rejected=0 passed=98
-t=0.35 fold=23: raw_crossings=149 lockout_rejected=51 barrier_pct_rejected=0 passed=98
-t=0.40 fold=23: raw_crossings=145 lockout_rejected=51 barrier_pct_rejected=0 passed=94
-t=0.45 fold=23: raw_crossings=127 lockout_rejected=44 barrier_pct_rejected=0 passed=83
-t=0.50 fold=23: raw_crossings=45 lockout_rejected=7 barrier_pct_rejected=0 passed=38
-t=0.55 fold=23: raw_crossings=5 lockout_rejected=0 barrier_pct_rejected=0 passed=5
-t=0.60 fold=23: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
-t=0.65 fold=23: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.20 fold=23: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
+t=0.25 fold=23: raw_crossings=148 lockout_rejected=36 barrier_pct_rejected=0 passed=112
+t=0.30 fold=23: raw_crossings=144 lockout_rejected=34 barrier_pct_rejected=0 passed=110
+t=0.35 fold=23: raw_crossings=142 lockout_rejected=33 barrier_pct_rejected=0 passed=109
+t=0.40 fold=23: raw_crossings=139 lockout_rejected=28 barrier_pct_rejected=0 passed=111
+t=0.45 fold=23: raw_crossings=135 lockout_rejected=28 barrier_pct_rejected=0 passed=107
+t=0.50 fold=23: raw_crossings=56 lockout_rejected=12 barrier_pct_rejected=0 passed=44
+t=0.55 fold=23: raw_crossings=8 lockout_rejected=0 barrier_pct_rejected=0 passed=8
+t=0.60 fold=23: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.65 fold=23: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.70 fold=23: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=23: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.80 fold=23: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -689,16 +689,16 @@ t=0.85 fold=23: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=23: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=23: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 23 | Train Rows: 6500   | Tested on forward 150 rows. Purged: 16
-t=0.20 fold=24: raw_crossings=150 lockout_rejected=48 barrier_pct_rejected=0 passed=102
-t=0.25 fold=24: raw_crossings=150 lockout_rejected=48 barrier_pct_rejected=0 passed=102
-t=0.30 fold=24: raw_crossings=149 lockout_rejected=47 barrier_pct_rejected=0 passed=102
-t=0.35 fold=24: raw_crossings=148 lockout_rejected=48 barrier_pct_rejected=0 passed=100
-t=0.40 fold=24: raw_crossings=143 lockout_rejected=47 barrier_pct_rejected=0 passed=96
-t=0.45 fold=24: raw_crossings=131 lockout_rejected=40 barrier_pct_rejected=0 passed=91
-t=0.50 fold=24: raw_crossings=42 lockout_rejected=7 barrier_pct_rejected=0 passed=35
-t=0.55 fold=24: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
-t=0.60 fold=24: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
-t=0.65 fold=24: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.20 fold=24: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
+t=0.25 fold=24: raw_crossings=148 lockout_rejected=37 barrier_pct_rejected=0 passed=111
+t=0.30 fold=24: raw_crossings=144 lockout_rejected=35 barrier_pct_rejected=0 passed=109
+t=0.35 fold=24: raw_crossings=143 lockout_rejected=34 barrier_pct_rejected=0 passed=109
+t=0.40 fold=24: raw_crossings=139 lockout_rejected=29 barrier_pct_rejected=0 passed=110
+t=0.45 fold=24: raw_crossings=135 lockout_rejected=29 barrier_pct_rejected=0 passed=106
+t=0.50 fold=24: raw_crossings=62 lockout_rejected=11 barrier_pct_rejected=0 passed=51
+t=0.55 fold=24: raw_crossings=12 lockout_rejected=0 barrier_pct_rejected=0 passed=12
+t=0.60 fold=24: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.65 fold=24: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.70 fold=24: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=24: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.80 fold=24: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -706,15 +706,15 @@ t=0.85 fold=24: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=24: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=24: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 24 | Train Rows: 6532   | Tested on forward 150 rows. Purged: 11
-t=0.20 fold=25: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.25 fold=25: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.30 fold=25: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.35 fold=25: raw_crossings=147 lockout_rejected=43 barrier_pct_rejected=0 passed=104
-t=0.40 fold=25: raw_crossings=144 lockout_rejected=43 barrier_pct_rejected=0 passed=101
-t=0.45 fold=25: raw_crossings=133 lockout_rejected=37 barrier_pct_rejected=0 passed=96
-t=0.50 fold=25: raw_crossings=55 lockout_rejected=13 barrier_pct_rejected=0 passed=42
-t=0.55 fold=25: raw_crossings=5 lockout_rejected=0 barrier_pct_rejected=0 passed=5
-t=0.60 fold=25: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=25: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.25 fold=25: raw_crossings=149 lockout_rejected=33 barrier_pct_rejected=0 passed=116
+t=0.30 fold=25: raw_crossings=145 lockout_rejected=31 barrier_pct_rejected=0 passed=114
+t=0.35 fold=25: raw_crossings=144 lockout_rejected=30 barrier_pct_rejected=0 passed=114
+t=0.40 fold=25: raw_crossings=141 lockout_rejected=25 barrier_pct_rejected=0 passed=116
+t=0.45 fold=25: raw_crossings=136 lockout_rejected=25 barrier_pct_rejected=0 passed=111
+t=0.50 fold=25: raw_crossings=53 lockout_rejected=5 barrier_pct_rejected=0 passed=48
+t=0.55 fold=25: raw_crossings=6 lockout_rejected=0 barrier_pct_rejected=0 passed=6
+t=0.60 fold=25: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=25: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=25: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=25: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -723,15 +723,15 @@ t=0.85 fold=25: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=25: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=25: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 25 | Train Rows: 6550   | Tested on forward 150 rows. Purged: 20
-t=0.20 fold=26: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.25 fold=26: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.30 fold=26: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.35 fold=26: raw_crossings=149 lockout_rejected=34 barrier_pct_rejected=0 passed=115
-t=0.40 fold=26: raw_crossings=147 lockout_rejected=33 barrier_pct_rejected=0 passed=114
-t=0.45 fold=26: raw_crossings=129 lockout_rejected=27 barrier_pct_rejected=0 passed=102
-t=0.50 fold=26: raw_crossings=51 lockout_rejected=7 barrier_pct_rejected=0 passed=44
-t=0.55 fold=26: raw_crossings=7 lockout_rejected=0 barrier_pct_rejected=0 passed=7
-t=0.60 fold=26: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=26: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
+t=0.25 fold=26: raw_crossings=149 lockout_rejected=35 barrier_pct_rejected=0 passed=114
+t=0.30 fold=26: raw_crossings=148 lockout_rejected=34 barrier_pct_rejected=0 passed=114
+t=0.35 fold=26: raw_crossings=146 lockout_rejected=33 barrier_pct_rejected=0 passed=113
+t=0.40 fold=26: raw_crossings=145 lockout_rejected=32 barrier_pct_rejected=0 passed=113
+t=0.45 fold=26: raw_crossings=140 lockout_rejected=32 barrier_pct_rejected=0 passed=108
+t=0.50 fold=26: raw_crossings=53 lockout_rejected=8 barrier_pct_rejected=0 passed=45
+t=0.55 fold=26: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
+t=0.60 fold=26: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=26: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=26: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=26: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -740,15 +740,15 @@ t=0.85 fold=26: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=26: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=26: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 26 | Train Rows: 6584   | Tested on forward 150 rows. Purged: 13
-t=0.20 fold=27: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.25 fold=27: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.30 fold=27: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.35 fold=27: raw_crossings=148 lockout_rejected=38 barrier_pct_rejected=0 passed=110
-t=0.40 fold=27: raw_crossings=144 lockout_rejected=35 barrier_pct_rejected=0 passed=109
-t=0.45 fold=27: raw_crossings=135 lockout_rejected=33 barrier_pct_rejected=0 passed=102
-t=0.50 fold=27: raw_crossings=46 lockout_rejected=7 barrier_pct_rejected=0 passed=39
-t=0.55 fold=27: raw_crossings=8 lockout_rejected=0 barrier_pct_rejected=0 passed=8
-t=0.60 fold=27: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=27: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
+t=0.25 fold=27: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
+t=0.30 fold=27: raw_crossings=148 lockout_rejected=32 barrier_pct_rejected=0 passed=116
+t=0.35 fold=27: raw_crossings=147 lockout_rejected=32 barrier_pct_rejected=0 passed=115
+t=0.40 fold=27: raw_crossings=145 lockout_rejected=31 barrier_pct_rejected=0 passed=114
+t=0.45 fold=27: raw_crossings=142 lockout_rejected=30 barrier_pct_rejected=0 passed=112
+t=0.50 fold=27: raw_crossings=50 lockout_rejected=4 barrier_pct_rejected=0 passed=46
+t=0.55 fold=27: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
+t=0.60 fold=27: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=27: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=27: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=27: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -757,15 +757,15 @@ t=0.85 fold=27: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=27: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=27: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 27 | Train Rows: 6611   | Tested on forward 150 rows. Purged: 13
-t=0.20 fold=28: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.25 fold=28: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.30 fold=28: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.35 fold=28: raw_crossings=147 lockout_rejected=32 barrier_pct_rejected=0 passed=115
-t=0.40 fold=28: raw_crossings=143 lockout_rejected=32 barrier_pct_rejected=0 passed=111
-t=0.45 fold=28: raw_crossings=135 lockout_rejected=25 barrier_pct_rejected=0 passed=110
-t=0.50 fold=28: raw_crossings=46 lockout_rejected=6 barrier_pct_rejected=0 passed=40
-t=0.55 fold=28: raw_crossings=9 lockout_rejected=1 barrier_pct_rejected=0 passed=8
-t=0.60 fold=28: raw_crossings=3 lockout_rejected=1 barrier_pct_rejected=0 passed=2
+t=0.20 fold=28: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
+t=0.25 fold=28: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
+t=0.30 fold=28: raw_crossings=149 lockout_rejected=29 barrier_pct_rejected=0 passed=120
+t=0.35 fold=28: raw_crossings=148 lockout_rejected=29 barrier_pct_rejected=0 passed=119
+t=0.40 fold=28: raw_crossings=147 lockout_rejected=28 barrier_pct_rejected=0 passed=119
+t=0.45 fold=28: raw_crossings=145 lockout_rejected=28 barrier_pct_rejected=0 passed=117
+t=0.50 fold=28: raw_crossings=47 lockout_rejected=3 barrier_pct_rejected=0 passed=44
+t=0.55 fold=28: raw_crossings=7 lockout_rejected=0 barrier_pct_rejected=0 passed=7
+t=0.60 fold=28: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=28: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=28: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=28: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -774,15 +774,15 @@ t=0.85 fold=28: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=28: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=28: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 28 | Train Rows: 6640   | Tested on forward 150 rows. Purged: 11
-t=0.20 fold=29: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.25 fold=29: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.30 fold=29: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.35 fold=29: raw_crossings=149 lockout_rejected=40 barrier_pct_rejected=0 passed=109
-t=0.40 fold=29: raw_crossings=145 lockout_rejected=37 barrier_pct_rejected=0 passed=108
-t=0.45 fold=29: raw_crossings=132 lockout_rejected=32 barrier_pct_rejected=0 passed=100
-t=0.50 fold=29: raw_crossings=51 lockout_rejected=7 barrier_pct_rejected=0 passed=44
-t=0.55 fold=29: raw_crossings=11 lockout_rejected=1 barrier_pct_rejected=0 passed=10
-t=0.60 fold=29: raw_crossings=3 lockout_rejected=1 barrier_pct_rejected=0 passed=2
+t=0.20 fold=29: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.25 fold=29: raw_crossings=149 lockout_rejected=25 barrier_pct_rejected=0 passed=124
+t=0.30 fold=29: raw_crossings=148 lockout_rejected=24 barrier_pct_rejected=0 passed=124
+t=0.35 fold=29: raw_crossings=147 lockout_rejected=24 barrier_pct_rejected=0 passed=123
+t=0.40 fold=29: raw_crossings=146 lockout_rejected=24 barrier_pct_rejected=0 passed=122
+t=0.45 fold=29: raw_crossings=142 lockout_rejected=23 barrier_pct_rejected=0 passed=119
+t=0.50 fold=29: raw_crossings=58 lockout_rejected=3 barrier_pct_rejected=0 passed=55
+t=0.55 fold=29: raw_crossings=5 lockout_rejected=0 barrier_pct_rejected=0 passed=5
+t=0.60 fold=29: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.65 fold=29: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=29: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=29: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -791,15 +791,15 @@ t=0.85 fold=29: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=29: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=29: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 29 | Train Rows: 6669   | Tested on forward 150 rows. Purged: 9
-t=0.20 fold=30: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.25 fold=30: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.30 fold=30: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.35 fold=30: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.40 fold=30: raw_crossings=145 lockout_rejected=43 barrier_pct_rejected=0 passed=102
-t=0.45 fold=30: raw_crossings=133 lockout_rejected=35 barrier_pct_rejected=0 passed=98
-t=0.50 fold=30: raw_crossings=47 lockout_rejected=6 barrier_pct_rejected=0 passed=41
-t=0.55 fold=30: raw_crossings=10 lockout_rejected=1 barrier_pct_rejected=0 passed=9
-t=0.60 fold=30: raw_crossings=3 lockout_rejected=1 barrier_pct_rejected=0 passed=2
+t=0.20 fold=30: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.25 fold=30: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.30 fold=30: raw_crossings=149 lockout_rejected=29 barrier_pct_rejected=0 passed=120
+t=0.35 fold=30: raw_crossings=149 lockout_rejected=29 barrier_pct_rejected=0 passed=120
+t=0.40 fold=30: raw_crossings=149 lockout_rejected=29 barrier_pct_rejected=0 passed=120
+t=0.45 fold=30: raw_crossings=143 lockout_rejected=28 barrier_pct_rejected=0 passed=115
+t=0.50 fold=30: raw_crossings=60 lockout_rejected=3 barrier_pct_rejected=0 passed=57
+t=0.55 fold=30: raw_crossings=7 lockout_rejected=0 barrier_pct_rejected=0 passed=7
+t=0.60 fold=30: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.65 fold=30: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=30: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=30: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -808,15 +808,15 @@ t=0.85 fold=30: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=30: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=30: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 30 | Train Rows: 6700   | Tested on forward 150 rows. Purged: 5
-t=0.20 fold=31: raw_crossings=150 lockout_rejected=49 barrier_pct_rejected=0 passed=101
-t=0.25 fold=31: raw_crossings=150 lockout_rejected=49 barrier_pct_rejected=0 passed=101
-t=0.30 fold=31: raw_crossings=150 lockout_rejected=49 barrier_pct_rejected=0 passed=101
-t=0.35 fold=31: raw_crossings=148 lockout_rejected=46 barrier_pct_rejected=0 passed=102
-t=0.40 fold=31: raw_crossings=144 lockout_rejected=43 barrier_pct_rejected=0 passed=101
-t=0.45 fold=31: raw_crossings=135 lockout_rejected=38 barrier_pct_rejected=0 passed=97
-t=0.50 fold=31: raw_crossings=35 lockout_rejected=3 barrier_pct_rejected=0 passed=32
-t=0.55 fold=31: raw_crossings=6 lockout_rejected=1 barrier_pct_rejected=0 passed=5
-t=0.60 fold=31: raw_crossings=3 lockout_rejected=1 barrier_pct_rejected=0 passed=2
+t=0.20 fold=31: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.25 fold=31: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.30 fold=31: raw_crossings=149 lockout_rejected=29 barrier_pct_rejected=0 passed=120
+t=0.35 fold=31: raw_crossings=149 lockout_rejected=29 barrier_pct_rejected=0 passed=120
+t=0.40 fold=31: raw_crossings=148 lockout_rejected=28 barrier_pct_rejected=0 passed=120
+t=0.45 fold=31: raw_crossings=144 lockout_rejected=27 barrier_pct_rejected=0 passed=117
+t=0.50 fold=31: raw_crossings=58 lockout_rejected=4 barrier_pct_rejected=0 passed=54
+t=0.55 fold=31: raw_crossings=8 lockout_rejected=0 barrier_pct_rejected=0 passed=8
+t=0.60 fold=31: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
 t=0.65 fold=31: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=31: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=31: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -825,15 +825,15 @@ t=0.85 fold=31: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=31: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=31: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 31 | Train Rows: 6720   | Tested on forward 150 rows. Purged: 12
-t=0.20 fold=32: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.25 fold=32: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.30 fold=32: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.35 fold=32: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.40 fold=32: raw_crossings=145 lockout_rejected=37 barrier_pct_rejected=0 passed=108
-t=0.45 fold=32: raw_crossings=136 lockout_rejected=34 barrier_pct_rejected=0 passed=102
-t=0.50 fold=32: raw_crossings=37 lockout_rejected=4 barrier_pct_rejected=0 passed=33
-t=0.55 fold=32: raw_crossings=3 lockout_rejected=1 barrier_pct_rejected=0 passed=2
-t=0.60 fold=32: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.20 fold=32: raw_crossings=150 lockout_rejected=22 barrier_pct_rejected=0 passed=128
+t=0.25 fold=32: raw_crossings=150 lockout_rejected=22 barrier_pct_rejected=0 passed=128
+t=0.30 fold=32: raw_crossings=149 lockout_rejected=22 barrier_pct_rejected=0 passed=127
+t=0.35 fold=32: raw_crossings=149 lockout_rejected=22 barrier_pct_rejected=0 passed=127
+t=0.40 fold=32: raw_crossings=148 lockout_rejected=22 barrier_pct_rejected=0 passed=126
+t=0.45 fold=32: raw_crossings=142 lockout_rejected=21 barrier_pct_rejected=0 passed=121
+t=0.50 fold=32: raw_crossings=51 lockout_rejected=2 barrier_pct_rejected=0 passed=49
+t=0.55 fold=32: raw_crossings=9 lockout_rejected=0 barrier_pct_rejected=0 passed=9
+t=0.60 fold=32: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.65 fold=32: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=32: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=32: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -842,15 +842,15 @@ t=0.85 fold=32: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=32: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=32: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 32 | Train Rows: 6742   | Tested on forward 150 rows. Purged: 17
-t=0.20 fold=33: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.25 fold=33: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.30 fold=33: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.35 fold=33: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.40 fold=33: raw_crossings=149 lockout_rejected=47 barrier_pct_rejected=0 passed=102
-t=0.45 fold=33: raw_crossings=138 lockout_rejected=42 barrier_pct_rejected=0 passed=96
-t=0.50 fold=33: raw_crossings=49 lockout_rejected=7 barrier_pct_rejected=0 passed=42
-t=0.55 fold=33: raw_crossings=6 lockout_rejected=1 barrier_pct_rejected=0 passed=5
-t=0.60 fold=33: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.20 fold=33: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
+t=0.25 fold=33: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
+t=0.30 fold=33: raw_crossings=149 lockout_rejected=27 barrier_pct_rejected=0 passed=122
+t=0.35 fold=33: raw_crossings=149 lockout_rejected=27 barrier_pct_rejected=0 passed=122
+t=0.40 fold=33: raw_crossings=147 lockout_rejected=27 barrier_pct_rejected=0 passed=120
+t=0.45 fold=33: raw_crossings=142 lockout_rejected=26 barrier_pct_rejected=0 passed=116
+t=0.50 fold=33: raw_crossings=59 lockout_rejected=6 barrier_pct_rejected=0 passed=53
+t=0.55 fold=33: raw_crossings=10 lockout_rejected=0 barrier_pct_rejected=0 passed=10
+t=0.60 fold=33: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.65 fold=33: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=33: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=33: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -859,14 +859,14 @@ t=0.85 fold=33: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=33: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=33: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 33 | Train Rows: 6775   | Tested on forward 150 rows. Purged: 11
-t=0.20 fold=34: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.25 fold=34: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.30 fold=34: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.35 fold=34: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.40 fold=34: raw_crossings=148 lockout_rejected=36 barrier_pct_rejected=0 passed=112
-t=0.45 fold=34: raw_crossings=139 lockout_rejected=33 barrier_pct_rejected=0 passed=106
-t=0.50 fold=34: raw_crossings=53 lockout_rejected=8 barrier_pct_rejected=0 passed=45
-t=0.55 fold=34: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.20 fold=34: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.25 fold=34: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.30 fold=34: raw_crossings=149 lockout_rejected=28 barrier_pct_rejected=0 passed=121
+t=0.35 fold=34: raw_crossings=148 lockout_rejected=28 barrier_pct_rejected=0 passed=120
+t=0.40 fold=34: raw_crossings=146 lockout_rejected=28 barrier_pct_rejected=0 passed=118
+t=0.45 fold=34: raw_crossings=142 lockout_rejected=28 barrier_pct_rejected=0 passed=114
+t=0.50 fold=34: raw_crossings=47 lockout_rejected=3 barrier_pct_rejected=0 passed=44
+t=0.55 fold=34: raw_crossings=6 lockout_rejected=0 barrier_pct_rejected=0 passed=6
 t=0.60 fold=34: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=34: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=34: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -876,15 +876,15 @@ t=0.85 fold=34: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=34: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=34: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 34 | Train Rows: 6797   | Tested on forward 150 rows. Purged: 16
-t=0.20 fold=35: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
-t=0.25 fold=35: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
-t=0.30 fold=35: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
-t=0.35 fold=35: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
-t=0.40 fold=35: raw_crossings=148 lockout_rejected=23 barrier_pct_rejected=0 passed=125
-t=0.45 fold=35: raw_crossings=144 lockout_rejected=22 barrier_pct_rejected=0 passed=122
-t=0.50 fold=35: raw_crossings=53 lockout_rejected=6 barrier_pct_rejected=0 passed=47
-t=0.55 fold=35: raw_crossings=5 lockout_rejected=0 barrier_pct_rejected=0 passed=5
-t=0.60 fold=35: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=35: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.25 fold=35: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.30 fold=35: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.35 fold=35: raw_crossings=149 lockout_rejected=28 barrier_pct_rejected=0 passed=121
+t=0.40 fold=35: raw_crossings=148 lockout_rejected=28 barrier_pct_rejected=0 passed=120
+t=0.45 fold=35: raw_crossings=147 lockout_rejected=28 barrier_pct_rejected=0 passed=119
+t=0.50 fold=35: raw_crossings=57 lockout_rejected=7 barrier_pct_rejected=0 passed=50
+t=0.55 fold=35: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
+t=0.60 fold=35: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=35: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=35: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=35: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -893,15 +893,15 @@ t=0.85 fold=35: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=35: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=35: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 35 | Train Rows: 6824   | Tested on forward 150 rows. Purged: 16
-t=0.20 fold=36: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
-t=0.25 fold=36: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
-t=0.30 fold=36: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
-t=0.35 fold=36: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
-t=0.40 fold=36: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
-t=0.45 fold=36: raw_crossings=145 lockout_rejected=22 barrier_pct_rejected=0 passed=123
-t=0.50 fold=36: raw_crossings=57 lockout_rejected=9 barrier_pct_rejected=0 passed=48
-t=0.55 fold=36: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
-t=0.60 fold=36: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=36: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
+t=0.25 fold=36: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
+t=0.30 fold=36: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
+t=0.35 fold=36: raw_crossings=149 lockout_rejected=30 barrier_pct_rejected=0 passed=119
+t=0.40 fold=36: raw_crossings=148 lockout_rejected=30 barrier_pct_rejected=0 passed=118
+t=0.45 fold=36: raw_crossings=145 lockout_rejected=30 barrier_pct_rejected=0 passed=115
+t=0.50 fold=36: raw_crossings=65 lockout_rejected=10 barrier_pct_rejected=0 passed=55
+t=0.55 fold=36: raw_crossings=5 lockout_rejected=0 barrier_pct_rejected=0 passed=5
+t=0.60 fold=36: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=36: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=36: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=36: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -910,15 +910,15 @@ t=0.85 fold=36: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=36: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=36: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 36 | Train Rows: 6852   | Tested on forward 150 rows. Purged: 15
-t=0.20 fold=37: raw_crossings=150 lockout_rejected=22 barrier_pct_rejected=0 passed=128
-t=0.25 fold=37: raw_crossings=150 lockout_rejected=22 barrier_pct_rejected=0 passed=128
-t=0.30 fold=37: raw_crossings=150 lockout_rejected=22 barrier_pct_rejected=0 passed=128
-t=0.35 fold=37: raw_crossings=150 lockout_rejected=22 barrier_pct_rejected=0 passed=128
-t=0.40 fold=37: raw_crossings=148 lockout_rejected=20 barrier_pct_rejected=0 passed=128
-t=0.45 fold=37: raw_crossings=141 lockout_rejected=20 barrier_pct_rejected=0 passed=121
-t=0.50 fold=37: raw_crossings=61 lockout_rejected=6 barrier_pct_rejected=0 passed=55
-t=0.55 fold=37: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
-t=0.60 fold=37: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=37: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
+t=0.25 fold=37: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
+t=0.30 fold=37: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
+t=0.35 fold=37: raw_crossings=149 lockout_rejected=32 barrier_pct_rejected=0 passed=117
+t=0.40 fold=37: raw_crossings=147 lockout_rejected=32 barrier_pct_rejected=0 passed=115
+t=0.45 fold=37: raw_crossings=142 lockout_rejected=31 barrier_pct_rejected=0 passed=111
+t=0.50 fold=37: raw_crossings=59 lockout_rejected=7 barrier_pct_rejected=0 passed=52
+t=0.55 fold=37: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.60 fold=37: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=37: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=37: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=37: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -927,15 +927,15 @@ t=0.85 fold=37: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=37: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=37: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 37 | Train Rows: 6886   | Tested on forward 150 rows. Purged: 8
-t=0.20 fold=38: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
-t=0.25 fold=38: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
-t=0.30 fold=38: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
-t=0.35 fold=38: raw_crossings=149 lockout_rejected=25 barrier_pct_rejected=0 passed=124
-t=0.40 fold=38: raw_crossings=148 lockout_rejected=25 barrier_pct_rejected=0 passed=123
-t=0.45 fold=38: raw_crossings=142 lockout_rejected=25 barrier_pct_rejected=0 passed=117
-t=0.50 fold=38: raw_crossings=51 lockout_rejected=3 barrier_pct_rejected=0 passed=48
-t=0.55 fold=38: raw_crossings=6 lockout_rejected=0 barrier_pct_rejected=0 passed=6
-t=0.60 fold=38: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=38: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.25 fold=38: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.30 fold=38: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.35 fold=38: raw_crossings=148 lockout_rejected=33 barrier_pct_rejected=0 passed=115
+t=0.40 fold=38: raw_crossings=147 lockout_rejected=33 barrier_pct_rejected=0 passed=114
+t=0.45 fold=38: raw_crossings=139 lockout_rejected=31 barrier_pct_rejected=0 passed=108
+t=0.50 fold=38: raw_crossings=62 lockout_rejected=7 barrier_pct_rejected=0 passed=55
+t=0.55 fold=38: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
+t=0.60 fold=38: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=38: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=38: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=38: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -944,14 +944,14 @@ t=0.85 fold=38: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=38: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=38: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 38 | Train Rows: 6909   | Tested on forward 150 rows. Purged: 12
-t=0.20 fold=39: raw_crossings=150 lockout_rejected=22 barrier_pct_rejected=0 passed=128
-t=0.25 fold=39: raw_crossings=150 lockout_rejected=22 barrier_pct_rejected=0 passed=128
-t=0.30 fold=39: raw_crossings=150 lockout_rejected=22 barrier_pct_rejected=0 passed=128
-t=0.35 fold=39: raw_crossings=148 lockout_rejected=20 barrier_pct_rejected=0 passed=128
-t=0.40 fold=39: raw_crossings=147 lockout_rejected=20 barrier_pct_rejected=0 passed=127
-t=0.45 fold=39: raw_crossings=142 lockout_rejected=20 barrier_pct_rejected=0 passed=122
-t=0.50 fold=39: raw_crossings=45 lockout_rejected=5 barrier_pct_rejected=0 passed=40
-t=0.55 fold=39: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
+t=0.20 fold=39: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.25 fold=39: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.30 fold=39: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.35 fold=39: raw_crossings=149 lockout_rejected=33 barrier_pct_rejected=0 passed=116
+t=0.40 fold=39: raw_crossings=147 lockout_rejected=33 barrier_pct_rejected=0 passed=114
+t=0.45 fold=39: raw_crossings=140 lockout_rejected=31 barrier_pct_rejected=0 passed=109
+t=0.50 fold=39: raw_crossings=62 lockout_rejected=7 barrier_pct_rejected=0 passed=55
+t=0.55 fold=39: raw_crossings=7 lockout_rejected=0 barrier_pct_rejected=0 passed=7
 t=0.60 fold=39: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=39: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=39: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -961,14 +961,14 @@ t=0.85 fold=39: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=39: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=39: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 39 | Train Rows: 6941   | Tested on forward 150 rows. Purged: 7
-t=0.20 fold=40: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
-t=0.25 fold=40: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
-t=0.30 fold=40: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
-t=0.35 fold=40: raw_crossings=147 lockout_rejected=26 barrier_pct_rejected=0 passed=121
-t=0.40 fold=40: raw_crossings=146 lockout_rejected=26 barrier_pct_rejected=0 passed=120
-t=0.45 fold=40: raw_crossings=131 lockout_rejected=21 barrier_pct_rejected=0 passed=110
-t=0.50 fold=40: raw_crossings=41 lockout_rejected=2 barrier_pct_rejected=0 passed=39
-t=0.55 fold=40: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
+t=0.20 fold=40: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.25 fold=40: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.30 fold=40: raw_crossings=149 lockout_rejected=29 barrier_pct_rejected=0 passed=120
+t=0.35 fold=40: raw_crossings=149 lockout_rejected=29 barrier_pct_rejected=0 passed=120
+t=0.40 fold=40: raw_crossings=148 lockout_rejected=29 barrier_pct_rejected=0 passed=119
+t=0.45 fold=40: raw_crossings=143 lockout_rejected=28 barrier_pct_rejected=0 passed=115
+t=0.50 fold=40: raw_crossings=57 lockout_rejected=4 barrier_pct_rejected=0 passed=53
+t=0.55 fold=40: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
 t=0.60 fold=40: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=40: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=40: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -978,14 +978,14 @@ t=0.85 fold=40: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=40: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=40: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 40 | Train Rows: 6965   | Tested on forward 150 rows. Purged: 10
-t=0.20 fold=41: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
-t=0.25 fold=41: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
-t=0.30 fold=41: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
-t=0.35 fold=41: raw_crossings=148 lockout_rejected=29 barrier_pct_rejected=0 passed=119
-t=0.40 fold=41: raw_crossings=144 lockout_rejected=27 barrier_pct_rejected=0 passed=117
-t=0.45 fold=41: raw_crossings=128 lockout_rejected=20 barrier_pct_rejected=0 passed=108
-t=0.50 fold=41: raw_crossings=41 lockout_rejected=2 barrier_pct_rejected=0 passed=39
-t=0.55 fold=41: raw_crossings=7 lockout_rejected=0 barrier_pct_rejected=0 passed=7
+t=0.20 fold=41: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.25 fold=41: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.30 fold=41: raw_crossings=149 lockout_rejected=26 barrier_pct_rejected=0 passed=123
+t=0.35 fold=41: raw_crossings=146 lockout_rejected=25 barrier_pct_rejected=0 passed=121
+t=0.40 fold=41: raw_crossings=146 lockout_rejected=25 barrier_pct_rejected=0 passed=121
+t=0.45 fold=41: raw_crossings=133 lockout_rejected=19 barrier_pct_rejected=0 passed=114
+t=0.50 fold=41: raw_crossings=49 lockout_rejected=2 barrier_pct_rejected=0 passed=47
+t=0.55 fold=41: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
 t=0.60 fold=41: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=41: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=41: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -995,14 +995,14 @@ t=0.85 fold=41: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=41: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=41: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 41 | Train Rows: 6990   | Tested on forward 150 rows. Purged: 12
-t=0.20 fold=42: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
-t=0.25 fold=42: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
-t=0.30 fold=42: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
-t=0.35 fold=42: raw_crossings=149 lockout_rejected=30 barrier_pct_rejected=0 passed=119
-t=0.40 fold=42: raw_crossings=145 lockout_rejected=30 barrier_pct_rejected=0 passed=115
-t=0.45 fold=42: raw_crossings=130 lockout_rejected=26 barrier_pct_rejected=0 passed=104
-t=0.50 fold=42: raw_crossings=35 lockout_rejected=2 barrier_pct_rejected=0 passed=33
-t=0.55 fold=42: raw_crossings=7 lockout_rejected=0 barrier_pct_rejected=0 passed=7
+t=0.20 fold=42: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.25 fold=42: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.30 fold=42: raw_crossings=149 lockout_rejected=28 barrier_pct_rejected=0 passed=121
+t=0.35 fold=42: raw_crossings=146 lockout_rejected=27 barrier_pct_rejected=0 passed=119
+t=0.40 fold=42: raw_crossings=145 lockout_rejected=26 barrier_pct_rejected=0 passed=119
+t=0.45 fold=42: raw_crossings=138 lockout_rejected=24 barrier_pct_rejected=0 passed=114
+t=0.50 fold=42: raw_crossings=47 lockout_rejected=2 barrier_pct_rejected=0 passed=45
+t=0.55 fold=42: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
 t=0.60 fold=42: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=42: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=42: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -1012,14 +1012,14 @@ t=0.85 fold=42: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=42: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=42: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 42 | Train Rows: 7015   | Tested on forward 150 rows. Purged: 14
-t=0.20 fold=43: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.25 fold=43: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.30 fold=43: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.35 fold=43: raw_crossings=148 lockout_rejected=35 barrier_pct_rejected=0 passed=113
-t=0.40 fold=43: raw_crossings=144 lockout_rejected=33 barrier_pct_rejected=0 passed=111
-t=0.45 fold=43: raw_crossings=133 lockout_rejected=27 barrier_pct_rejected=0 passed=106
-t=0.50 fold=43: raw_crossings=33 lockout_rejected=1 barrier_pct_rejected=0 passed=32
-t=0.55 fold=43: raw_crossings=5 lockout_rejected=0 barrier_pct_rejected=0 passed=5
+t=0.20 fold=43: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.25 fold=43: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.30 fold=43: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.35 fold=43: raw_crossings=145 lockout_rejected=25 barrier_pct_rejected=0 passed=120
+t=0.40 fold=43: raw_crossings=142 lockout_rejected=24 barrier_pct_rejected=0 passed=118
+t=0.45 fold=43: raw_crossings=130 lockout_rejected=17 barrier_pct_rejected=0 passed=113
+t=0.50 fold=43: raw_crossings=42 lockout_rejected=0 barrier_pct_rejected=0 passed=42
+t=0.55 fold=43: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
 t=0.60 fold=43: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=43: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=43: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -1029,15 +1029,15 @@ t=0.85 fold=43: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=43: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=43: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 43 | Train Rows: 7051   | Tested on forward 150 rows. Purged: 5
-t=0.20 fold=44: raw_crossings=150 lockout_rejected=40 barrier_pct_rejected=0 passed=110
-t=0.25 fold=44: raw_crossings=150 lockout_rejected=40 barrier_pct_rejected=0 passed=110
-t=0.30 fold=44: raw_crossings=150 lockout_rejected=40 barrier_pct_rejected=0 passed=110
-t=0.35 fold=44: raw_crossings=149 lockout_rejected=40 barrier_pct_rejected=0 passed=109
-t=0.40 fold=44: raw_crossings=144 lockout_rejected=37 barrier_pct_rejected=0 passed=107
-t=0.45 fold=44: raw_crossings=136 lockout_rejected=32 barrier_pct_rejected=0 passed=104
-t=0.50 fold=44: raw_crossings=32 lockout_rejected=0 barrier_pct_rejected=0 passed=32
-t=0.55 fold=44: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
-t=0.60 fold=44: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.20 fold=44: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.25 fold=44: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.30 fold=44: raw_crossings=149 lockout_rejected=28 barrier_pct_rejected=0 passed=121
+t=0.35 fold=44: raw_crossings=144 lockout_rejected=26 barrier_pct_rejected=0 passed=118
+t=0.40 fold=44: raw_crossings=142 lockout_rejected=25 barrier_pct_rejected=0 passed=117
+t=0.45 fold=44: raw_crossings=131 lockout_rejected=17 barrier_pct_rejected=0 passed=114
+t=0.50 fold=44: raw_crossings=38 lockout_rejected=1 barrier_pct_rejected=0 passed=37
+t=0.55 fold=44: raw_crossings=8 lockout_rejected=0 barrier_pct_rejected=0 passed=8
+t=0.60 fold=44: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.65 fold=44: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=44: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=44: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -1046,15 +1046,15 @@ t=0.85 fold=44: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=44: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=44: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 44 | Train Rows: 7073   | Tested on forward 150 rows. Purged: 10
-t=0.20 fold=45: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.25 fold=45: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.30 fold=45: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.35 fold=45: raw_crossings=148 lockout_rejected=44 barrier_pct_rejected=0 passed=104
-t=0.40 fold=45: raw_crossings=143 lockout_rejected=41 barrier_pct_rejected=0 passed=102
-t=0.45 fold=45: raw_crossings=138 lockout_rejected=37 barrier_pct_rejected=0 passed=101
-t=0.50 fold=45: raw_crossings=46 lockout_rejected=3 barrier_pct_rejected=0 passed=43
-t=0.55 fold=45: raw_crossings=9 lockout_rejected=1 barrier_pct_rejected=0 passed=8
-t=0.60 fold=45: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.20 fold=45: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
+t=0.25 fold=45: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
+t=0.30 fold=45: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
+t=0.35 fold=45: raw_crossings=144 lockout_rejected=25 barrier_pct_rejected=0 passed=119
+t=0.40 fold=45: raw_crossings=139 lockout_rejected=24 barrier_pct_rejected=0 passed=115
+t=0.45 fold=45: raw_crossings=123 lockout_rejected=16 barrier_pct_rejected=0 passed=107
+t=0.50 fold=45: raw_crossings=41 lockout_rejected=1 barrier_pct_rejected=0 passed=40
+t=0.55 fold=45: raw_crossings=9 lockout_rejected=0 barrier_pct_rejected=0 passed=9
+t=0.60 fold=45: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.65 fold=45: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=45: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=45: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -1063,14 +1063,14 @@ t=0.85 fold=45: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=45: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=45: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 45 | Train Rows: 7098   | Tested on forward 150 rows. Purged: 12
-t=0.20 fold=46: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.25 fold=46: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.30 fold=46: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.35 fold=46: raw_crossings=147 lockout_rejected=45 barrier_pct_rejected=0 passed=102
-t=0.40 fold=46: raw_crossings=145 lockout_rejected=44 barrier_pct_rejected=0 passed=101
-t=0.45 fold=46: raw_crossings=126 lockout_rejected=35 barrier_pct_rejected=0 passed=91
-t=0.50 fold=46: raw_crossings=38 lockout_rejected=6 barrier_pct_rejected=0 passed=32
-t=0.55 fold=46: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
+t=0.20 fold=46: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.25 fold=46: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.30 fold=46: raw_crossings=149 lockout_rejected=26 barrier_pct_rejected=0 passed=123
+t=0.35 fold=46: raw_crossings=143 lockout_rejected=24 barrier_pct_rejected=0 passed=119
+t=0.40 fold=46: raw_crossings=138 lockout_rejected=22 barrier_pct_rejected=0 passed=116
+t=0.45 fold=46: raw_crossings=124 lockout_rejected=15 barrier_pct_rejected=0 passed=109
+t=0.50 fold=46: raw_crossings=48 lockout_rejected=1 barrier_pct_rejected=0 passed=47
+t=0.55 fold=46: raw_crossings=9 lockout_rejected=0 barrier_pct_rejected=0 passed=9
 t=0.60 fold=46: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=46: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=46: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -1080,15 +1080,15 @@ t=0.85 fold=46: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=46: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=46: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 46 | Train Rows: 7117   | Tested on forward 150 rows. Purged: 20
-t=0.20 fold=47: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.25 fold=47: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.30 fold=47: raw_crossings=149 lockout_rejected=47 barrier_pct_rejected=0 passed=102
-t=0.35 fold=47: raw_crossings=148 lockout_rejected=46 barrier_pct_rejected=0 passed=102
-t=0.40 fold=47: raw_crossings=143 lockout_rejected=44 barrier_pct_rejected=0 passed=99
-t=0.45 fold=47: raw_crossings=133 lockout_rejected=38 barrier_pct_rejected=0 passed=95
-t=0.50 fold=47: raw_crossings=43 lockout_rejected=7 barrier_pct_rejected=0 passed=36
-t=0.55 fold=47: raw_crossings=6 lockout_rejected=0 barrier_pct_rejected=0 passed=6
-t=0.60 fold=47: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=47: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
+t=0.25 fold=47: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
+t=0.30 fold=47: raw_crossings=149 lockout_rejected=23 barrier_pct_rejected=0 passed=126
+t=0.35 fold=47: raw_crossings=146 lockout_rejected=22 barrier_pct_rejected=0 passed=124
+t=0.40 fold=47: raw_crossings=140 lockout_rejected=21 barrier_pct_rejected=0 passed=119
+t=0.45 fold=47: raw_crossings=123 lockout_rejected=11 barrier_pct_rejected=0 passed=112
+t=0.50 fold=47: raw_crossings=46 lockout_rejected=1 barrier_pct_rejected=0 passed=45
+t=0.55 fold=47: raw_crossings=7 lockout_rejected=0 barrier_pct_rejected=0 passed=7
+t=0.60 fold=47: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=47: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=47: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=47: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -1097,14 +1097,14 @@ t=0.85 fold=47: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=47: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=47: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 47 | Train Rows: 7151   | Tested on forward 150 rows. Purged: 13
-t=0.20 fold=48: raw_crossings=150 lockout_rejected=49 barrier_pct_rejected=0 passed=101
-t=0.25 fold=48: raw_crossings=150 lockout_rejected=49 barrier_pct_rejected=0 passed=101
-t=0.30 fold=48: raw_crossings=149 lockout_rejected=49 barrier_pct_rejected=0 passed=100
-t=0.35 fold=48: raw_crossings=148 lockout_rejected=48 barrier_pct_rejected=0 passed=100
-t=0.40 fold=48: raw_crossings=145 lockout_rejected=47 barrier_pct_rejected=0 passed=98
-t=0.45 fold=48: raw_crossings=134 lockout_rejected=43 barrier_pct_rejected=0 passed=91
-t=0.50 fold=48: raw_crossings=45 lockout_rejected=12 barrier_pct_rejected=0 passed=33
-t=0.55 fold=48: raw_crossings=5 lockout_rejected=0 barrier_pct_rejected=0 passed=5
+t=0.20 fold=48: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
+t=0.25 fold=48: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
+t=0.30 fold=48: raw_crossings=149 lockout_rejected=27 barrier_pct_rejected=0 passed=122
+t=0.35 fold=48: raw_crossings=148 lockout_rejected=27 barrier_pct_rejected=0 passed=121
+t=0.40 fold=48: raw_crossings=143 lockout_rejected=26 barrier_pct_rejected=0 passed=117
+t=0.45 fold=48: raw_crossings=130 lockout_rejected=21 barrier_pct_rejected=0 passed=109
+t=0.50 fold=48: raw_crossings=53 lockout_rejected=4 barrier_pct_rejected=0 passed=49
+t=0.55 fold=48: raw_crossings=11 lockout_rejected=0 barrier_pct_rejected=0 passed=11
 t=0.60 fold=48: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=48: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=48: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -1114,14 +1114,14 @@ t=0.85 fold=48: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=48: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=48: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 48 | Train Rows: 7179   | Tested on forward 150 rows. Purged: 12
-t=0.20 fold=49: raw_crossings=150 lockout_rejected=46 barrier_pct_rejected=0 passed=104
-t=0.25 fold=49: raw_crossings=150 lockout_rejected=46 barrier_pct_rejected=0 passed=104
-t=0.30 fold=49: raw_crossings=150 lockout_rejected=46 barrier_pct_rejected=0 passed=104
-t=0.35 fold=49: raw_crossings=149 lockout_rejected=45 barrier_pct_rejected=0 passed=104
-t=0.40 fold=49: raw_crossings=145 lockout_rejected=44 barrier_pct_rejected=0 passed=101
-t=0.45 fold=49: raw_crossings=136 lockout_rejected=40 barrier_pct_rejected=0 passed=96
-t=0.50 fold=49: raw_crossings=44 lockout_rejected=12 barrier_pct_rejected=0 passed=32
-t=0.55 fold=49: raw_crossings=7 lockout_rejected=0 barrier_pct_rejected=0 passed=7
+t=0.20 fold=49: raw_crossings=150 lockout_rejected=24 barrier_pct_rejected=0 passed=126
+t=0.25 fold=49: raw_crossings=150 lockout_rejected=24 barrier_pct_rejected=0 passed=126
+t=0.30 fold=49: raw_crossings=149 lockout_rejected=23 barrier_pct_rejected=0 passed=126
+t=0.35 fold=49: raw_crossings=144 lockout_rejected=23 barrier_pct_rejected=0 passed=121
+t=0.40 fold=49: raw_crossings=144 lockout_rejected=23 barrier_pct_rejected=0 passed=121
+t=0.45 fold=49: raw_crossings=129 lockout_rejected=20 barrier_pct_rejected=0 passed=109
+t=0.50 fold=49: raw_crossings=53 lockout_rejected=5 barrier_pct_rejected=0 passed=48
+t=0.55 fold=49: raw_crossings=10 lockout_rejected=0 barrier_pct_rejected=0 passed=10
 t=0.60 fold=49: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=49: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=49: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -1131,13 +1131,13 @@ t=0.85 fold=49: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=49: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=49: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 49 | Train Rows: 7206   | Tested on forward 150 rows. Purged: 12
-t=0.20 fold=50: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
-t=0.25 fold=50: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
-t=0.30 fold=50: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
-t=0.35 fold=50: raw_crossings=149 lockout_rejected=44 barrier_pct_rejected=0 passed=105
-t=0.40 fold=50: raw_crossings=147 lockout_rejected=44 barrier_pct_rejected=0 passed=103
-t=0.45 fold=50: raw_crossings=139 lockout_rejected=38 barrier_pct_rejected=0 passed=101
-t=0.50 fold=50: raw_crossings=42 lockout_rejected=11 barrier_pct_rejected=0 passed=31
+t=0.20 fold=50: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.25 fold=50: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.30 fold=50: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.35 fold=50: raw_crossings=147 lockout_rejected=23 barrier_pct_rejected=0 passed=124
+t=0.40 fold=50: raw_crossings=147 lockout_rejected=23 barrier_pct_rejected=0 passed=124
+t=0.45 fold=50: raw_crossings=138 lockout_rejected=22 barrier_pct_rejected=0 passed=116
+t=0.50 fold=50: raw_crossings=46 lockout_rejected=4 barrier_pct_rejected=0 passed=42
 t=0.55 fold=50: raw_crossings=7 lockout_rejected=0 barrier_pct_rejected=0 passed=7
 t=0.60 fold=50: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=50: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -1148,14 +1148,14 @@ t=0.85 fold=50: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=50: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=50: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 50 | Train Rows: 7225   | Tested on forward 150 rows. Purged: 20
-t=0.20 fold=51: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.25 fold=51: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.30 fold=51: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.35 fold=51: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.40 fold=51: raw_crossings=149 lockout_rejected=42 barrier_pct_rejected=0 passed=107
-t=0.45 fold=51: raw_crossings=141 lockout_rejected=36 barrier_pct_rejected=0 passed=105
-t=0.50 fold=51: raw_crossings=38 lockout_rejected=8 barrier_pct_rejected=0 passed=30
-t=0.55 fold=51: raw_crossings=5 lockout_rejected=0 barrier_pct_rejected=0 passed=5
+t=0.20 fold=51: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
+t=0.25 fold=51: raw_crossings=147 lockout_rejected=26 barrier_pct_rejected=0 passed=121
+t=0.30 fold=51: raw_crossings=146 lockout_rejected=25 barrier_pct_rejected=0 passed=121
+t=0.35 fold=51: raw_crossings=146 lockout_rejected=25 barrier_pct_rejected=0 passed=121
+t=0.40 fold=51: raw_crossings=146 lockout_rejected=25 barrier_pct_rejected=0 passed=121
+t=0.45 fold=51: raw_crossings=137 lockout_rejected=23 barrier_pct_rejected=0 passed=114
+t=0.50 fold=51: raw_crossings=39 lockout_rejected=4 barrier_pct_rejected=0 passed=35
+t=0.55 fold=51: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
 t=0.60 fold=51: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=51: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=51: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -1165,14 +1165,14 @@ t=0.85 fold=51: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=51: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=51: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 51 | Train Rows: 7256   | Tested on forward 150 rows. Purged: 16
-t=0.20 fold=52: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.25 fold=52: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.30 fold=52: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.35 fold=52: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.40 fold=52: raw_crossings=149 lockout_rejected=43 barrier_pct_rejected=0 passed=106
-t=0.45 fold=52: raw_crossings=145 lockout_rejected=39 barrier_pct_rejected=0 passed=106
-t=0.50 fold=52: raw_crossings=47 lockout_rejected=9 barrier_pct_rejected=0 passed=38
-t=0.55 fold=52: raw_crossings=7 lockout_rejected=0 barrier_pct_rejected=0 passed=7
+t=0.20 fold=52: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.25 fold=52: raw_crossings=147 lockout_rejected=28 barrier_pct_rejected=0 passed=119
+t=0.30 fold=52: raw_crossings=146 lockout_rejected=27 barrier_pct_rejected=0 passed=119
+t=0.35 fold=52: raw_crossings=146 lockout_rejected=27 barrier_pct_rejected=0 passed=119
+t=0.40 fold=52: raw_crossings=146 lockout_rejected=27 barrier_pct_rejected=0 passed=119
+t=0.45 fold=52: raw_crossings=141 lockout_rejected=26 barrier_pct_rejected=0 passed=115
+t=0.50 fold=52: raw_crossings=50 lockout_rejected=7 barrier_pct_rejected=0 passed=43
+t=0.55 fold=52: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
 t=0.60 fold=52: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=52: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=52: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -1182,14 +1182,14 @@ t=0.85 fold=52: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=52: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=52: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 52 | Train Rows: 7284   | Tested on forward 150 rows. Purged: 15
-t=0.20 fold=53: raw_crossings=150 lockout_rejected=52 barrier_pct_rejected=0 passed=98
-t=0.25 fold=53: raw_crossings=150 lockout_rejected=52 barrier_pct_rejected=0 passed=98
-t=0.30 fold=53: raw_crossings=150 lockout_rejected=52 barrier_pct_rejected=0 passed=98
-t=0.35 fold=53: raw_crossings=150 lockout_rejected=52 barrier_pct_rejected=0 passed=98
-t=0.40 fold=53: raw_crossings=148 lockout_rejected=50 barrier_pct_rejected=0 passed=98
-t=0.45 fold=53: raw_crossings=139 lockout_rejected=42 barrier_pct_rejected=0 passed=97
-t=0.50 fold=53: raw_crossings=39 lockout_rejected=5 barrier_pct_rejected=0 passed=34
-t=0.55 fold=53: raw_crossings=6 lockout_rejected=0 barrier_pct_rejected=0 passed=6
+t=0.20 fold=53: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.25 fold=53: raw_crossings=146 lockout_rejected=31 barrier_pct_rejected=0 passed=115
+t=0.30 fold=53: raw_crossings=144 lockout_rejected=30 barrier_pct_rejected=0 passed=114
+t=0.35 fold=53: raw_crossings=144 lockout_rejected=30 barrier_pct_rejected=0 passed=114
+t=0.40 fold=53: raw_crossings=144 lockout_rejected=30 barrier_pct_rejected=0 passed=114
+t=0.45 fold=53: raw_crossings=138 lockout_rejected=29 barrier_pct_rejected=0 passed=109
+t=0.50 fold=53: raw_crossings=49 lockout_rejected=6 barrier_pct_rejected=0 passed=43
+t=0.55 fold=53: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
 t=0.60 fold=53: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=53: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=53: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -1199,15 +1199,15 @@ t=0.85 fold=53: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=53: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=53: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 53 | Train Rows: 7310   | Tested on forward 150 rows. Purged: 16
-t=0.20 fold=54: raw_crossings=150 lockout_rejected=46 barrier_pct_rejected=0 passed=104
-t=0.25 fold=54: raw_crossings=150 lockout_rejected=46 barrier_pct_rejected=0 passed=104
-t=0.30 fold=54: raw_crossings=150 lockout_rejected=46 barrier_pct_rejected=0 passed=104
-t=0.35 fold=54: raw_crossings=150 lockout_rejected=46 barrier_pct_rejected=0 passed=104
-t=0.40 fold=54: raw_crossings=147 lockout_rejected=44 barrier_pct_rejected=0 passed=103
-t=0.45 fold=54: raw_crossings=141 lockout_rejected=39 barrier_pct_rejected=0 passed=102
-t=0.50 fold=54: raw_crossings=42 lockout_rejected=6 barrier_pct_rejected=0 passed=36
-t=0.55 fold=54: raw_crossings=14 lockout_rejected=1 barrier_pct_rejected=0 passed=13
-t=0.60 fold=54: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=54: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
+t=0.25 fold=54: raw_crossings=146 lockout_rejected=32 barrier_pct_rejected=0 passed=114
+t=0.30 fold=54: raw_crossings=146 lockout_rejected=32 barrier_pct_rejected=0 passed=114
+t=0.35 fold=54: raw_crossings=145 lockout_rejected=32 barrier_pct_rejected=0 passed=113
+t=0.40 fold=54: raw_crossings=145 lockout_rejected=32 barrier_pct_rejected=0 passed=113
+t=0.45 fold=54: raw_crossings=138 lockout_rejected=31 barrier_pct_rejected=0 passed=107
+t=0.50 fold=54: raw_crossings=63 lockout_rejected=9 barrier_pct_rejected=0 passed=54
+t=0.55 fold=54: raw_crossings=5 lockout_rejected=0 barrier_pct_rejected=0 passed=5
+t=0.60 fold=54: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=54: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=54: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=54: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -1216,15 +1216,15 @@ t=0.85 fold=54: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=54: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=54: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 54 | Train Rows: 7339   | Tested on forward 150 rows. Purged: 14
-t=0.20 fold=55: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.25 fold=55: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.30 fold=55: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.35 fold=55: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.40 fold=55: raw_crossings=147 lockout_rejected=39 barrier_pct_rejected=0 passed=108
-t=0.45 fold=55: raw_crossings=138 lockout_rejected=35 barrier_pct_rejected=0 passed=103
-t=0.50 fold=55: raw_crossings=50 lockout_rejected=6 barrier_pct_rejected=0 passed=44
-t=0.55 fold=55: raw_crossings=14 lockout_rejected=0 barrier_pct_rejected=0 passed=14
-t=0.60 fold=55: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=55: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.25 fold=55: raw_crossings=146 lockout_rejected=31 barrier_pct_rejected=0 passed=115
+t=0.30 fold=55: raw_crossings=145 lockout_rejected=31 barrier_pct_rejected=0 passed=114
+t=0.35 fold=55: raw_crossings=145 lockout_rejected=31 barrier_pct_rejected=0 passed=114
+t=0.40 fold=55: raw_crossings=145 lockout_rejected=31 barrier_pct_rejected=0 passed=114
+t=0.45 fold=55: raw_crossings=140 lockout_rejected=31 barrier_pct_rejected=0 passed=109
+t=0.50 fold=55: raw_crossings=69 lockout_rejected=10 barrier_pct_rejected=0 passed=59
+t=0.55 fold=55: raw_crossings=7 lockout_rejected=0 barrier_pct_rejected=0 passed=7
+t=0.60 fold=55: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=55: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=55: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=55: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -1233,14 +1233,14 @@ t=0.85 fold=55: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=55: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=55: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 55 | Train Rows: 7366   | Tested on forward 150 rows. Purged: 14
-t=0.20 fold=56: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.25 fold=56: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.30 fold=56: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.35 fold=56: raw_crossings=149 lockout_rejected=34 barrier_pct_rejected=0 passed=115
-t=0.40 fold=56: raw_crossings=148 lockout_rejected=33 barrier_pct_rejected=0 passed=115
-t=0.45 fold=56: raw_crossings=138 lockout_rejected=29 barrier_pct_rejected=0 passed=109
-t=0.50 fold=56: raw_crossings=65 lockout_rejected=6 barrier_pct_rejected=0 passed=59
-t=0.55 fold=56: raw_crossings=10 lockout_rejected=0 barrier_pct_rejected=0 passed=10
+t=0.20 fold=56: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
+t=0.25 fold=56: raw_crossings=148 lockout_rejected=36 barrier_pct_rejected=0 passed=112
+t=0.30 fold=56: raw_crossings=148 lockout_rejected=36 barrier_pct_rejected=0 passed=112
+t=0.35 fold=56: raw_crossings=148 lockout_rejected=36 barrier_pct_rejected=0 passed=112
+t=0.40 fold=56: raw_crossings=147 lockout_rejected=35 barrier_pct_rejected=0 passed=112
+t=0.45 fold=56: raw_crossings=138 lockout_rejected=33 barrier_pct_rejected=0 passed=105
+t=0.50 fold=56: raw_crossings=69 lockout_rejected=7 barrier_pct_rejected=0 passed=62
+t=0.55 fold=56: raw_crossings=11 lockout_rejected=0 barrier_pct_rejected=0 passed=11
 t=0.60 fold=56: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.65 fold=56: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=56: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -1250,15 +1250,15 @@ t=0.85 fold=56: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=56: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=56: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 56 | Train Rows: 7392   | Tested on forward 150 rows. Purged: 15
-t=0.20 fold=57: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.25 fold=57: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.30 fold=57: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.35 fold=57: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.40 fold=57: raw_crossings=148 lockout_rejected=34 barrier_pct_rejected=0 passed=114
-t=0.45 fold=57: raw_crossings=131 lockout_rejected=34 barrier_pct_rejected=0 passed=97
-t=0.50 fold=57: raw_crossings=60 lockout_rejected=6 barrier_pct_rejected=0 passed=54
-t=0.55 fold=57: raw_crossings=7 lockout_rejected=0 barrier_pct_rejected=0 passed=7
-t=0.60 fold=57: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.20 fold=57: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
+t=0.25 fold=57: raw_crossings=148 lockout_rejected=37 barrier_pct_rejected=0 passed=111
+t=0.30 fold=57: raw_crossings=148 lockout_rejected=37 barrier_pct_rejected=0 passed=111
+t=0.35 fold=57: raw_crossings=148 lockout_rejected=37 barrier_pct_rejected=0 passed=111
+t=0.40 fold=57: raw_crossings=147 lockout_rejected=36 barrier_pct_rejected=0 passed=111
+t=0.45 fold=57: raw_crossings=135 lockout_rejected=31 barrier_pct_rejected=0 passed=104
+t=0.50 fold=57: raw_crossings=60 lockout_rejected=9 barrier_pct_rejected=0 passed=51
+t=0.55 fold=57: raw_crossings=9 lockout_rejected=0 barrier_pct_rejected=0 passed=9
+t=0.60 fold=57: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.65 fold=57: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=57: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=57: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -1267,15 +1267,15 @@ t=0.85 fold=57: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=57: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=57: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 57 | Train Rows: 7423   | Tested on forward 150 rows. Purged: 11
-t=0.20 fold=58: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
-t=0.25 fold=58: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
-t=0.30 fold=58: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
-t=0.35 fold=58: raw_crossings=149 lockout_rejected=33 barrier_pct_rejected=0 passed=116
-t=0.40 fold=58: raw_crossings=148 lockout_rejected=32 barrier_pct_rejected=0 passed=116
-t=0.45 fold=58: raw_crossings=134 lockout_rejected=33 barrier_pct_rejected=0 passed=101
-t=0.50 fold=58: raw_crossings=53 lockout_rejected=3 barrier_pct_rejected=0 passed=50
-t=0.55 fold=58: raw_crossings=9 lockout_rejected=0 barrier_pct_rejected=0 passed=9
-t=0.60 fold=58: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.20 fold=58: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
+t=0.25 fold=58: raw_crossings=148 lockout_rejected=44 barrier_pct_rejected=0 passed=104
+t=0.30 fold=58: raw_crossings=147 lockout_rejected=43 barrier_pct_rejected=0 passed=104
+t=0.35 fold=58: raw_crossings=147 lockout_rejected=43 barrier_pct_rejected=0 passed=104
+t=0.40 fold=58: raw_crossings=146 lockout_rejected=42 barrier_pct_rejected=0 passed=104
+t=0.45 fold=58: raw_crossings=135 lockout_rejected=38 barrier_pct_rejected=0 passed=97
+t=0.50 fold=58: raw_crossings=63 lockout_rejected=10 barrier_pct_rejected=0 passed=53
+t=0.55 fold=58: raw_crossings=8 lockout_rejected=0 barrier_pct_rejected=0 passed=8
+t=0.60 fold=58: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.65 fold=58: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=58: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=58: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -1284,15 +1284,15 @@ t=0.85 fold=58: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=58: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=58: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 58 | Train Rows: 7444   | Tested on forward 150 rows. Purged: 17
-t=0.20 fold=59: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
-t=0.25 fold=59: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
-t=0.30 fold=59: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
-t=0.35 fold=59: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
-t=0.40 fold=59: raw_crossings=149 lockout_rejected=30 barrier_pct_rejected=0 passed=119
-t=0.45 fold=59: raw_crossings=138 lockout_rejected=30 barrier_pct_rejected=0 passed=108
-t=0.50 fold=59: raw_crossings=54 lockout_rejected=4 barrier_pct_rejected=0 passed=50
-t=0.55 fold=59: raw_crossings=8 lockout_rejected=0 barrier_pct_rejected=0 passed=8
-t=0.60 fold=59: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.20 fold=59: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
+t=0.25 fold=59: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
+t=0.30 fold=59: raw_crossings=149 lockout_rejected=38 barrier_pct_rejected=0 passed=111
+t=0.35 fold=59: raw_crossings=149 lockout_rejected=38 barrier_pct_rejected=0 passed=111
+t=0.40 fold=59: raw_crossings=148 lockout_rejected=37 barrier_pct_rejected=0 passed=111
+t=0.45 fold=59: raw_crossings=129 lockout_rejected=29 barrier_pct_rejected=0 passed=100
+t=0.50 fold=59: raw_crossings=59 lockout_rejected=7 barrier_pct_rejected=0 passed=52
+t=0.55 fold=59: raw_crossings=7 lockout_rejected=0 barrier_pct_rejected=0 passed=7
+t=0.60 fold=59: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.65 fold=59: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=59: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=59: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -1301,14 +1301,14 @@ t=0.85 fold=59: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=59: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=59: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 59 | Train Rows: 7481   | Tested on forward 150 rows. Purged: 7
-t=0.20 fold=60: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.25 fold=60: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.30 fold=60: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.35 fold=60: raw_crossings=149 lockout_rejected=36 barrier_pct_rejected=0 passed=113
-t=0.40 fold=60: raw_crossings=149 lockout_rejected=36 barrier_pct_rejected=0 passed=113
-t=0.45 fold=60: raw_crossings=138 lockout_rejected=37 barrier_pct_rejected=0 passed=101
-t=0.50 fold=60: raw_crossings=49 lockout_rejected=4 barrier_pct_rejected=0 passed=45
-t=0.55 fold=60: raw_crossings=5 lockout_rejected=0 barrier_pct_rejected=0 passed=5
+t=0.20 fold=60: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
+t=0.25 fold=60: raw_crossings=149 lockout_rejected=38 barrier_pct_rejected=0 passed=111
+t=0.30 fold=60: raw_crossings=148 lockout_rejected=37 barrier_pct_rejected=0 passed=111
+t=0.35 fold=60: raw_crossings=148 lockout_rejected=37 barrier_pct_rejected=0 passed=111
+t=0.40 fold=60: raw_crossings=147 lockout_rejected=36 barrier_pct_rejected=0 passed=111
+t=0.45 fold=60: raw_crossings=124 lockout_rejected=28 barrier_pct_rejected=0 passed=96
+t=0.50 fold=60: raw_crossings=58 lockout_rejected=7 barrier_pct_rejected=0 passed=51
+t=0.55 fold=60: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
 t=0.60 fold=60: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=60: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=60: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -1318,14 +1318,14 @@ t=0.85 fold=60: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=60: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=60: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 60 | Train Rows: 7505   | Tested on forward 150 rows. Purged: 10
-t=0.20 fold=61: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.25 fold=61: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.30 fold=61: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.35 fold=61: raw_crossings=149 lockout_rejected=41 barrier_pct_rejected=0 passed=108
-t=0.40 fold=61: raw_crossings=148 lockout_rejected=41 barrier_pct_rejected=0 passed=107
-t=0.45 fold=61: raw_crossings=142 lockout_rejected=44 barrier_pct_rejected=0 passed=98
-t=0.50 fold=61: raw_crossings=46 lockout_rejected=3 barrier_pct_rejected=0 passed=43
-t=0.55 fold=61: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.20 fold=61: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
+t=0.25 fold=61: raw_crossings=149 lockout_rejected=37 barrier_pct_rejected=0 passed=112
+t=0.30 fold=61: raw_crossings=148 lockout_rejected=36 barrier_pct_rejected=0 passed=112
+t=0.35 fold=61: raw_crossings=148 lockout_rejected=36 barrier_pct_rejected=0 passed=112
+t=0.40 fold=61: raw_crossings=148 lockout_rejected=36 barrier_pct_rejected=0 passed=112
+t=0.45 fold=61: raw_crossings=132 lockout_rejected=30 barrier_pct_rejected=0 passed=102
+t=0.50 fold=61: raw_crossings=53 lockout_rejected=8 barrier_pct_rejected=0 passed=45
+t=0.55 fold=61: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.60 fold=61: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=61: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=61: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -1335,15 +1335,15 @@ t=0.85 fold=61: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=61: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=61: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 61 | Train Rows: 7528   | Tested on forward 150 rows. Purged: 14
-t=0.20 fold=62: raw_crossings=150 lockout_rejected=40 barrier_pct_rejected=0 passed=110
-t=0.25 fold=62: raw_crossings=150 lockout_rejected=40 barrier_pct_rejected=0 passed=110
-t=0.30 fold=62: raw_crossings=150 lockout_rejected=40 barrier_pct_rejected=0 passed=110
-t=0.35 fold=62: raw_crossings=149 lockout_rejected=40 barrier_pct_rejected=0 passed=109
-t=0.40 fold=62: raw_crossings=148 lockout_rejected=40 barrier_pct_rejected=0 passed=108
-t=0.45 fold=62: raw_crossings=142 lockout_rejected=39 barrier_pct_rejected=0 passed=103
-t=0.50 fold=62: raw_crossings=51 lockout_rejected=8 barrier_pct_rejected=0 passed=43
-t=0.55 fold=62: raw_crossings=6 lockout_rejected=0 barrier_pct_rejected=0 passed=6
-t=0.60 fold=62: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=62: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
+t=0.25 fold=62: raw_crossings=149 lockout_rejected=34 barrier_pct_rejected=0 passed=115
+t=0.30 fold=62: raw_crossings=148 lockout_rejected=33 barrier_pct_rejected=0 passed=115
+t=0.35 fold=62: raw_crossings=148 lockout_rejected=33 barrier_pct_rejected=0 passed=115
+t=0.40 fold=62: raw_crossings=148 lockout_rejected=33 barrier_pct_rejected=0 passed=115
+t=0.45 fold=62: raw_crossings=142 lockout_rejected=31 barrier_pct_rejected=0 passed=111
+t=0.50 fold=62: raw_crossings=57 lockout_rejected=8 barrier_pct_rejected=0 passed=49
+t=0.55 fold=62: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.60 fold=62: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=62: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=62: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=62: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -1352,15 +1352,15 @@ t=0.85 fold=62: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=62: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=62: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 62 | Train Rows: 7551   | Tested on forward 150 rows. Purged: 18
-t=0.20 fold=63: raw_crossings=150 lockout_rejected=50 barrier_pct_rejected=0 passed=100
-t=0.25 fold=63: raw_crossings=150 lockout_rejected=50 barrier_pct_rejected=0 passed=100
-t=0.30 fold=63: raw_crossings=150 lockout_rejected=50 barrier_pct_rejected=0 passed=100
-t=0.35 fold=63: raw_crossings=149 lockout_rejected=50 barrier_pct_rejected=0 passed=99
-t=0.40 fold=63: raw_crossings=149 lockout_rejected=50 barrier_pct_rejected=0 passed=99
-t=0.45 fold=63: raw_crossings=143 lockout_rejected=47 barrier_pct_rejected=0 passed=96
-t=0.50 fold=63: raw_crossings=54 lockout_rejected=12 barrier_pct_rejected=0 passed=42
-t=0.55 fold=63: raw_crossings=9 lockout_rejected=0 barrier_pct_rejected=0 passed=9
-t=0.60 fold=63: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.20 fold=63: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
+t=0.25 fold=63: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
+t=0.30 fold=63: raw_crossings=149 lockout_rejected=37 barrier_pct_rejected=0 passed=112
+t=0.35 fold=63: raw_crossings=149 lockout_rejected=37 barrier_pct_rejected=0 passed=112
+t=0.40 fold=63: raw_crossings=149 lockout_rejected=37 barrier_pct_rejected=0 passed=112
+t=0.45 fold=63: raw_crossings=138 lockout_rejected=35 barrier_pct_rejected=0 passed=103
+t=0.50 fold=63: raw_crossings=55 lockout_rejected=5 barrier_pct_rejected=0 passed=50
+t=0.55 fold=63: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.60 fold=63: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=63: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=63: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=63: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -1369,15 +1369,15 @@ t=0.85 fold=63: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=63: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=63: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 63 | Train Rows: 7584   | Tested on forward 150 rows. Purged: 12
-t=0.20 fold=64: raw_crossings=150 lockout_rejected=57 barrier_pct_rejected=0 passed=93
-t=0.25 fold=64: raw_crossings=150 lockout_rejected=57 barrier_pct_rejected=0 passed=93
-t=0.30 fold=64: raw_crossings=150 lockout_rejected=57 barrier_pct_rejected=0 passed=93
-t=0.35 fold=64: raw_crossings=149 lockout_rejected=57 barrier_pct_rejected=0 passed=92
-t=0.40 fold=64: raw_crossings=149 lockout_rejected=57 barrier_pct_rejected=0 passed=92
-t=0.45 fold=64: raw_crossings=147 lockout_rejected=56 barrier_pct_rejected=0 passed=91
-t=0.50 fold=64: raw_crossings=57 lockout_rejected=11 barrier_pct_rejected=0 passed=46
-t=0.55 fold=64: raw_crossings=7 lockout_rejected=1 barrier_pct_rejected=0 passed=6
-t=0.60 fold=64: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=64: raw_crossings=149 lockout_rejected=34 barrier_pct_rejected=0 passed=115
+t=0.25 fold=64: raw_crossings=147 lockout_rejected=33 barrier_pct_rejected=0 passed=114
+t=0.30 fold=64: raw_crossings=145 lockout_rejected=32 barrier_pct_rejected=0 passed=113
+t=0.35 fold=64: raw_crossings=145 lockout_rejected=32 barrier_pct_rejected=0 passed=113
+t=0.40 fold=64: raw_crossings=145 lockout_rejected=32 barrier_pct_rejected=0 passed=113
+t=0.45 fold=64: raw_crossings=130 lockout_rejected=29 barrier_pct_rejected=0 passed=101
+t=0.50 fold=64: raw_crossings=49 lockout_rejected=5 barrier_pct_rejected=0 passed=44
+t=0.55 fold=64: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
+t=0.60 fold=64: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=64: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=64: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=64: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -1386,14 +1386,14 @@ t=0.85 fold=64: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=64: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=64: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 64 | Train Rows: 7612   | Tested on forward 150 rows. Purged: 11
-t=0.20 fold=65: raw_crossings=150 lockout_rejected=54 barrier_pct_rejected=0 passed=96
-t=0.25 fold=65: raw_crossings=150 lockout_rejected=54 barrier_pct_rejected=0 passed=96
-t=0.30 fold=65: raw_crossings=150 lockout_rejected=54 barrier_pct_rejected=0 passed=96
-t=0.35 fold=65: raw_crossings=149 lockout_rejected=54 barrier_pct_rejected=0 passed=95
-t=0.40 fold=65: raw_crossings=148 lockout_rejected=54 barrier_pct_rejected=0 passed=94
-t=0.45 fold=65: raw_crossings=138 lockout_rejected=51 barrier_pct_rejected=0 passed=87
-t=0.50 fold=65: raw_crossings=54 lockout_rejected=9 barrier_pct_rejected=0 passed=45
-t=0.55 fold=65: raw_crossings=8 lockout_rejected=0 barrier_pct_rejected=0 passed=8
+t=0.20 fold=65: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
+t=0.25 fold=65: raw_crossings=142 lockout_rejected=31 barrier_pct_rejected=0 passed=111
+t=0.30 fold=65: raw_crossings=137 lockout_rejected=30 barrier_pct_rejected=0 passed=107
+t=0.35 fold=65: raw_crossings=137 lockout_rejected=30 barrier_pct_rejected=0 passed=107
+t=0.40 fold=65: raw_crossings=137 lockout_rejected=30 barrier_pct_rejected=0 passed=107
+t=0.45 fold=65: raw_crossings=121 lockout_rejected=27 barrier_pct_rejected=0 passed=94
+t=0.50 fold=65: raw_crossings=55 lockout_rejected=6 barrier_pct_rejected=0 passed=49
+t=0.55 fold=65: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
 t=0.60 fold=65: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=65: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=65: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -1403,15 +1403,15 @@ t=0.85 fold=65: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=65: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=65: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 65 | Train Rows: 7643   | Tested on forward 150 rows. Purged: 7
-t=0.20 fold=66: raw_crossings=150 lockout_rejected=53 barrier_pct_rejected=0 passed=97
-t=0.25 fold=66: raw_crossings=150 lockout_rejected=53 barrier_pct_rejected=0 passed=97
-t=0.30 fold=66: raw_crossings=150 lockout_rejected=53 barrier_pct_rejected=0 passed=97
-t=0.35 fold=66: raw_crossings=150 lockout_rejected=53 barrier_pct_rejected=0 passed=97
-t=0.40 fold=66: raw_crossings=144 lockout_rejected=49 barrier_pct_rejected=0 passed=95
-t=0.45 fold=66: raw_crossings=137 lockout_rejected=45 barrier_pct_rejected=0 passed=92
-t=0.50 fold=66: raw_crossings=45 lockout_rejected=10 barrier_pct_rejected=0 passed=35
-t=0.55 fold=66: raw_crossings=7 lockout_rejected=0 barrier_pct_rejected=0 passed=7
-t=0.60 fold=66: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=66: raw_crossings=147 lockout_rejected=36 barrier_pct_rejected=0 passed=111
+t=0.25 fold=66: raw_crossings=140 lockout_rejected=31 barrier_pct_rejected=0 passed=109
+t=0.30 fold=66: raw_crossings=136 lockout_rejected=30 barrier_pct_rejected=0 passed=106
+t=0.35 fold=66: raw_crossings=134 lockout_rejected=29 barrier_pct_rejected=0 passed=105
+t=0.40 fold=66: raw_crossings=128 lockout_rejected=29 barrier_pct_rejected=0 passed=99
+t=0.45 fold=66: raw_crossings=114 lockout_rejected=26 barrier_pct_rejected=0 passed=88
+t=0.50 fold=66: raw_crossings=48 lockout_rejected=6 barrier_pct_rejected=0 passed=42
+t=0.55 fold=66: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.60 fold=66: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=66: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=66: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=66: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -1420,14 +1420,14 @@ t=0.85 fold=66: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=66: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=66: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 66 | Train Rows: 7658   | Tested on forward 150 rows. Purged: 19
-t=0.20 fold=67: raw_crossings=150 lockout_rejected=51 barrier_pct_rejected=0 passed=99
-t=0.25 fold=67: raw_crossings=150 lockout_rejected=51 barrier_pct_rejected=0 passed=99
-t=0.30 fold=67: raw_crossings=150 lockout_rejected=51 barrier_pct_rejected=0 passed=99
-t=0.35 fold=67: raw_crossings=150 lockout_rejected=51 barrier_pct_rejected=0 passed=99
-t=0.40 fold=67: raw_crossings=149 lockout_rejected=51 barrier_pct_rejected=0 passed=98
-t=0.45 fold=67: raw_crossings=137 lockout_rejected=46 barrier_pct_rejected=0 passed=91
-t=0.50 fold=67: raw_crossings=54 lockout_rejected=5 barrier_pct_rejected=0 passed=49
-t=0.55 fold=67: raw_crossings=8 lockout_rejected=0 barrier_pct_rejected=0 passed=8
+t=0.20 fold=67: raw_crossings=147 lockout_rejected=38 barrier_pct_rejected=0 passed=109
+t=0.25 fold=67: raw_crossings=140 lockout_rejected=33 barrier_pct_rejected=0 passed=107
+t=0.30 fold=67: raw_crossings=134 lockout_rejected=30 barrier_pct_rejected=0 passed=104
+t=0.35 fold=67: raw_crossings=132 lockout_rejected=30 barrier_pct_rejected=0 passed=102
+t=0.40 fold=67: raw_crossings=127 lockout_rejected=30 barrier_pct_rejected=0 passed=97
+t=0.45 fold=67: raw_crossings=115 lockout_rejected=26 barrier_pct_rejected=0 passed=89
+t=0.50 fold=67: raw_crossings=46 lockout_rejected=5 barrier_pct_rejected=0 passed=41
+t=0.55 fold=67: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
 t=0.60 fold=67: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=67: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=67: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -1437,14 +1437,14 @@ t=0.85 fold=67: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=67: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=67: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 67 | Train Rows: 7699   | Tested on forward 150 rows. Purged: 5
-t=0.20 fold=68: raw_crossings=150 lockout_rejected=56 barrier_pct_rejected=0 passed=94
-t=0.25 fold=68: raw_crossings=150 lockout_rejected=56 barrier_pct_rejected=0 passed=94
-t=0.30 fold=68: raw_crossings=150 lockout_rejected=56 barrier_pct_rejected=0 passed=94
-t=0.35 fold=68: raw_crossings=149 lockout_rejected=56 barrier_pct_rejected=0 passed=93
-t=0.40 fold=68: raw_crossings=148 lockout_rejected=56 barrier_pct_rejected=0 passed=92
-t=0.45 fold=68: raw_crossings=135 lockout_rejected=49 barrier_pct_rejected=0 passed=86
-t=0.50 fold=68: raw_crossings=63 lockout_rejected=9 barrier_pct_rejected=0 passed=54
-t=0.55 fold=68: raw_crossings=5 lockout_rejected=0 barrier_pct_rejected=0 passed=5
+t=0.20 fold=68: raw_crossings=147 lockout_rejected=38 barrier_pct_rejected=0 passed=109
+t=0.25 fold=68: raw_crossings=138 lockout_rejected=32 barrier_pct_rejected=0 passed=106
+t=0.30 fold=68: raw_crossings=130 lockout_rejected=28 barrier_pct_rejected=0 passed=102
+t=0.35 fold=68: raw_crossings=129 lockout_rejected=28 barrier_pct_rejected=0 passed=101
+t=0.40 fold=68: raw_crossings=123 lockout_rejected=28 barrier_pct_rejected=0 passed=95
+t=0.45 fold=68: raw_crossings=113 lockout_rejected=25 barrier_pct_rejected=0 passed=88
+t=0.50 fold=68: raw_crossings=55 lockout_rejected=7 barrier_pct_rejected=0 passed=48
+t=0.55 fold=68: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
 t=0.60 fold=68: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=68: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=68: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -1454,14 +1454,14 @@ t=0.85 fold=68: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=68: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=68: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 68 | Train Rows: 7721   | Tested on forward 150 rows. Purged: 10
-t=0.20 fold=69: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.25 fold=69: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.30 fold=69: raw_crossings=149 lockout_rejected=41 barrier_pct_rejected=0 passed=108
-t=0.35 fold=69: raw_crossings=148 lockout_rejected=41 barrier_pct_rejected=0 passed=107
-t=0.40 fold=69: raw_crossings=147 lockout_rejected=41 barrier_pct_rejected=0 passed=106
-t=0.45 fold=69: raw_crossings=129 lockout_rejected=33 barrier_pct_rejected=0 passed=96
-t=0.50 fold=69: raw_crossings=55 lockout_rejected=3 barrier_pct_rejected=0 passed=52
-t=0.55 fold=69: raw_crossings=6 lockout_rejected=0 barrier_pct_rejected=0 passed=6
+t=0.20 fold=69: raw_crossings=148 lockout_rejected=38 barrier_pct_rejected=0 passed=110
+t=0.25 fold=69: raw_crossings=137 lockout_rejected=33 barrier_pct_rejected=0 passed=104
+t=0.30 fold=69: raw_crossings=129 lockout_rejected=29 barrier_pct_rejected=0 passed=100
+t=0.35 fold=69: raw_crossings=125 lockout_rejected=29 barrier_pct_rejected=0 passed=96
+t=0.40 fold=69: raw_crossings=121 lockout_rejected=29 barrier_pct_rejected=0 passed=92
+t=0.45 fold=69: raw_crossings=113 lockout_rejected=28 barrier_pct_rejected=0 passed=85
+t=0.50 fold=69: raw_crossings=60 lockout_rejected=8 barrier_pct_rejected=0 passed=52
+t=0.55 fold=69: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
 t=0.60 fold=69: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=69: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=69: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -1471,14 +1471,14 @@ t=0.85 fold=69: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=69: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=69: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 69 | Train Rows: 7734   | Tested on forward 150 rows. Purged: 24
-t=0.20 fold=70: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.25 fold=70: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.30 fold=70: raw_crossings=149 lockout_rejected=37 barrier_pct_rejected=0 passed=112
-t=0.35 fold=70: raw_crossings=148 lockout_rejected=37 barrier_pct_rejected=0 passed=111
-t=0.40 fold=70: raw_crossings=147 lockout_rejected=37 barrier_pct_rejected=0 passed=110
-t=0.45 fold=70: raw_crossings=125 lockout_rejected=29 barrier_pct_rejected=0 passed=96
-t=0.50 fold=70: raw_crossings=58 lockout_rejected=9 barrier_pct_rejected=0 passed=49
-t=0.55 fold=70: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.20 fold=70: raw_crossings=150 lockout_rejected=40 barrier_pct_rejected=0 passed=110
+t=0.25 fold=70: raw_crossings=149 lockout_rejected=40 barrier_pct_rejected=0 passed=109
+t=0.30 fold=70: raw_crossings=135 lockout_rejected=34 barrier_pct_rejected=0 passed=101
+t=0.35 fold=70: raw_crossings=127 lockout_rejected=31 barrier_pct_rejected=0 passed=96
+t=0.40 fold=70: raw_crossings=120 lockout_rejected=31 barrier_pct_rejected=0 passed=89
+t=0.45 fold=70: raw_crossings=114 lockout_rejected=28 barrier_pct_rejected=0 passed=86
+t=0.50 fold=70: raw_crossings=67 lockout_rejected=9 barrier_pct_rejected=0 passed=58
+t=0.55 fold=70: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.60 fold=70: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=70: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=70: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -1488,14 +1488,14 @@ t=0.85 fold=70: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=70: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=70: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 70 | Train Rows: 7777   | Tested on forward 150 rows. Purged: 8
-t=0.20 fold=71: raw_crossings=150 lockout_rejected=48 barrier_pct_rejected=0 passed=102
-t=0.25 fold=71: raw_crossings=150 lockout_rejected=48 barrier_pct_rejected=0 passed=102
-t=0.30 fold=71: raw_crossings=149 lockout_rejected=47 barrier_pct_rejected=0 passed=102
-t=0.35 fold=71: raw_crossings=149 lockout_rejected=47 barrier_pct_rejected=0 passed=102
-t=0.40 fold=71: raw_crossings=148 lockout_rejected=47 barrier_pct_rejected=0 passed=101
-t=0.45 fold=71: raw_crossings=127 lockout_rejected=38 barrier_pct_rejected=0 passed=89
-t=0.50 fold=71: raw_crossings=69 lockout_rejected=15 barrier_pct_rejected=0 passed=54
-t=0.55 fold=71: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.20 fold=71: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
+t=0.25 fold=71: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
+t=0.30 fold=71: raw_crossings=142 lockout_rejected=34 barrier_pct_rejected=0 passed=108
+t=0.35 fold=71: raw_crossings=132 lockout_rejected=30 barrier_pct_rejected=0 passed=102
+t=0.40 fold=71: raw_crossings=125 lockout_rejected=30 barrier_pct_rejected=0 passed=95
+t=0.45 fold=71: raw_crossings=117 lockout_rejected=27 barrier_pct_rejected=0 passed=90
+t=0.50 fold=71: raw_crossings=64 lockout_rejected=8 barrier_pct_rejected=0 passed=56
+t=0.55 fold=71: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
 t=0.60 fold=71: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=71: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=71: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -1505,14 +1505,14 @@ t=0.85 fold=71: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=71: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=71: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 71 | Train Rows: 7800   | Tested on forward 150 rows. Purged: 12
-t=0.20 fold=72: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.25 fold=72: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.30 fold=72: raw_crossings=149 lockout_rejected=42 barrier_pct_rejected=0 passed=107
-t=0.35 fold=72: raw_crossings=149 lockout_rejected=42 barrier_pct_rejected=0 passed=107
-t=0.40 fold=72: raw_crossings=142 lockout_rejected=39 barrier_pct_rejected=0 passed=103
-t=0.45 fold=72: raw_crossings=131 lockout_rejected=35 barrier_pct_rejected=0 passed=96
-t=0.50 fold=72: raw_crossings=57 lockout_rejected=9 barrier_pct_rejected=0 passed=48
-t=0.55 fold=72: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
+t=0.20 fold=72: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
+t=0.25 fold=72: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
+t=0.30 fold=72: raw_crossings=147 lockout_rejected=37 barrier_pct_rejected=0 passed=110
+t=0.35 fold=72: raw_crossings=131 lockout_rejected=35 barrier_pct_rejected=0 passed=96
+t=0.40 fold=72: raw_crossings=120 lockout_rejected=31 barrier_pct_rejected=0 passed=89
+t=0.45 fold=72: raw_crossings=109 lockout_rejected=27 barrier_pct_rejected=0 passed=82
+t=0.50 fold=72: raw_crossings=60 lockout_rejected=8 barrier_pct_rejected=0 passed=52
+t=0.55 fold=72: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
 t=0.60 fold=72: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=72: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=72: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -1522,14 +1522,14 @@ t=0.85 fold=72: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=72: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=72: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 72 | Train Rows: 7834   | Tested on forward 150 rows. Purged: 5
-t=0.20 fold=73: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.25 fold=73: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.30 fold=73: raw_crossings=149 lockout_rejected=34 barrier_pct_rejected=0 passed=115
-t=0.35 fold=73: raw_crossings=148 lockout_rejected=34 barrier_pct_rejected=0 passed=114
-t=0.40 fold=73: raw_crossings=147 lockout_rejected=34 barrier_pct_rejected=0 passed=113
-t=0.45 fold=73: raw_crossings=124 lockout_rejected=25 barrier_pct_rejected=0 passed=99
-t=0.50 fold=73: raw_crossings=51 lockout_rejected=10 barrier_pct_rejected=0 passed=41
-t=0.55 fold=73: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=73: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
+t=0.25 fold=73: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
+t=0.30 fold=73: raw_crossings=147 lockout_rejected=31 barrier_pct_rejected=0 passed=116
+t=0.35 fold=73: raw_crossings=134 lockout_rejected=30 barrier_pct_rejected=0 passed=104
+t=0.40 fold=73: raw_crossings=124 lockout_rejected=27 barrier_pct_rejected=0 passed=97
+t=0.45 fold=73: raw_crossings=113 lockout_rejected=22 barrier_pct_rejected=0 passed=91
+t=0.50 fold=73: raw_crossings=64 lockout_rejected=7 barrier_pct_rejected=0 passed=57
+t=0.55 fold=73: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
 t=0.60 fold=73: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=73: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=73: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -1539,14 +1539,14 @@ t=0.85 fold=73: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=73: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=73: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 73 | Train Rows: 7853   | Tested on forward 150 rows. Purged: 13
-t=0.20 fold=74: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
-t=0.25 fold=74: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
-t=0.30 fold=74: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
-t=0.35 fold=74: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
-t=0.40 fold=74: raw_crossings=147 lockout_rejected=32 barrier_pct_rejected=0 passed=115
-t=0.45 fold=74: raw_crossings=125 lockout_rejected=24 barrier_pct_rejected=0 passed=101
-t=0.50 fold=74: raw_crossings=55 lockout_rejected=10 barrier_pct_rejected=0 passed=45
-t=0.55 fold=74: raw_crossings=3 lockout_rejected=1 barrier_pct_rejected=0 passed=2
+t=0.20 fold=74: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.25 fold=74: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.30 fold=74: raw_crossings=146 lockout_rejected=27 barrier_pct_rejected=0 passed=119
+t=0.35 fold=74: raw_crossings=131 lockout_rejected=25 barrier_pct_rejected=0 passed=106
+t=0.40 fold=74: raw_crossings=125 lockout_rejected=22 barrier_pct_rejected=0 passed=103
+t=0.45 fold=74: raw_crossings=115 lockout_rejected=18 barrier_pct_rejected=0 passed=97
+t=0.50 fold=74: raw_crossings=64 lockout_rejected=6 barrier_pct_rejected=0 passed=58
+t=0.55 fold=74: raw_crossings=7 lockout_rejected=0 barrier_pct_rejected=0 passed=7
 t=0.60 fold=74: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=74: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=74: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -1556,14 +1556,14 @@ t=0.85 fold=74: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=74: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=74: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 74 | Train Rows: 7877   | Tested on forward 150 rows. Purged: 16
-t=0.20 fold=75: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.25 fold=75: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.30 fold=75: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.35 fold=75: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.40 fold=75: raw_crossings=149 lockout_rejected=41 barrier_pct_rejected=0 passed=108
-t=0.45 fold=75: raw_crossings=135 lockout_rejected=35 barrier_pct_rejected=0 passed=100
-t=0.50 fold=75: raw_crossings=48 lockout_rejected=9 barrier_pct_rejected=0 passed=39
-t=0.55 fold=75: raw_crossings=3 lockout_rejected=1 barrier_pct_rejected=0 passed=2
+t=0.20 fold=75: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
+t=0.25 fold=75: raw_crossings=149 lockout_rejected=27 barrier_pct_rejected=0 passed=122
+t=0.30 fold=75: raw_crossings=148 lockout_rejected=27 barrier_pct_rejected=0 passed=121
+t=0.35 fold=75: raw_crossings=133 lockout_rejected=24 barrier_pct_rejected=0 passed=109
+t=0.40 fold=75: raw_crossings=130 lockout_rejected=23 barrier_pct_rejected=0 passed=107
+t=0.45 fold=75: raw_crossings=118 lockout_rejected=16 barrier_pct_rejected=0 passed=102
+t=0.50 fold=75: raw_crossings=72 lockout_rejected=6 barrier_pct_rejected=0 passed=66
+t=0.55 fold=75: raw_crossings=8 lockout_rejected=0 barrier_pct_rejected=0 passed=8
 t=0.60 fold=75: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=75: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=75: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -1573,14 +1573,14 @@ t=0.85 fold=75: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=75: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=75: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 75 | Train Rows: 7909   | Tested on forward 150 rows. Purged: 11
-t=0.20 fold=76: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.25 fold=76: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.30 fold=76: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.35 fold=76: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.40 fold=76: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.45 fold=76: raw_crossings=136 lockout_rejected=30 barrier_pct_rejected=0 passed=106
-t=0.50 fold=76: raw_crossings=44 lockout_rejected=6 barrier_pct_rejected=0 passed=38
-t=0.55 fold=76: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=76: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.25 fold=76: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.30 fold=76: raw_crossings=148 lockout_rejected=28 barrier_pct_rejected=0 passed=120
+t=0.35 fold=76: raw_crossings=133 lockout_rejected=25 barrier_pct_rejected=0 passed=108
+t=0.40 fold=76: raw_crossings=131 lockout_rejected=24 barrier_pct_rejected=0 passed=107
+t=0.45 fold=76: raw_crossings=118 lockout_rejected=18 barrier_pct_rejected=0 passed=100
+t=0.50 fold=76: raw_crossings=83 lockout_rejected=13 barrier_pct_rejected=0 passed=70
+t=0.55 fold=76: raw_crossings=10 lockout_rejected=0 barrier_pct_rejected=0 passed=10
 t=0.60 fold=76: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=76: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=76: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -1590,14 +1590,14 @@ t=0.85 fold=76: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=76: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=76: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 76 | Train Rows: 7933   | Tested on forward 150 rows. Purged: 14
-t=0.20 fold=77: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
-t=0.25 fold=77: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
-t=0.30 fold=77: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
-t=0.35 fold=77: raw_crossings=149 lockout_rejected=27 barrier_pct_rejected=0 passed=122
-t=0.40 fold=77: raw_crossings=148 lockout_rejected=27 barrier_pct_rejected=0 passed=121
-t=0.45 fold=77: raw_crossings=135 lockout_rejected=22 barrier_pct_rejected=0 passed=113
-t=0.50 fold=77: raw_crossings=38 lockout_rejected=4 barrier_pct_rejected=0 passed=34
-t=0.55 fold=77: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.20 fold=77: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
+t=0.25 fold=77: raw_crossings=147 lockout_rejected=31 barrier_pct_rejected=0 passed=116
+t=0.30 fold=77: raw_crossings=145 lockout_rejected=31 barrier_pct_rejected=0 passed=114
+t=0.35 fold=77: raw_crossings=142 lockout_rejected=30 barrier_pct_rejected=0 passed=112
+t=0.40 fold=77: raw_crossings=141 lockout_rejected=30 barrier_pct_rejected=0 passed=111
+t=0.45 fold=77: raw_crossings=131 lockout_rejected=25 barrier_pct_rejected=0 passed=106
+t=0.50 fold=77: raw_crossings=77 lockout_rejected=12 barrier_pct_rejected=0 passed=65
+t=0.55 fold=77: raw_crossings=6 lockout_rejected=0 barrier_pct_rejected=0 passed=6
 t=0.60 fold=77: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=77: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=77: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -1607,14 +1607,14 @@ t=0.85 fold=77: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=77: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=77: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 77 | Train Rows: 7949   | Tested on forward 150 rows. Purged: 25
-t=0.20 fold=78: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
-t=0.25 fold=78: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
-t=0.30 fold=78: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
-t=0.35 fold=78: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
-t=0.40 fold=78: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
-t=0.45 fold=78: raw_crossings=141 lockout_rejected=27 barrier_pct_rejected=0 passed=114
-t=0.50 fold=78: raw_crossings=49 lockout_rejected=5 barrier_pct_rejected=0 passed=44
-t=0.55 fold=78: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
+t=0.20 fold=78: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.25 fold=78: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.30 fold=78: raw_crossings=146 lockout_rejected=32 barrier_pct_rejected=0 passed=114
+t=0.35 fold=78: raw_crossings=144 lockout_rejected=32 barrier_pct_rejected=0 passed=112
+t=0.40 fold=78: raw_crossings=143 lockout_rejected=32 barrier_pct_rejected=0 passed=111
+t=0.45 fold=78: raw_crossings=134 lockout_rejected=26 barrier_pct_rejected=0 passed=108
+t=0.50 fold=78: raw_crossings=66 lockout_rejected=8 barrier_pct_rejected=0 passed=58
+t=0.55 fold=78: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
 t=0.60 fold=78: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=78: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=78: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -1624,14 +1624,14 @@ t=0.85 fold=78: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=78: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=78: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 78 | Train Rows: 7992   | Tested on forward 150 rows. Purged: 9
-t=0.20 fold=79: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
-t=0.25 fold=79: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
-t=0.30 fold=79: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
-t=0.35 fold=79: raw_crossings=149 lockout_rejected=36 barrier_pct_rejected=0 passed=113
-t=0.40 fold=79: raw_crossings=148 lockout_rejected=36 barrier_pct_rejected=0 passed=112
-t=0.45 fold=79: raw_crossings=139 lockout_rejected=32 barrier_pct_rejected=0 passed=107
-t=0.50 fold=79: raw_crossings=45 lockout_rejected=5 barrier_pct_rejected=0 passed=40
-t=0.55 fold=79: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.20 fold=79: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
+t=0.25 fold=79: raw_crossings=146 lockout_rejected=37 barrier_pct_rejected=0 passed=109
+t=0.30 fold=79: raw_crossings=143 lockout_rejected=37 barrier_pct_rejected=0 passed=106
+t=0.35 fold=79: raw_crossings=140 lockout_rejected=37 barrier_pct_rejected=0 passed=103
+t=0.40 fold=79: raw_crossings=138 lockout_rejected=36 barrier_pct_rejected=0 passed=102
+t=0.45 fold=79: raw_crossings=127 lockout_rejected=31 barrier_pct_rejected=0 passed=96
+t=0.50 fold=79: raw_crossings=67 lockout_rejected=9 barrier_pct_rejected=0 passed=58
+t=0.55 fold=79: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
 t=0.60 fold=79: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=79: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=79: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -1642,12 +1642,12 @@ t=0.90 fold=79: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.95 fold=79: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 79 | Train Rows: 8017   | Tested on forward 150 rows. Purged: 11
 t=0.20 fold=80: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
-t=0.25 fold=80: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
-t=0.30 fold=80: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
-t=0.35 fold=80: raw_crossings=149 lockout_rejected=32 barrier_pct_rejected=0 passed=117
-t=0.40 fold=80: raw_crossings=147 lockout_rejected=31 barrier_pct_rejected=0 passed=116
-t=0.45 fold=80: raw_crossings=135 lockout_rejected=27 barrier_pct_rejected=0 passed=108
-t=0.50 fold=80: raw_crossings=53 lockout_rejected=8 barrier_pct_rejected=0 passed=45
+t=0.25 fold=80: raw_crossings=145 lockout_rejected=32 barrier_pct_rejected=0 passed=113
+t=0.30 fold=80: raw_crossings=142 lockout_rejected=32 barrier_pct_rejected=0 passed=110
+t=0.35 fold=80: raw_crossings=140 lockout_rejected=32 barrier_pct_rejected=0 passed=108
+t=0.40 fold=80: raw_crossings=138 lockout_rejected=31 barrier_pct_rejected=0 passed=107
+t=0.45 fold=80: raw_crossings=121 lockout_rejected=29 barrier_pct_rejected=0 passed=92
+t=0.50 fold=80: raw_crossings=69 lockout_rejected=11 barrier_pct_rejected=0 passed=58
 t=0.55 fold=80: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
 t=0.60 fold=80: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=80: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -1658,14 +1658,14 @@ t=0.85 fold=80: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=80: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=80: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 80 | Train Rows: 8044   | Tested on forward 150 rows. Purged: 11
-t=0.20 fold=81: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
-t=0.25 fold=81: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
-t=0.30 fold=81: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
-t=0.35 fold=81: raw_crossings=149 lockout_rejected=32 barrier_pct_rejected=0 passed=117
-t=0.40 fold=81: raw_crossings=147 lockout_rejected=31 barrier_pct_rejected=0 passed=116
-t=0.45 fold=81: raw_crossings=134 lockout_rejected=29 barrier_pct_rejected=0 passed=105
-t=0.50 fold=81: raw_crossings=52 lockout_rejected=7 barrier_pct_rejected=0 passed=45
-t=0.55 fold=81: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
+t=0.20 fold=81: raw_crossings=149 lockout_rejected=34 barrier_pct_rejected=0 passed=115
+t=0.25 fold=81: raw_crossings=143 lockout_rejected=33 barrier_pct_rejected=0 passed=110
+t=0.30 fold=81: raw_crossings=140 lockout_rejected=33 barrier_pct_rejected=0 passed=107
+t=0.35 fold=81: raw_crossings=137 lockout_rejected=32 barrier_pct_rejected=0 passed=105
+t=0.40 fold=81: raw_crossings=135 lockout_rejected=32 barrier_pct_rejected=0 passed=103
+t=0.45 fold=81: raw_crossings=119 lockout_rejected=28 barrier_pct_rejected=0 passed=91
+t=0.50 fold=81: raw_crossings=59 lockout_rejected=6 barrier_pct_rejected=0 passed=53
+t=0.55 fold=81: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.60 fold=81: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=81: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=81: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -1675,14 +1675,14 @@ t=0.85 fold=81: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=81: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=81: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 81 | Train Rows: 8066   | Tested on forward 150 rows. Purged: 16
-t=0.20 fold=82: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
-t=0.25 fold=82: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
-t=0.30 fold=82: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
-t=0.35 fold=82: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
-t=0.40 fold=82: raw_crossings=148 lockout_rejected=33 barrier_pct_rejected=0 passed=115
-t=0.45 fold=82: raw_crossings=134 lockout_rejected=29 barrier_pct_rejected=0 passed=105
-t=0.50 fold=82: raw_crossings=59 lockout_rejected=10 barrier_pct_rejected=0 passed=49
-t=0.55 fold=82: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
+t=0.20 fold=82: raw_crossings=149 lockout_rejected=27 barrier_pct_rejected=0 passed=122
+t=0.25 fold=82: raw_crossings=143 lockout_rejected=26 barrier_pct_rejected=0 passed=117
+t=0.30 fold=82: raw_crossings=139 lockout_rejected=26 barrier_pct_rejected=0 passed=113
+t=0.35 fold=82: raw_crossings=136 lockout_rejected=26 barrier_pct_rejected=0 passed=110
+t=0.40 fold=82: raw_crossings=134 lockout_rejected=26 barrier_pct_rejected=0 passed=108
+t=0.45 fold=82: raw_crossings=120 lockout_rejected=24 barrier_pct_rejected=0 passed=96
+t=0.50 fold=82: raw_crossings=56 lockout_rejected=3 barrier_pct_rejected=0 passed=53
+t=0.55 fold=82: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.60 fold=82: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=82: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=82: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -1692,14 +1692,14 @@ t=0.85 fold=82: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=82: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=82: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 82 | Train Rows: 8102   | Tested on forward 150 rows. Purged: 7
-t=0.20 fold=83: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
-t=0.25 fold=83: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
-t=0.30 fold=83: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
-t=0.35 fold=83: raw_crossings=149 lockout_rejected=30 barrier_pct_rejected=0 passed=119
-t=0.40 fold=83: raw_crossings=147 lockout_rejected=29 barrier_pct_rejected=0 passed=118
-t=0.45 fold=83: raw_crossings=130 lockout_rejected=27 barrier_pct_rejected=0 passed=103
-t=0.50 fold=83: raw_crossings=53 lockout_rejected=8 barrier_pct_rejected=0 passed=45
-t=0.55 fold=83: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.20 fold=83: raw_crossings=149 lockout_rejected=30 barrier_pct_rejected=0 passed=119
+t=0.25 fold=83: raw_crossings=142 lockout_rejected=28 barrier_pct_rejected=0 passed=114
+t=0.30 fold=83: raw_crossings=139 lockout_rejected=28 barrier_pct_rejected=0 passed=111
+t=0.35 fold=83: raw_crossings=138 lockout_rejected=28 barrier_pct_rejected=0 passed=110
+t=0.40 fold=83: raw_crossings=136 lockout_rejected=28 barrier_pct_rejected=0 passed=108
+t=0.45 fold=83: raw_crossings=122 lockout_rejected=24 barrier_pct_rejected=0 passed=98
+t=0.50 fold=83: raw_crossings=68 lockout_rejected=4 barrier_pct_rejected=0 passed=64
+t=0.55 fold=83: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
 t=0.60 fold=83: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=83: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=83: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -1709,14 +1709,14 @@ t=0.85 fold=83: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=83: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=83: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 83 | Train Rows: 8128   | Tested on forward 150 rows. Purged: 8
-t=0.20 fold=84: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
-t=0.25 fold=84: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
-t=0.30 fold=84: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
-t=0.35 fold=84: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
-t=0.40 fold=84: raw_crossings=147 lockout_rejected=28 barrier_pct_rejected=0 passed=119
-t=0.45 fold=84: raw_crossings=137 lockout_rejected=26 barrier_pct_rejected=0 passed=111
-t=0.50 fold=84: raw_crossings=56 lockout_rejected=6 barrier_pct_rejected=0 passed=50
-t=0.55 fold=84: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.20 fold=84: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
+t=0.25 fold=84: raw_crossings=149 lockout_rejected=34 barrier_pct_rejected=0 passed=115
+t=0.30 fold=84: raw_crossings=143 lockout_rejected=31 barrier_pct_rejected=0 passed=112
+t=0.35 fold=84: raw_crossings=137 lockout_rejected=29 barrier_pct_rejected=0 passed=108
+t=0.40 fold=84: raw_crossings=133 lockout_rejected=28 barrier_pct_rejected=0 passed=105
+t=0.45 fold=84: raw_crossings=120 lockout_rejected=25 barrier_pct_rejected=0 passed=95
+t=0.50 fold=84: raw_crossings=55 lockout_rejected=4 barrier_pct_rejected=0 passed=51
+t=0.55 fold=84: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.60 fold=84: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=84: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=84: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -1726,14 +1726,14 @@ t=0.85 fold=84: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=84: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=84: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 84 | Train Rows: 8148   | Tested on forward 150 rows. Purged: 15
-t=0.20 fold=85: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
-t=0.25 fold=85: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
-t=0.30 fold=85: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
-t=0.35 fold=85: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
-t=0.40 fold=85: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
-t=0.45 fold=85: raw_crossings=140 lockout_rejected=28 barrier_pct_rejected=0 passed=112
-t=0.50 fold=85: raw_crossings=48 lockout_rejected=7 barrier_pct_rejected=0 passed=41
-t=0.55 fold=85: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.20 fold=85: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
+t=0.25 fold=85: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
+t=0.30 fold=85: raw_crossings=146 lockout_rejected=32 barrier_pct_rejected=0 passed=114
+t=0.35 fold=85: raw_crossings=139 lockout_rejected=31 barrier_pct_rejected=0 passed=108
+t=0.40 fold=85: raw_crossings=134 lockout_rejected=28 barrier_pct_rejected=0 passed=106
+t=0.45 fold=85: raw_crossings=129 lockout_rejected=26 barrier_pct_rejected=0 passed=103
+t=0.50 fold=85: raw_crossings=74 lockout_rejected=7 barrier_pct_rejected=0 passed=67
+t=0.55 fold=85: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.60 fold=85: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=85: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=85: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -1743,14 +1743,14 @@ t=0.85 fold=85: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=85: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=85: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 85 | Train Rows: 8173   | Tested on forward 150 rows. Purged: 17
-t=0.20 fold=86: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
-t=0.25 fold=86: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
-t=0.30 fold=86: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
-t=0.35 fold=86: raw_crossings=149 lockout_rejected=35 barrier_pct_rejected=0 passed=114
-t=0.40 fold=86: raw_crossings=149 lockout_rejected=35 barrier_pct_rejected=0 passed=114
-t=0.45 fold=86: raw_crossings=142 lockout_rejected=33 barrier_pct_rejected=0 passed=109
-t=0.50 fold=86: raw_crossings=40 lockout_rejected=6 barrier_pct_rejected=0 passed=34
-t=0.55 fold=86: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.20 fold=86: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.25 fold=86: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.30 fold=86: raw_crossings=147 lockout_rejected=30 barrier_pct_rejected=0 passed=117
+t=0.35 fold=86: raw_crossings=139 lockout_rejected=28 barrier_pct_rejected=0 passed=111
+t=0.40 fold=86: raw_crossings=134 lockout_rejected=25 barrier_pct_rejected=0 passed=109
+t=0.45 fold=86: raw_crossings=130 lockout_rejected=24 barrier_pct_rejected=0 passed=106
+t=0.50 fold=86: raw_crossings=68 lockout_rejected=6 barrier_pct_rejected=0 passed=62
+t=0.55 fold=86: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
 t=0.60 fold=86: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=86: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=86: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -1760,14 +1760,14 @@ t=0.85 fold=86: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=86: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=86: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 86 | Train Rows: 8207   | Tested on forward 150 rows. Purged: 10
-t=0.20 fold=87: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
-t=0.25 fold=87: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
-t=0.30 fold=87: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
-t=0.35 fold=87: raw_crossings=149 lockout_rejected=34 barrier_pct_rejected=0 passed=115
-t=0.40 fold=87: raw_crossings=149 lockout_rejected=34 barrier_pct_rejected=0 passed=115
-t=0.45 fold=87: raw_crossings=140 lockout_rejected=31 barrier_pct_rejected=0 passed=109
-t=0.50 fold=87: raw_crossings=41 lockout_rejected=3 barrier_pct_rejected=0 passed=38
-t=0.55 fold=87: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
+t=0.20 fold=87: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.25 fold=87: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.30 fold=87: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.35 fold=87: raw_crossings=142 lockout_rejected=29 barrier_pct_rejected=0 passed=113
+t=0.40 fold=87: raw_crossings=135 lockout_rejected=25 barrier_pct_rejected=0 passed=110
+t=0.45 fold=87: raw_crossings=124 lockout_rejected=22 barrier_pct_rejected=0 passed=102
+t=0.50 fold=87: raw_crossings=64 lockout_rejected=4 barrier_pct_rejected=0 passed=60
+t=0.55 fold=87: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.60 fold=87: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=87: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=87: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -1777,14 +1777,14 @@ t=0.85 fold=87: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=87: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=87: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 87 | Train Rows: 8232   | Tested on forward 150 rows. Purged: 12
-t=0.20 fold=88: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.25 fold=88: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.30 fold=88: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.35 fold=88: raw_crossings=149 lockout_rejected=41 barrier_pct_rejected=0 passed=108
-t=0.40 fold=88: raw_crossings=149 lockout_rejected=41 barrier_pct_rejected=0 passed=108
-t=0.45 fold=88: raw_crossings=143 lockout_rejected=38 barrier_pct_rejected=0 passed=105
-t=0.50 fold=88: raw_crossings=39 lockout_rejected=4 barrier_pct_rejected=0 passed=35
-t=0.55 fold=88: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.20 fold=88: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
+t=0.25 fold=88: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
+t=0.30 fold=88: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
+t=0.35 fold=88: raw_crossings=138 lockout_rejected=31 barrier_pct_rejected=0 passed=107
+t=0.40 fold=88: raw_crossings=135 lockout_rejected=29 barrier_pct_rejected=0 passed=106
+t=0.45 fold=88: raw_crossings=124 lockout_rejected=28 barrier_pct_rejected=0 passed=96
+t=0.50 fold=88: raw_crossings=61 lockout_rejected=7 barrier_pct_rejected=0 passed=54
+t=0.55 fold=88: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.60 fold=88: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=88: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=88: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -1794,14 +1794,14 @@ t=0.85 fold=88: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=88: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=88: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 88 | Train Rows: 8257   | Tested on forward 150 rows. Purged: 14
-t=0.20 fold=89: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.25 fold=89: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.30 fold=89: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.35 fold=89: raw_crossings=149 lockout_rejected=45 barrier_pct_rejected=0 passed=104
-t=0.40 fold=89: raw_crossings=149 lockout_rejected=45 barrier_pct_rejected=0 passed=104
-t=0.45 fold=89: raw_crossings=146 lockout_rejected=43 barrier_pct_rejected=0 passed=103
-t=0.50 fold=89: raw_crossings=41 lockout_rejected=5 barrier_pct_rejected=0 passed=36
-t=0.55 fold=89: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
+t=0.20 fold=89: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
+t=0.25 fold=89: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
+t=0.30 fold=89: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
+t=0.35 fold=89: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
+t=0.40 fold=89: raw_crossings=137 lockout_rejected=30 barrier_pct_rejected=0 passed=107
+t=0.45 fold=89: raw_crossings=126 lockout_rejected=25 barrier_pct_rejected=0 passed=101
+t=0.50 fold=89: raw_crossings=66 lockout_rejected=6 barrier_pct_rejected=0 passed=60
+t=0.55 fold=89: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.60 fold=89: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=89: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=89: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -1811,14 +1811,14 @@ t=0.85 fold=89: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=89: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=89: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 89 | Train Rows: 8292   | Tested on forward 150 rows. Purged: 6
-t=0.20 fold=90: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.25 fold=90: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.30 fold=90: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.35 fold=90: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.40 fold=90: raw_crossings=148 lockout_rejected=45 barrier_pct_rejected=0 passed=103
-t=0.45 fold=90: raw_crossings=147 lockout_rejected=44 barrier_pct_rejected=0 passed=103
-t=0.50 fold=90: raw_crossings=34 lockout_rejected=6 barrier_pct_rejected=0 passed=28
-t=0.55 fold=90: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.20 fold=90: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
+t=0.25 fold=90: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
+t=0.30 fold=90: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
+t=0.35 fold=90: raw_crossings=148 lockout_rejected=35 barrier_pct_rejected=0 passed=113
+t=0.40 fold=90: raw_crossings=137 lockout_rejected=30 barrier_pct_rejected=0 passed=107
+t=0.45 fold=90: raw_crossings=121 lockout_rejected=23 barrier_pct_rejected=0 passed=98
+t=0.50 fold=90: raw_crossings=74 lockout_rejected=6 barrier_pct_rejected=0 passed=68
+t=0.55 fold=90: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.60 fold=90: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=90: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=90: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -1828,14 +1828,14 @@ t=0.85 fold=90: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=90: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=90: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 90 | Train Rows: 8314   | Tested on forward 150 rows. Purged: 11
-t=0.20 fold=91: raw_crossings=150 lockout_rejected=50 barrier_pct_rejected=0 passed=100
-t=0.25 fold=91: raw_crossings=150 lockout_rejected=50 barrier_pct_rejected=0 passed=100
-t=0.30 fold=91: raw_crossings=150 lockout_rejected=50 barrier_pct_rejected=0 passed=100
-t=0.35 fold=91: raw_crossings=148 lockout_rejected=53 barrier_pct_rejected=0 passed=95
-t=0.40 fold=91: raw_crossings=148 lockout_rejected=53 barrier_pct_rejected=0 passed=95
-t=0.45 fold=91: raw_crossings=146 lockout_rejected=52 barrier_pct_rejected=0 passed=94
-t=0.50 fold=91: raw_crossings=37 lockout_rejected=6 barrier_pct_rejected=0 passed=31
-t=0.55 fold=91: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.20 fold=91: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
+t=0.25 fold=91: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
+t=0.30 fold=91: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
+t=0.35 fold=91: raw_crossings=148 lockout_rejected=38 barrier_pct_rejected=0 passed=110
+t=0.40 fold=91: raw_crossings=133 lockout_rejected=31 barrier_pct_rejected=0 passed=102
+t=0.45 fold=91: raw_crossings=108 lockout_rejected=20 barrier_pct_rejected=0 passed=88
+t=0.50 fold=91: raw_crossings=74 lockout_rejected=8 barrier_pct_rejected=0 passed=66
+t=0.55 fold=91: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.60 fold=91: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=91: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=91: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -1845,13 +1845,13 @@ t=0.85 fold=91: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=91: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=91: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 91 | Train Rows: 8337   | Tested on forward 150 rows. Purged: 15
-t=0.20 fold=92: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.25 fold=92: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.30 fold=92: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.35 fold=92: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.40 fold=92: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.45 fold=92: raw_crossings=145 lockout_rejected=43 barrier_pct_rejected=0 passed=102
-t=0.50 fold=92: raw_crossings=35 lockout_rejected=4 barrier_pct_rejected=0 passed=31
+t=0.20 fold=92: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
+t=0.25 fold=92: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
+t=0.30 fold=92: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
+t=0.35 fold=92: raw_crossings=147 lockout_rejected=42 barrier_pct_rejected=0 passed=105
+t=0.40 fold=92: raw_crossings=135 lockout_rejected=38 barrier_pct_rejected=0 passed=97
+t=0.45 fold=92: raw_crossings=114 lockout_rejected=25 barrier_pct_rejected=0 passed=89
+t=0.50 fold=92: raw_crossings=73 lockout_rejected=9 barrier_pct_rejected=0 passed=64
 t=0.55 fold=92: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.60 fold=92: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=92: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -1862,14 +1862,14 @@ t=0.85 fold=92: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=92: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=92: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 92 | Train Rows: 8367   | Tested on forward 150 rows. Purged: 12
-t=0.20 fold=93: raw_crossings=150 lockout_rejected=49 barrier_pct_rejected=0 passed=101
-t=0.25 fold=93: raw_crossings=150 lockout_rejected=49 barrier_pct_rejected=0 passed=101
-t=0.30 fold=93: raw_crossings=150 lockout_rejected=49 barrier_pct_rejected=0 passed=101
-t=0.35 fold=93: raw_crossings=150 lockout_rejected=49 barrier_pct_rejected=0 passed=101
-t=0.40 fold=93: raw_crossings=149 lockout_rejected=49 barrier_pct_rejected=0 passed=100
-t=0.45 fold=93: raw_crossings=137 lockout_rejected=48 barrier_pct_rejected=0 passed=89
-t=0.50 fold=93: raw_crossings=44 lockout_rejected=8 barrier_pct_rejected=0 passed=36
-t=0.55 fold=93: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=93: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
+t=0.25 fold=93: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
+t=0.30 fold=93: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
+t=0.35 fold=93: raw_crossings=136 lockout_rejected=35 barrier_pct_rejected=0 passed=101
+t=0.40 fold=93: raw_crossings=130 lockout_rejected=32 barrier_pct_rejected=0 passed=98
+t=0.45 fold=93: raw_crossings=115 lockout_rejected=26 barrier_pct_rejected=0 passed=89
+t=0.50 fold=93: raw_crossings=80 lockout_rejected=14 barrier_pct_rejected=0 passed=66
+t=0.55 fold=93: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.60 fold=93: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=93: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=93: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -1879,14 +1879,14 @@ t=0.85 fold=93: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=93: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=93: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 93 | Train Rows: 8390   | Tested on forward 150 rows. Purged: 16
-t=0.20 fold=94: raw_crossings=150 lockout_rejected=48 barrier_pct_rejected=0 passed=102
-t=0.25 fold=94: raw_crossings=150 lockout_rejected=48 barrier_pct_rejected=0 passed=102
-t=0.30 fold=94: raw_crossings=150 lockout_rejected=48 barrier_pct_rejected=0 passed=102
-t=0.35 fold=94: raw_crossings=150 lockout_rejected=48 barrier_pct_rejected=0 passed=102
-t=0.40 fold=94: raw_crossings=150 lockout_rejected=48 barrier_pct_rejected=0 passed=102
-t=0.45 fold=94: raw_crossings=145 lockout_rejected=47 barrier_pct_rejected=0 passed=98
-t=0.50 fold=94: raw_crossings=39 lockout_rejected=6 barrier_pct_rejected=0 passed=33
-t=0.55 fold=94: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.20 fold=94: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
+t=0.25 fold=94: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
+t=0.30 fold=94: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
+t=0.35 fold=94: raw_crossings=148 lockout_rejected=36 barrier_pct_rejected=0 passed=112
+t=0.40 fold=94: raw_crossings=139 lockout_rejected=33 barrier_pct_rejected=0 passed=106
+t=0.45 fold=94: raw_crossings=121 lockout_rejected=28 barrier_pct_rejected=0 passed=93
+t=0.50 fold=94: raw_crossings=76 lockout_rejected=10 barrier_pct_rejected=0 passed=66
+t=0.55 fold=94: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.60 fold=94: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=94: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=94: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -1896,14 +1896,14 @@ t=0.85 fold=94: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=94: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=94: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 94 | Train Rows: 8418   | Tested on forward 150 rows. Purged: 15
-t=0.20 fold=95: raw_crossings=150 lockout_rejected=49 barrier_pct_rejected=0 passed=101
-t=0.25 fold=95: raw_crossings=150 lockout_rejected=49 barrier_pct_rejected=0 passed=101
-t=0.30 fold=95: raw_crossings=150 lockout_rejected=49 barrier_pct_rejected=0 passed=101
-t=0.35 fold=95: raw_crossings=150 lockout_rejected=49 barrier_pct_rejected=0 passed=101
-t=0.40 fold=95: raw_crossings=150 lockout_rejected=49 barrier_pct_rejected=0 passed=101
-t=0.45 fold=95: raw_crossings=141 lockout_rejected=46 barrier_pct_rejected=0 passed=95
-t=0.50 fold=95: raw_crossings=47 lockout_rejected=7 barrier_pct_rejected=0 passed=40
-t=0.55 fold=95: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
+t=0.20 fold=95: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
+t=0.25 fold=95: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
+t=0.30 fold=95: raw_crossings=149 lockout_rejected=35 barrier_pct_rejected=0 passed=114
+t=0.35 fold=95: raw_crossings=148 lockout_rejected=34 barrier_pct_rejected=0 passed=114
+t=0.40 fold=95: raw_crossings=142 lockout_rejected=32 barrier_pct_rejected=0 passed=110
+t=0.45 fold=95: raw_crossings=119 lockout_rejected=23 barrier_pct_rejected=0 passed=96
+t=0.50 fold=95: raw_crossings=76 lockout_rejected=12 barrier_pct_rejected=0 passed=64
+t=0.55 fold=95: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
 t=0.60 fold=95: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=95: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=95: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -1913,14 +1913,14 @@ t=0.85 fold=95: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=95: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=95: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 95 | Train Rows: 8448   | Tested on forward 150 rows. Purged: 12
-t=0.20 fold=96: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.25 fold=96: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.30 fold=96: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.35 fold=96: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.40 fold=96: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.45 fold=96: raw_crossings=145 lockout_rejected=46 barrier_pct_rejected=0 passed=99
-t=0.50 fold=96: raw_crossings=44 lockout_rejected=10 barrier_pct_rejected=0 passed=34
-t=0.55 fold=96: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.20 fold=96: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.25 fold=96: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.30 fold=96: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.35 fold=96: raw_crossings=149 lockout_rejected=33 barrier_pct_rejected=0 passed=116
+t=0.40 fold=96: raw_crossings=140 lockout_rejected=29 barrier_pct_rejected=0 passed=111
+t=0.45 fold=96: raw_crossings=128 lockout_rejected=25 barrier_pct_rejected=0 passed=103
+t=0.50 fold=96: raw_crossings=78 lockout_rejected=11 barrier_pct_rejected=0 passed=67
+t=0.55 fold=96: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
 t=0.60 fold=96: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=96: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=96: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -1930,13 +1930,13 @@ t=0.85 fold=96: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=96: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=96: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 96 | Train Rows: 8469   | Tested on forward 150 rows. Purged: 18
-t=0.20 fold=97: raw_crossings=150 lockout_rejected=56 barrier_pct_rejected=0 passed=94
-t=0.25 fold=97: raw_crossings=150 lockout_rejected=56 barrier_pct_rejected=0 passed=94
-t=0.30 fold=97: raw_crossings=150 lockout_rejected=56 barrier_pct_rejected=0 passed=94
-t=0.35 fold=97: raw_crossings=150 lockout_rejected=56 barrier_pct_rejected=0 passed=94
-t=0.40 fold=97: raw_crossings=149 lockout_rejected=56 barrier_pct_rejected=0 passed=93
-t=0.45 fold=97: raw_crossings=141 lockout_rejected=53 barrier_pct_rejected=0 passed=88
-t=0.50 fold=97: raw_crossings=38 lockout_rejected=8 barrier_pct_rejected=0 passed=30
+t=0.20 fold=97: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
+t=0.25 fold=97: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
+t=0.30 fold=97: raw_crossings=149 lockout_rejected=34 barrier_pct_rejected=0 passed=115
+t=0.35 fold=97: raw_crossings=148 lockout_rejected=32 barrier_pct_rejected=0 passed=116
+t=0.40 fold=97: raw_crossings=142 lockout_rejected=30 barrier_pct_rejected=0 passed=112
+t=0.45 fold=97: raw_crossings=129 lockout_rejected=26 barrier_pct_rejected=0 passed=103
+t=0.50 fold=97: raw_crossings=78 lockout_rejected=14 barrier_pct_rejected=0 passed=64
 t=0.55 fold=97: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
 t=0.60 fold=97: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=97: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -1947,14 +1947,14 @@ t=0.85 fold=97: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=97: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=97: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 97 | Train Rows: 8499   | Tested on forward 150 rows. Purged: 15
-t=0.20 fold=98: raw_crossings=150 lockout_rejected=54 barrier_pct_rejected=0 passed=96
-t=0.25 fold=98: raw_crossings=150 lockout_rejected=54 barrier_pct_rejected=0 passed=96
-t=0.30 fold=98: raw_crossings=150 lockout_rejected=54 barrier_pct_rejected=0 passed=96
-t=0.35 fold=98: raw_crossings=150 lockout_rejected=54 barrier_pct_rejected=0 passed=96
-t=0.40 fold=98: raw_crossings=149 lockout_rejected=54 barrier_pct_rejected=0 passed=95
-t=0.45 fold=98: raw_crossings=137 lockout_rejected=50 barrier_pct_rejected=0 passed=87
-t=0.50 fold=98: raw_crossings=35 lockout_rejected=5 barrier_pct_rejected=0 passed=30
-t=0.55 fold=98: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
+t=0.20 fold=98: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
+t=0.25 fold=98: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
+t=0.30 fold=98: raw_crossings=149 lockout_rejected=36 barrier_pct_rejected=0 passed=113
+t=0.35 fold=98: raw_crossings=148 lockout_rejected=36 barrier_pct_rejected=0 passed=112
+t=0.40 fold=98: raw_crossings=135 lockout_rejected=32 barrier_pct_rejected=0 passed=103
+t=0.45 fold=98: raw_crossings=126 lockout_rejected=28 barrier_pct_rejected=0 passed=98
+t=0.50 fold=98: raw_crossings=73 lockout_rejected=14 barrier_pct_rejected=0 passed=59
+t=0.55 fold=98: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
 t=0.60 fold=98: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=98: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=98: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -1964,14 +1964,14 @@ t=0.85 fold=98: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=98: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=98: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 98 | Train Rows: 8522   | Tested on forward 150 rows. Purged: 19
-t=0.20 fold=99: raw_crossings=150 lockout_rejected=55 barrier_pct_rejected=0 passed=95
-t=0.25 fold=99: raw_crossings=150 lockout_rejected=55 barrier_pct_rejected=0 passed=95
-t=0.30 fold=99: raw_crossings=150 lockout_rejected=55 barrier_pct_rejected=0 passed=95
-t=0.35 fold=99: raw_crossings=150 lockout_rejected=55 barrier_pct_rejected=0 passed=95
-t=0.40 fold=99: raw_crossings=150 lockout_rejected=55 barrier_pct_rejected=0 passed=95
-t=0.45 fold=99: raw_crossings=144 lockout_rejected=53 barrier_pct_rejected=0 passed=91
-t=0.50 fold=99: raw_crossings=37 lockout_rejected=6 barrier_pct_rejected=0 passed=31
-t=0.55 fold=99: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
+t=0.20 fold=99: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
+t=0.25 fold=99: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
+t=0.30 fold=99: raw_crossings=149 lockout_rejected=36 barrier_pct_rejected=0 passed=113
+t=0.35 fold=99: raw_crossings=148 lockout_rejected=36 barrier_pct_rejected=0 passed=112
+t=0.40 fold=99: raw_crossings=137 lockout_rejected=34 barrier_pct_rejected=0 passed=103
+t=0.45 fold=99: raw_crossings=127 lockout_rejected=29 barrier_pct_rejected=0 passed=98
+t=0.50 fold=99: raw_crossings=69 lockout_rejected=12 barrier_pct_rejected=0 passed=57
+t=0.55 fold=99: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
 t=0.60 fold=99: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=99: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=99: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -1981,14 +1981,14 @@ t=0.85 fold=99: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed
 t=0.90 fold=99: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=99: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 99 | Train Rows: 8549   | Tested on forward 150 rows. Purged: 19
-t=0.20 fold=100: raw_crossings=150 lockout_rejected=55 barrier_pct_rejected=0 passed=95
-t=0.25 fold=100: raw_crossings=150 lockout_rejected=55 barrier_pct_rejected=0 passed=95
-t=0.30 fold=100: raw_crossings=150 lockout_rejected=55 barrier_pct_rejected=0 passed=95
-t=0.35 fold=100: raw_crossings=150 lockout_rejected=55 barrier_pct_rejected=0 passed=95
-t=0.40 fold=100: raw_crossings=149 lockout_rejected=55 barrier_pct_rejected=0 passed=94
-t=0.45 fold=100: raw_crossings=141 lockout_rejected=51 barrier_pct_rejected=0 passed=90
-t=0.50 fold=100: raw_crossings=37 lockout_rejected=4 barrier_pct_rejected=0 passed=33
-t=0.55 fold=100: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
+t=0.20 fold=100: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.25 fold=100: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.30 fold=100: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.35 fold=100: raw_crossings=147 lockout_rejected=33 barrier_pct_rejected=0 passed=114
+t=0.40 fold=100: raw_crossings=142 lockout_rejected=33 barrier_pct_rejected=0 passed=109
+t=0.45 fold=100: raw_crossings=130 lockout_rejected=27 barrier_pct_rejected=0 passed=103
+t=0.50 fold=100: raw_crossings=74 lockout_rejected=9 barrier_pct_rejected=0 passed=65
+t=0.55 fold=100: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
 t=0.60 fold=100: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=100: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=100: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -1998,14 +1998,14 @@ t=0.85 fold=100: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=100: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=100: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 100 | Train Rows: 8573   | Tested on forward 150 rows. Purged: 22
-t=0.20 fold=101: raw_crossings=150 lockout_rejected=49 barrier_pct_rejected=0 passed=101
-t=0.25 fold=101: raw_crossings=150 lockout_rejected=49 barrier_pct_rejected=0 passed=101
-t=0.30 fold=101: raw_crossings=150 lockout_rejected=49 barrier_pct_rejected=0 passed=101
-t=0.35 fold=101: raw_crossings=150 lockout_rejected=49 barrier_pct_rejected=0 passed=101
-t=0.40 fold=101: raw_crossings=150 lockout_rejected=49 barrier_pct_rejected=0 passed=101
-t=0.45 fold=101: raw_crossings=139 lockout_rejected=43 barrier_pct_rejected=0 passed=96
-t=0.50 fold=101: raw_crossings=38 lockout_rejected=3 barrier_pct_rejected=0 passed=35
-t=0.55 fold=101: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
+t=0.20 fold=101: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.25 fold=101: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.30 fold=101: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.35 fold=101: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.40 fold=101: raw_crossings=144 lockout_rejected=29 barrier_pct_rejected=0 passed=115
+t=0.45 fold=101: raw_crossings=136 lockout_rejected=25 barrier_pct_rejected=0 passed=111
+t=0.50 fold=101: raw_crossings=65 lockout_rejected=7 barrier_pct_rejected=0 passed=58
+t=0.55 fold=101: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.60 fold=101: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=101: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=101: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -2015,14 +2015,14 @@ t=0.85 fold=101: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=101: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=101: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 101 | Train Rows: 8611   | Tested on forward 150 rows. Purged: 11
-t=0.20 fold=102: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.25 fold=102: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.30 fold=102: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.35 fold=102: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.40 fold=102: raw_crossings=149 lockout_rejected=43 barrier_pct_rejected=0 passed=106
-t=0.45 fold=102: raw_crossings=140 lockout_rejected=37 barrier_pct_rejected=0 passed=103
-t=0.50 fold=102: raw_crossings=45 lockout_rejected=1 barrier_pct_rejected=0 passed=44
-t=0.55 fold=102: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
+t=0.20 fold=102: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.25 fold=102: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.30 fold=102: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.35 fold=102: raw_crossings=149 lockout_rejected=26 barrier_pct_rejected=0 passed=123
+t=0.40 fold=102: raw_crossings=143 lockout_rejected=26 barrier_pct_rejected=0 passed=117
+t=0.45 fold=102: raw_crossings=131 lockout_rejected=20 barrier_pct_rejected=0 passed=111
+t=0.50 fold=102: raw_crossings=72 lockout_rejected=2 barrier_pct_rejected=0 passed=70
+t=0.55 fold=102: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.60 fold=102: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=102: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=102: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -2032,13 +2032,13 @@ t=0.85 fold=102: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=102: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=102: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 102 | Train Rows: 8632   | Tested on forward 150 rows. Purged: 17
-t=0.20 fold=103: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.25 fold=103: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.30 fold=103: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.35 fold=103: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.40 fold=103: raw_crossings=147 lockout_rejected=39 barrier_pct_rejected=0 passed=108
-t=0.45 fold=103: raw_crossings=140 lockout_rejected=37 barrier_pct_rejected=0 passed=103
-t=0.50 fold=103: raw_crossings=50 lockout_rejected=5 barrier_pct_rejected=0 passed=45
+t=0.20 fold=103: raw_crossings=150 lockout_rejected=20 barrier_pct_rejected=0 passed=130
+t=0.25 fold=103: raw_crossings=150 lockout_rejected=20 barrier_pct_rejected=0 passed=130
+t=0.30 fold=103: raw_crossings=150 lockout_rejected=20 barrier_pct_rejected=0 passed=130
+t=0.35 fold=103: raw_crossings=149 lockout_rejected=20 barrier_pct_rejected=0 passed=129
+t=0.40 fold=103: raw_crossings=144 lockout_rejected=20 barrier_pct_rejected=0 passed=124
+t=0.45 fold=103: raw_crossings=139 lockout_rejected=17 barrier_pct_rejected=0 passed=122
+t=0.50 fold=103: raw_crossings=77 lockout_rejected=5 barrier_pct_rejected=0 passed=72
 t=0.55 fold=103: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
 t=0.60 fold=103: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=103: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -2049,14 +2049,14 @@ t=0.85 fold=103: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=103: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=103: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 103 | Train Rows: 8663   | Tested on forward 150 rows. Purged: 13
-t=0.20 fold=104: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.25 fold=104: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.30 fold=104: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.35 fold=104: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.40 fold=104: raw_crossings=147 lockout_rejected=34 barrier_pct_rejected=0 passed=113
-t=0.45 fold=104: raw_crossings=142 lockout_rejected=32 barrier_pct_rejected=0 passed=110
-t=0.50 fold=104: raw_crossings=62 lockout_rejected=9 barrier_pct_rejected=0 passed=53
-t=0.55 fold=104: raw_crossings=7 lockout_rejected=2 barrier_pct_rejected=0 passed=5
+t=0.20 fold=104: raw_crossings=150 lockout_rejected=19 barrier_pct_rejected=0 passed=131
+t=0.25 fold=104: raw_crossings=150 lockout_rejected=19 barrier_pct_rejected=0 passed=131
+t=0.30 fold=104: raw_crossings=150 lockout_rejected=19 barrier_pct_rejected=0 passed=131
+t=0.35 fold=104: raw_crossings=150 lockout_rejected=19 barrier_pct_rejected=0 passed=131
+t=0.40 fold=104: raw_crossings=146 lockout_rejected=19 barrier_pct_rejected=0 passed=127
+t=0.45 fold=104: raw_crossings=138 lockout_rejected=13 barrier_pct_rejected=0 passed=125
+t=0.50 fold=104: raw_crossings=69 lockout_rejected=2 barrier_pct_rejected=0 passed=67
+t=0.55 fold=104: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
 t=0.60 fold=104: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=104: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=104: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -2066,15 +2066,15 @@ t=0.85 fold=104: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=104: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=104: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 104 | Train Rows: 8686   | Tested on forward 150 rows. Purged: 17
-t=0.20 fold=105: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
-t=0.25 fold=105: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
-t=0.30 fold=105: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
-t=0.35 fold=105: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
-t=0.40 fold=105: raw_crossings=148 lockout_rejected=37 barrier_pct_rejected=0 passed=111
-t=0.45 fold=105: raw_crossings=136 lockout_rejected=32 barrier_pct_rejected=0 passed=104
-t=0.50 fold=105: raw_crossings=61 lockout_rejected=9 barrier_pct_rejected=0 passed=52
-t=0.55 fold=105: raw_crossings=7 lockout_rejected=0 barrier_pct_rejected=0 passed=7
-t=0.60 fold=105: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.20 fold=105: raw_crossings=150 lockout_rejected=18 barrier_pct_rejected=0 passed=132
+t=0.25 fold=105: raw_crossings=150 lockout_rejected=18 barrier_pct_rejected=0 passed=132
+t=0.30 fold=105: raw_crossings=150 lockout_rejected=18 barrier_pct_rejected=0 passed=132
+t=0.35 fold=105: raw_crossings=150 lockout_rejected=18 barrier_pct_rejected=0 passed=132
+t=0.40 fold=105: raw_crossings=148 lockout_rejected=16 barrier_pct_rejected=0 passed=132
+t=0.45 fold=105: raw_crossings=137 lockout_rejected=11 barrier_pct_rejected=0 passed=126
+t=0.50 fold=105: raw_crossings=62 lockout_rejected=2 barrier_pct_rejected=0 passed=60
+t=0.55 fold=105: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.60 fold=105: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=105: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=105: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=105: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -2083,15 +2083,15 @@ t=0.85 fold=105: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=105: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=105: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 105 | Train Rows: 8729   | Tested on forward 150 rows. Purged: 1
-t=0.20 fold=106: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
-t=0.25 fold=106: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
-t=0.30 fold=106: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
-t=0.35 fold=106: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
-t=0.40 fold=106: raw_crossings=148 lockout_rejected=37 barrier_pct_rejected=0 passed=111
-t=0.45 fold=106: raw_crossings=137 lockout_rejected=31 barrier_pct_rejected=0 passed=106
-t=0.50 fold=106: raw_crossings=57 lockout_rejected=11 barrier_pct_rejected=0 passed=46
-t=0.55 fold=106: raw_crossings=7 lockout_rejected=0 barrier_pct_rejected=0 passed=7
-t=0.60 fold=106: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.20 fold=106: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
+t=0.25 fold=106: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
+t=0.30 fold=106: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
+t=0.35 fold=106: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
+t=0.40 fold=106: raw_crossings=148 lockout_rejected=21 barrier_pct_rejected=0 passed=127
+t=0.45 fold=106: raw_crossings=136 lockout_rejected=18 barrier_pct_rejected=0 passed=118
+t=0.50 fold=106: raw_crossings=64 lockout_rejected=4 barrier_pct_rejected=0 passed=60
+t=0.55 fold=106: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.60 fold=106: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=106: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=106: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=106: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -2100,15 +2100,15 @@ t=0.85 fold=106: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=106: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=106: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 106 | Train Rows: 8747   | Tested on forward 150 rows. Purged: 10
-t=0.20 fold=107: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.25 fold=107: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.30 fold=107: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.35 fold=107: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.40 fold=107: raw_crossings=149 lockout_rejected=44 barrier_pct_rejected=0 passed=105
-t=0.45 fold=107: raw_crossings=144 lockout_rejected=42 barrier_pct_rejected=0 passed=102
-t=0.50 fold=107: raw_crossings=52 lockout_rejected=6 barrier_pct_rejected=0 passed=46
-t=0.55 fold=107: raw_crossings=5 lockout_rejected=0 barrier_pct_rejected=0 passed=5
-t=0.60 fold=107: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=107: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
+t=0.25 fold=107: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
+t=0.30 fold=107: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
+t=0.35 fold=107: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
+t=0.40 fold=107: raw_crossings=149 lockout_rejected=23 barrier_pct_rejected=0 passed=126
+t=0.45 fold=107: raw_crossings=138 lockout_rejected=19 barrier_pct_rejected=0 passed=119
+t=0.50 fold=107: raw_crossings=64 lockout_rejected=6 barrier_pct_rejected=0 passed=58
+t=0.55 fold=107: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
+t=0.60 fold=107: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=107: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=107: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=107: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -2117,14 +2117,14 @@ t=0.85 fold=107: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=107: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=107: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 107 | Train Rows: 8771   | Tested on forward 150 rows. Purged: 13
-t=0.20 fold=108: raw_crossings=150 lockout_rejected=46 barrier_pct_rejected=0 passed=104
-t=0.25 fold=108: raw_crossings=150 lockout_rejected=46 barrier_pct_rejected=0 passed=104
-t=0.30 fold=108: raw_crossings=150 lockout_rejected=46 barrier_pct_rejected=0 passed=104
-t=0.35 fold=108: raw_crossings=150 lockout_rejected=46 barrier_pct_rejected=0 passed=104
-t=0.40 fold=108: raw_crossings=150 lockout_rejected=46 barrier_pct_rejected=0 passed=104
-t=0.45 fold=108: raw_crossings=139 lockout_rejected=41 barrier_pct_rejected=0 passed=98
-t=0.50 fold=108: raw_crossings=60 lockout_rejected=8 barrier_pct_rejected=0 passed=52
-t=0.55 fold=108: raw_crossings=5 lockout_rejected=0 barrier_pct_rejected=0 passed=5
+t=0.20 fold=108: raw_crossings=150 lockout_rejected=22 barrier_pct_rejected=0 passed=128
+t=0.25 fold=108: raw_crossings=150 lockout_rejected=22 barrier_pct_rejected=0 passed=128
+t=0.30 fold=108: raw_crossings=150 lockout_rejected=22 barrier_pct_rejected=0 passed=128
+t=0.35 fold=108: raw_crossings=150 lockout_rejected=22 barrier_pct_rejected=0 passed=128
+t=0.40 fold=108: raw_crossings=148 lockout_rejected=22 barrier_pct_rejected=0 passed=126
+t=0.45 fold=108: raw_crossings=133 lockout_rejected=17 barrier_pct_rejected=0 passed=116
+t=0.50 fold=108: raw_crossings=66 lockout_rejected=6 barrier_pct_rejected=0 passed=60
+t=0.55 fold=108: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.60 fold=108: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=108: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=108: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -2134,15 +2134,15 @@ t=0.85 fold=108: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=108: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=108: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 108 | Train Rows: 8799   | Tested on forward 150 rows. Purged: 12
-t=0.20 fold=109: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.25 fold=109: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.30 fold=109: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.35 fold=109: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.40 fold=109: raw_crossings=149 lockout_rejected=43 barrier_pct_rejected=0 passed=106
-t=0.45 fold=109: raw_crossings=137 lockout_rejected=38 barrier_pct_rejected=0 passed=99
-t=0.50 fold=109: raw_crossings=68 lockout_rejected=6 barrier_pct_rejected=0 passed=62
+t=0.20 fold=109: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
+t=0.25 fold=109: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
+t=0.30 fold=109: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
+t=0.35 fold=109: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
+t=0.40 fold=109: raw_crossings=147 lockout_rejected=32 barrier_pct_rejected=0 passed=115
+t=0.45 fold=109: raw_crossings=135 lockout_rejected=27 barrier_pct_rejected=0 passed=108
+t=0.50 fold=109: raw_crossings=77 lockout_rejected=9 barrier_pct_rejected=0 passed=68
 t=0.55 fold=109: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
-t=0.60 fold=109: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.60 fold=109: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=109: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=109: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=109: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -2151,15 +2151,15 @@ t=0.85 fold=109: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=109: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=109: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 109 | Train Rows: 8822   | Tested on forward 150 rows. Purged: 16
-t=0.20 fold=110: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.25 fold=110: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.30 fold=110: raw_crossings=149 lockout_rejected=41 barrier_pct_rejected=0 passed=108
-t=0.35 fold=110: raw_crossings=148 lockout_rejected=40 barrier_pct_rejected=0 passed=108
-t=0.40 fold=110: raw_crossings=146 lockout_rejected=39 barrier_pct_rejected=0 passed=107
-t=0.45 fold=110: raw_crossings=135 lockout_rejected=34 barrier_pct_rejected=0 passed=101
-t=0.50 fold=110: raw_crossings=51 lockout_rejected=4 barrier_pct_rejected=0 passed=47
-t=0.55 fold=110: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
-t=0.60 fold=110: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=110: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
+t=0.25 fold=110: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
+t=0.30 fold=110: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
+t=0.35 fold=110: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
+t=0.40 fold=110: raw_crossings=147 lockout_rejected=37 barrier_pct_rejected=0 passed=110
+t=0.45 fold=110: raw_crossings=138 lockout_rejected=36 barrier_pct_rejected=0 passed=102
+t=0.50 fold=110: raw_crossings=72 lockout_rejected=9 barrier_pct_rejected=0 passed=63
+t=0.55 fold=110: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
+t=0.60 fold=110: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=110: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=110: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=110: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -2168,14 +2168,14 @@ t=0.85 fold=110: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=110: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=110: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 110 | Train Rows: 8855   | Tested on forward 150 rows. Purged: 10
-t=0.20 fold=111: raw_crossings=150 lockout_rejected=49 barrier_pct_rejected=0 passed=101
-t=0.25 fold=111: raw_crossings=150 lockout_rejected=49 barrier_pct_rejected=0 passed=101
-t=0.30 fold=111: raw_crossings=150 lockout_rejected=49 barrier_pct_rejected=0 passed=101
-t=0.35 fold=111: raw_crossings=149 lockout_rejected=48 barrier_pct_rejected=0 passed=101
-t=0.40 fold=111: raw_crossings=147 lockout_rejected=47 barrier_pct_rejected=0 passed=100
-t=0.45 fold=111: raw_crossings=142 lockout_rejected=45 barrier_pct_rejected=0 passed=97
-t=0.50 fold=111: raw_crossings=56 lockout_rejected=10 barrier_pct_rejected=0 passed=46
-t=0.55 fold=111: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
+t=0.20 fold=111: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
+t=0.25 fold=111: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
+t=0.30 fold=111: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
+t=0.35 fold=111: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
+t=0.40 fold=111: raw_crossings=147 lockout_rejected=34 barrier_pct_rejected=0 passed=113
+t=0.45 fold=111: raw_crossings=140 lockout_rejected=33 barrier_pct_rejected=0 passed=107
+t=0.50 fold=111: raw_crossings=74 lockout_rejected=3 barrier_pct_rejected=0 passed=71
+t=0.55 fold=111: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.60 fold=111: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=111: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=111: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -2185,13 +2185,13 @@ t=0.85 fold=111: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=111: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=111: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 111 | Train Rows: 8880   | Tested on forward 150 rows. Purged: 12
-t=0.20 fold=112: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.25 fold=112: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.30 fold=112: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.35 fold=112: raw_crossings=149 lockout_rejected=41 barrier_pct_rejected=0 passed=108
-t=0.40 fold=112: raw_crossings=146 lockout_rejected=40 barrier_pct_rejected=0 passed=106
-t=0.45 fold=112: raw_crossings=145 lockout_rejected=39 barrier_pct_rejected=0 passed=106
-t=0.50 fold=112: raw_crossings=65 lockout_rejected=9 barrier_pct_rejected=0 passed=56
+t=0.20 fold=112: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
+t=0.25 fold=112: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
+t=0.30 fold=112: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
+t=0.35 fold=112: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
+t=0.40 fold=112: raw_crossings=144 lockout_rejected=32 barrier_pct_rejected=0 passed=112
+t=0.45 fold=112: raw_crossings=138 lockout_rejected=31 barrier_pct_rejected=0 passed=107
+t=0.50 fold=112: raw_crossings=87 lockout_rejected=10 barrier_pct_rejected=0 passed=77
 t=0.55 fold=112: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
 t=0.60 fold=112: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=112: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -2202,14 +2202,14 @@ t=0.85 fold=112: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=112: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=112: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 112 | Train Rows: 8910   | Tested on forward 150 rows. Purged: 9
-t=0.20 fold=113: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.25 fold=113: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.30 fold=113: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.35 fold=113: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.40 fold=113: raw_crossings=147 lockout_rejected=41 barrier_pct_rejected=0 passed=106
-t=0.45 fold=113: raw_crossings=141 lockout_rejected=38 barrier_pct_rejected=0 passed=103
-t=0.50 fold=113: raw_crossings=67 lockout_rejected=9 barrier_pct_rejected=0 passed=58
-t=0.55 fold=113: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.20 fold=113: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
+t=0.25 fold=113: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
+t=0.30 fold=113: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
+t=0.35 fold=113: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
+t=0.40 fold=113: raw_crossings=145 lockout_rejected=34 barrier_pct_rejected=0 passed=111
+t=0.45 fold=113: raw_crossings=139 lockout_rejected=33 barrier_pct_rejected=0 passed=106
+t=0.50 fold=113: raw_crossings=67 lockout_rejected=4 barrier_pct_rejected=0 passed=63
+t=0.55 fold=113: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
 t=0.60 fold=113: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=113: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=113: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -2219,14 +2219,14 @@ t=0.85 fold=113: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=113: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=113: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 113 | Train Rows: 8932   | Tested on forward 150 rows. Purged: 14
-t=0.20 fold=114: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.25 fold=114: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.30 fold=114: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.35 fold=114: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.40 fold=114: raw_crossings=148 lockout_rejected=43 barrier_pct_rejected=0 passed=105
-t=0.45 fold=114: raw_crossings=143 lockout_rejected=41 barrier_pct_rejected=0 passed=102
-t=0.50 fold=114: raw_crossings=65 lockout_rejected=11 barrier_pct_rejected=0 passed=54
-t=0.55 fold=114: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.20 fold=114: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
+t=0.25 fold=114: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
+t=0.30 fold=114: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
+t=0.35 fold=114: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
+t=0.40 fold=114: raw_crossings=146 lockout_rejected=29 barrier_pct_rejected=0 passed=117
+t=0.45 fold=114: raw_crossings=138 lockout_rejected=28 barrier_pct_rejected=0 passed=110
+t=0.50 fold=114: raw_crossings=71 lockout_rejected=5 barrier_pct_rejected=0 passed=66
+t=0.55 fold=114: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
 t=0.60 fold=114: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=114: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=114: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -2236,14 +2236,14 @@ t=0.85 fold=114: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=114: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=114: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 114 | Train Rows: 8961   | Tested on forward 150 rows. Purged: 12
-t=0.20 fold=115: raw_crossings=150 lockout_rejected=49 barrier_pct_rejected=0 passed=101
-t=0.25 fold=115: raw_crossings=150 lockout_rejected=49 barrier_pct_rejected=0 passed=101
-t=0.30 fold=115: raw_crossings=150 lockout_rejected=49 barrier_pct_rejected=0 passed=101
-t=0.35 fold=115: raw_crossings=150 lockout_rejected=49 barrier_pct_rejected=0 passed=101
-t=0.40 fold=115: raw_crossings=148 lockout_rejected=47 barrier_pct_rejected=0 passed=101
-t=0.45 fold=115: raw_crossings=141 lockout_rejected=44 barrier_pct_rejected=0 passed=97
-t=0.50 fold=115: raw_crossings=64 lockout_rejected=12 barrier_pct_rejected=0 passed=52
-t=0.55 fold=115: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.20 fold=115: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
+t=0.25 fold=115: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
+t=0.30 fold=115: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
+t=0.35 fold=115: raw_crossings=149 lockout_rejected=31 barrier_pct_rejected=0 passed=118
+t=0.40 fold=115: raw_crossings=146 lockout_rejected=30 barrier_pct_rejected=0 passed=116
+t=0.45 fold=115: raw_crossings=135 lockout_rejected=25 barrier_pct_rejected=0 passed=110
+t=0.50 fold=115: raw_crossings=73 lockout_rejected=6 barrier_pct_rejected=0 passed=67
+t=0.55 fold=115: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
 t=0.60 fold=115: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=115: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=115: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -2253,15 +2253,15 @@ t=0.85 fold=115: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=115: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=115: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 115 | Train Rows: 8982   | Tested on forward 150 rows. Purged: 18
-t=0.20 fold=116: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
-t=0.25 fold=116: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
-t=0.30 fold=116: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
-t=0.35 fold=116: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
-t=0.40 fold=116: raw_crossings=149 lockout_rejected=45 barrier_pct_rejected=0 passed=104
-t=0.45 fold=116: raw_crossings=143 lockout_rejected=42 barrier_pct_rejected=0 passed=101
-t=0.50 fold=116: raw_crossings=69 lockout_rejected=15 barrier_pct_rejected=0 passed=54
-t=0.55 fold=116: raw_crossings=4 lockout_rejected=1 barrier_pct_rejected=0 passed=3
-t=0.60 fold=116: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.20 fold=116: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
+t=0.25 fold=116: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
+t=0.30 fold=116: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
+t=0.35 fold=116: raw_crossings=149 lockout_rejected=30 barrier_pct_rejected=0 passed=119
+t=0.40 fold=116: raw_crossings=146 lockout_rejected=29 barrier_pct_rejected=0 passed=117
+t=0.45 fold=116: raw_crossings=135 lockout_rejected=26 barrier_pct_rejected=0 passed=109
+t=0.50 fold=116: raw_crossings=82 lockout_rejected=9 barrier_pct_rejected=0 passed=73
+t=0.55 fold=116: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
+t=0.60 fold=116: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.65 fold=116: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=116: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=116: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -2270,15 +2270,15 @@ t=0.85 fold=116: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=116: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=116: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 116 | Train Rows: 9012   | Tested on forward 150 rows. Purged: 15
-t=0.20 fold=117: raw_crossings=150 lockout_rejected=46 barrier_pct_rejected=0 passed=104
-t=0.25 fold=117: raw_crossings=150 lockout_rejected=46 barrier_pct_rejected=0 passed=104
-t=0.30 fold=117: raw_crossings=150 lockout_rejected=46 barrier_pct_rejected=0 passed=104
-t=0.35 fold=117: raw_crossings=150 lockout_rejected=46 barrier_pct_rejected=0 passed=104
-t=0.40 fold=117: raw_crossings=148 lockout_rejected=44 barrier_pct_rejected=0 passed=104
-t=0.45 fold=117: raw_crossings=140 lockout_rejected=39 barrier_pct_rejected=0 passed=101
-t=0.50 fold=117: raw_crossings=61 lockout_rejected=11 barrier_pct_rejected=0 passed=50
-t=0.55 fold=117: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
-t=0.60 fold=117: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.20 fold=117: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
+t=0.25 fold=117: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
+t=0.30 fold=117: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
+t=0.35 fold=117: raw_crossings=148 lockout_rejected=27 barrier_pct_rejected=0 passed=121
+t=0.40 fold=117: raw_crossings=144 lockout_rejected=26 barrier_pct_rejected=0 passed=118
+t=0.45 fold=117: raw_crossings=131 lockout_rejected=24 barrier_pct_rejected=0 passed=107
+t=0.50 fold=117: raw_crossings=73 lockout_rejected=8 barrier_pct_rejected=0 passed=65
+t=0.55 fold=117: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
+t=0.60 fold=117: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.65 fold=117: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=117: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=117: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -2287,15 +2287,15 @@ t=0.85 fold=117: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=117: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=117: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 117 | Train Rows: 9040   | Tested on forward 150 rows. Purged: 14
-t=0.20 fold=118: raw_crossings=150 lockout_rejected=46 barrier_pct_rejected=0 passed=104
-t=0.25 fold=118: raw_crossings=150 lockout_rejected=46 barrier_pct_rejected=0 passed=104
-t=0.30 fold=118: raw_crossings=150 lockout_rejected=46 barrier_pct_rejected=0 passed=104
-t=0.35 fold=118: raw_crossings=150 lockout_rejected=46 barrier_pct_rejected=0 passed=104
-t=0.40 fold=118: raw_crossings=149 lockout_rejected=45 barrier_pct_rejected=0 passed=104
-t=0.45 fold=118: raw_crossings=140 lockout_rejected=39 barrier_pct_rejected=0 passed=101
-t=0.50 fold=118: raw_crossings=68 lockout_rejected=16 barrier_pct_rejected=0 passed=52
-t=0.55 fold=118: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
-t=0.60 fold=118: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.20 fold=118: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.25 fold=118: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.30 fold=118: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.35 fold=118: raw_crossings=147 lockout_rejected=32 barrier_pct_rejected=0 passed=115
+t=0.40 fold=118: raw_crossings=142 lockout_rejected=31 barrier_pct_rejected=0 passed=111
+t=0.45 fold=118: raw_crossings=133 lockout_rejected=28 barrier_pct_rejected=0 passed=105
+t=0.50 fold=118: raw_crossings=65 lockout_rejected=11 barrier_pct_rejected=0 passed=54
+t=0.55 fold=118: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.60 fold=118: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.65 fold=118: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=118: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=118: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -2304,15 +2304,15 @@ t=0.85 fold=118: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=118: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=118: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 118 | Train Rows: 9072   | Tested on forward 150 rows. Purged: 9
-t=0.20 fold=119: raw_crossings=150 lockout_rejected=46 barrier_pct_rejected=0 passed=104
-t=0.25 fold=119: raw_crossings=150 lockout_rejected=46 barrier_pct_rejected=0 passed=104
-t=0.30 fold=119: raw_crossings=150 lockout_rejected=46 barrier_pct_rejected=0 passed=104
-t=0.35 fold=119: raw_crossings=150 lockout_rejected=46 barrier_pct_rejected=0 passed=104
-t=0.40 fold=119: raw_crossings=148 lockout_rejected=44 barrier_pct_rejected=0 passed=104
-t=0.45 fold=119: raw_crossings=142 lockout_rejected=41 barrier_pct_rejected=0 passed=101
-t=0.50 fold=119: raw_crossings=57 lockout_rejected=13 barrier_pct_rejected=0 passed=44
-t=0.55 fold=119: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
-t=0.60 fold=119: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.20 fold=119: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.25 fold=119: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.30 fold=119: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.35 fold=119: raw_crossings=149 lockout_rejected=32 barrier_pct_rejected=0 passed=117
+t=0.40 fold=119: raw_crossings=146 lockout_rejected=32 barrier_pct_rejected=0 passed=114
+t=0.45 fold=119: raw_crossings=139 lockout_rejected=29 barrier_pct_rejected=0 passed=110
+t=0.50 fold=119: raw_crossings=74 lockout_rejected=8 barrier_pct_rejected=0 passed=66
+t=0.55 fold=119: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.60 fold=119: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.65 fold=119: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=119: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=119: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -2321,15 +2321,15 @@ t=0.85 fold=119: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=119: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=119: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 119 | Train Rows: 9092   | Tested on forward 150 rows. Purged: 16
-t=0.20 fold=120: raw_crossings=150 lockout_rejected=49 barrier_pct_rejected=0 passed=101
-t=0.25 fold=120: raw_crossings=150 lockout_rejected=49 barrier_pct_rejected=0 passed=101
-t=0.30 fold=120: raw_crossings=150 lockout_rejected=49 barrier_pct_rejected=0 passed=101
-t=0.35 fold=120: raw_crossings=150 lockout_rejected=49 barrier_pct_rejected=0 passed=101
-t=0.40 fold=120: raw_crossings=149 lockout_rejected=48 barrier_pct_rejected=0 passed=101
-t=0.45 fold=120: raw_crossings=139 lockout_rejected=43 barrier_pct_rejected=0 passed=96
-t=0.50 fold=120: raw_crossings=55 lockout_rejected=5 barrier_pct_rejected=0 passed=50
-t=0.55 fold=120: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
-t=0.60 fold=120: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.20 fold=120: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
+t=0.25 fold=120: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
+t=0.30 fold=120: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
+t=0.35 fold=120: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
+t=0.40 fold=120: raw_crossings=145 lockout_rejected=30 barrier_pct_rejected=0 passed=115
+t=0.45 fold=120: raw_crossings=138 lockout_rejected=23 barrier_pct_rejected=0 passed=115
+t=0.50 fold=120: raw_crossings=77 lockout_rejected=8 barrier_pct_rejected=0 passed=69
+t=0.55 fold=120: raw_crossings=6 lockout_rejected=0 barrier_pct_rejected=0 passed=6
+t=0.60 fold=120: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.65 fold=120: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=120: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=120: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -2338,15 +2338,15 @@ t=0.85 fold=120: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=120: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=120: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 120 | Train Rows: 9128   | Tested on forward 150 rows. Purged: 7
-t=0.20 fold=121: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.25 fold=121: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.30 fold=121: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.35 fold=121: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.40 fold=121: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.45 fold=121: raw_crossings=132 lockout_rejected=34 barrier_pct_rejected=0 passed=98
-t=0.50 fold=121: raw_crossings=56 lockout_rejected=9 barrier_pct_rejected=0 passed=47
-t=0.55 fold=121: raw_crossings=6 lockout_rejected=0 barrier_pct_rejected=0 passed=6
-t=0.60 fold=121: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.20 fold=121: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.25 fold=121: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.30 fold=121: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.35 fold=121: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.40 fold=121: raw_crossings=145 lockout_rejected=24 barrier_pct_rejected=0 passed=121
+t=0.45 fold=121: raw_crossings=138 lockout_rejected=20 barrier_pct_rejected=0 passed=118
+t=0.50 fold=121: raw_crossings=67 lockout_rejected=9 barrier_pct_rejected=0 passed=58
+t=0.55 fold=121: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
+t=0.60 fold=121: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.65 fold=121: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=121: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=121: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -2355,15 +2355,15 @@ t=0.85 fold=121: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=121: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=121: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 121 | Train Rows: 9156   | Tested on forward 150 rows. Purged: 6
-t=0.20 fold=122: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.25 fold=122: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.30 fold=122: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.35 fold=122: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.40 fold=122: raw_crossings=149 lockout_rejected=43 barrier_pct_rejected=0 passed=106
-t=0.45 fold=122: raw_crossings=133 lockout_rejected=35 barrier_pct_rejected=0 passed=98
-t=0.50 fold=122: raw_crossings=56 lockout_rejected=4 barrier_pct_rejected=0 passed=52
-t=0.55 fold=122: raw_crossings=6 lockout_rejected=0 barrier_pct_rejected=0 passed=6
-t=0.60 fold=122: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=122: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.25 fold=122: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.30 fold=122: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.35 fold=122: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.40 fold=122: raw_crossings=146 lockout_rejected=23 barrier_pct_rejected=0 passed=123
+t=0.45 fold=122: raw_crossings=134 lockout_rejected=18 barrier_pct_rejected=0 passed=116
+t=0.50 fold=122: raw_crossings=64 lockout_rejected=6 barrier_pct_rejected=0 passed=58
+t=0.55 fold=122: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
+t=0.60 fold=122: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=122: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=122: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=122: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -2372,15 +2372,15 @@ t=0.85 fold=122: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=122: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=122: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 122 | Train Rows: 9171   | Tested on forward 150 rows. Purged: 18
-t=0.20 fold=123: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.25 fold=123: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.30 fold=123: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.35 fold=123: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.40 fold=123: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.45 fold=123: raw_crossings=134 lockout_rejected=36 barrier_pct_rejected=0 passed=98
-t=0.50 fold=123: raw_crossings=60 lockout_rejected=7 barrier_pct_rejected=0 passed=53
-t=0.55 fold=123: raw_crossings=5 lockout_rejected=0 barrier_pct_rejected=0 passed=5
-t=0.60 fold=123: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.20 fold=123: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.25 fold=123: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.30 fold=123: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.35 fold=123: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.40 fold=123: raw_crossings=148 lockout_rejected=27 barrier_pct_rejected=0 passed=121
+t=0.45 fold=123: raw_crossings=141 lockout_rejected=23 barrier_pct_rejected=0 passed=118
+t=0.50 fold=123: raw_crossings=71 lockout_rejected=7 barrier_pct_rejected=0 passed=64
+t=0.55 fold=123: raw_crossings=6 lockout_rejected=1 barrier_pct_rejected=0 passed=5
+t=0.60 fold=123: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=123: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=123: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=123: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -2389,15 +2389,15 @@ t=0.85 fold=123: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=123: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=123: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 123 | Train Rows: 9207   | Tested on forward 150 rows. Purged: 9
-t=0.20 fold=124: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
-t=0.25 fold=124: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
-t=0.30 fold=124: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
-t=0.35 fold=124: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
-t=0.40 fold=124: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
-t=0.45 fold=124: raw_crossings=134 lockout_rejected=38 barrier_pct_rejected=0 passed=96
-t=0.50 fold=124: raw_crossings=69 lockout_rejected=11 barrier_pct_rejected=0 passed=58
-t=0.55 fold=124: raw_crossings=6 lockout_rejected=0 barrier_pct_rejected=0 passed=6
-t=0.60 fold=124: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.20 fold=124: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.25 fold=124: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.30 fold=124: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.35 fold=124: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.40 fold=124: raw_crossings=147 lockout_rejected=27 barrier_pct_rejected=0 passed=120
+t=0.45 fold=124: raw_crossings=143 lockout_rejected=24 barrier_pct_rejected=0 passed=119
+t=0.50 fold=124: raw_crossings=61 lockout_rejected=5 barrier_pct_rejected=0 passed=56
+t=0.55 fold=124: raw_crossings=5 lockout_rejected=1 barrier_pct_rejected=0 passed=4
+t=0.60 fold=124: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=124: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=124: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=124: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -2406,15 +2406,15 @@ t=0.85 fold=124: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=124: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=124: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 124 | Train Rows: 9236   | Tested on forward 150 rows. Purged: 7
-t=0.20 fold=125: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.25 fold=125: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.30 fold=125: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.35 fold=125: raw_crossings=149 lockout_rejected=43 barrier_pct_rejected=0 passed=106
-t=0.40 fold=125: raw_crossings=149 lockout_rejected=43 barrier_pct_rejected=0 passed=106
-t=0.45 fold=125: raw_crossings=136 lockout_rejected=36 barrier_pct_rejected=0 passed=100
-t=0.50 fold=125: raw_crossings=61 lockout_rejected=11 barrier_pct_rejected=0 passed=50
-t=0.55 fold=125: raw_crossings=7 lockout_rejected=0 barrier_pct_rejected=0 passed=7
-t=0.60 fold=125: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.20 fold=125: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.25 fold=125: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.30 fold=125: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.35 fold=125: raw_crossings=149 lockout_rejected=25 barrier_pct_rejected=0 passed=124
+t=0.40 fold=125: raw_crossings=145 lockout_rejected=24 barrier_pct_rejected=0 passed=121
+t=0.45 fold=125: raw_crossings=139 lockout_rejected=23 barrier_pct_rejected=0 passed=116
+t=0.50 fold=125: raw_crossings=62 lockout_rejected=4 barrier_pct_rejected=0 passed=58
+t=0.55 fold=125: raw_crossings=6 lockout_rejected=0 barrier_pct_rejected=0 passed=6
+t=0.60 fold=125: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=125: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=125: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=125: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -2423,15 +2423,15 @@ t=0.85 fold=125: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=125: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=125: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 125 | Train Rows: 9255   | Tested on forward 150 rows. Purged: 15
-t=0.20 fold=126: raw_crossings=150 lockout_rejected=48 barrier_pct_rejected=0 passed=102
-t=0.25 fold=126: raw_crossings=150 lockout_rejected=48 barrier_pct_rejected=0 passed=102
-t=0.30 fold=126: raw_crossings=150 lockout_rejected=48 barrier_pct_rejected=0 passed=102
-t=0.35 fold=126: raw_crossings=149 lockout_rejected=48 barrier_pct_rejected=0 passed=101
-t=0.40 fold=126: raw_crossings=148 lockout_rejected=48 barrier_pct_rejected=0 passed=100
-t=0.45 fold=126: raw_crossings=129 lockout_rejected=34 barrier_pct_rejected=0 passed=95
-t=0.50 fold=126: raw_crossings=61 lockout_rejected=11 barrier_pct_rejected=0 passed=50
-t=0.55 fold=126: raw_crossings=6 lockout_rejected=0 barrier_pct_rejected=0 passed=6
-t=0.60 fold=126: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.20 fold=126: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.25 fold=126: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.30 fold=126: raw_crossings=149 lockout_rejected=29 barrier_pct_rejected=0 passed=120
+t=0.35 fold=126: raw_crossings=146 lockout_rejected=28 barrier_pct_rejected=0 passed=118
+t=0.40 fold=126: raw_crossings=136 lockout_rejected=26 barrier_pct_rejected=0 passed=110
+t=0.45 fold=126: raw_crossings=125 lockout_rejected=25 barrier_pct_rejected=0 passed=100
+t=0.50 fold=126: raw_crossings=57 lockout_rejected=3 barrier_pct_rejected=0 passed=54
+t=0.55 fold=126: raw_crossings=7 lockout_rejected=0 barrier_pct_rejected=0 passed=7
+t=0.60 fold=126: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=126: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=126: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=126: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -2440,14 +2440,14 @@ t=0.85 fold=126: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=126: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=126: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 126 | Train Rows: 9286   | Tested on forward 150 rows. Purged: 11
-t=0.20 fold=127: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.25 fold=127: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.30 fold=127: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.35 fold=127: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.40 fold=127: raw_crossings=145 lockout_rejected=38 barrier_pct_rejected=0 passed=107
-t=0.45 fold=127: raw_crossings=126 lockout_rejected=31 barrier_pct_rejected=0 passed=95
-t=0.50 fold=127: raw_crossings=65 lockout_rejected=12 barrier_pct_rejected=0 passed=53
-t=0.55 fold=127: raw_crossings=5 lockout_rejected=0 barrier_pct_rejected=0 passed=5
+t=0.20 fold=127: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.25 fold=127: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.30 fold=127: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.35 fold=127: raw_crossings=149 lockout_rejected=29 barrier_pct_rejected=0 passed=120
+t=0.40 fold=127: raw_crossings=137 lockout_rejected=27 barrier_pct_rejected=0 passed=110
+t=0.45 fold=127: raw_crossings=128 lockout_rejected=26 barrier_pct_rejected=0 passed=102
+t=0.50 fold=127: raw_crossings=55 lockout_rejected=4 barrier_pct_rejected=0 passed=51
+t=0.55 fold=127: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
 t=0.60 fold=127: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=127: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=127: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -2457,14 +2457,14 @@ t=0.85 fold=127: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=127: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=127: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 127 | Train Rows: 9308   | Tested on forward 150 rows. Purged: 16
-t=0.20 fold=128: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.25 fold=128: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.30 fold=128: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.35 fold=128: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.40 fold=128: raw_crossings=146 lockout_rejected=33 barrier_pct_rejected=0 passed=113
-t=0.45 fold=128: raw_crossings=123 lockout_rejected=21 barrier_pct_rejected=0 passed=102
-t=0.50 fold=128: raw_crossings=63 lockout_rejected=9 barrier_pct_rejected=0 passed=54
-t=0.55 fold=128: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.20 fold=128: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.25 fold=128: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.30 fold=128: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.35 fold=128: raw_crossings=148 lockout_rejected=25 barrier_pct_rejected=0 passed=123
+t=0.40 fold=128: raw_crossings=138 lockout_rejected=22 barrier_pct_rejected=0 passed=116
+t=0.45 fold=128: raw_crossings=126 lockout_rejected=20 barrier_pct_rejected=0 passed=106
+t=0.50 fold=128: raw_crossings=54 lockout_rejected=4 barrier_pct_rejected=0 passed=50
+t=0.55 fold=128: raw_crossings=5 lockout_rejected=0 barrier_pct_rejected=0 passed=5
 t=0.60 fold=128: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=128: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=128: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -2474,14 +2474,14 @@ t=0.85 fold=128: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=128: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=128: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 128 | Train Rows: 9341   | Tested on forward 150 rows. Purged: 10
-t=0.20 fold=129: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.25 fold=129: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.30 fold=129: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.35 fold=129: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.40 fold=129: raw_crossings=148 lockout_rejected=35 barrier_pct_rejected=0 passed=113
-t=0.45 fold=129: raw_crossings=125 lockout_rejected=25 barrier_pct_rejected=0 passed=100
-t=0.50 fold=129: raw_crossings=59 lockout_rejected=9 barrier_pct_rejected=0 passed=50
-t=0.55 fold=129: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.20 fold=129: raw_crossings=150 lockout_rejected=22 barrier_pct_rejected=0 passed=128
+t=0.25 fold=129: raw_crossings=150 lockout_rejected=22 barrier_pct_rejected=0 passed=128
+t=0.30 fold=129: raw_crossings=149 lockout_rejected=22 barrier_pct_rejected=0 passed=127
+t=0.35 fold=129: raw_crossings=146 lockout_rejected=21 barrier_pct_rejected=0 passed=125
+t=0.40 fold=129: raw_crossings=140 lockout_rejected=20 barrier_pct_rejected=0 passed=120
+t=0.45 fold=129: raw_crossings=127 lockout_rejected=17 barrier_pct_rejected=0 passed=110
+t=0.50 fold=129: raw_crossings=61 lockout_rejected=5 barrier_pct_rejected=0 passed=56
+t=0.55 fold=129: raw_crossings=5 lockout_rejected=0 barrier_pct_rejected=0 passed=5
 t=0.60 fold=129: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=129: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=129: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -2491,14 +2491,14 @@ t=0.85 fold=129: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=129: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=129: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 129 | Train Rows: 9366   | Tested on forward 150 rows. Purged: 12
-t=0.20 fold=130: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.25 fold=130: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.30 fold=130: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.35 fold=130: raw_crossings=149 lockout_rejected=44 barrier_pct_rejected=0 passed=105
-t=0.40 fold=130: raw_crossings=147 lockout_rejected=42 barrier_pct_rejected=0 passed=105
-t=0.45 fold=130: raw_crossings=130 lockout_rejected=34 barrier_pct_rejected=0 passed=96
-t=0.50 fold=130: raw_crossings=42 lockout_rejected=7 barrier_pct_rejected=0 passed=35
-t=0.55 fold=130: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
+t=0.20 fold=130: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
+t=0.25 fold=130: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
+t=0.30 fold=130: raw_crossings=149 lockout_rejected=23 barrier_pct_rejected=0 passed=126
+t=0.35 fold=130: raw_crossings=145 lockout_rejected=22 barrier_pct_rejected=0 passed=123
+t=0.40 fold=130: raw_crossings=141 lockout_rejected=21 barrier_pct_rejected=0 passed=120
+t=0.45 fold=130: raw_crossings=130 lockout_rejected=18 barrier_pct_rejected=0 passed=112
+t=0.50 fold=130: raw_crossings=59 lockout_rejected=6 barrier_pct_rejected=0 passed=53
+t=0.55 fold=130: raw_crossings=5 lockout_rejected=0 barrier_pct_rejected=0 passed=5
 t=0.60 fold=130: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=130: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=130: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -2508,14 +2508,14 @@ t=0.85 fold=130: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=130: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=130: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 130 | Train Rows: 9395   | Tested on forward 150 rows. Purged: 10
-t=0.20 fold=131: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.25 fold=131: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.30 fold=131: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.35 fold=131: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.40 fold=131: raw_crossings=144 lockout_rejected=34 barrier_pct_rejected=0 passed=110
-t=0.45 fold=131: raw_crossings=126 lockout_rejected=28 barrier_pct_rejected=0 passed=98
-t=0.50 fold=131: raw_crossings=51 lockout_rejected=9 barrier_pct_rejected=0 passed=42
-t=0.55 fold=131: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.20 fold=131: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.25 fold=131: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.30 fold=131: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.35 fold=131: raw_crossings=147 lockout_rejected=25 barrier_pct_rejected=0 passed=122
+t=0.40 fold=131: raw_crossings=143 lockout_rejected=23 barrier_pct_rejected=0 passed=120
+t=0.45 fold=131: raw_crossings=134 lockout_rejected=19 barrier_pct_rejected=0 passed=115
+t=0.50 fold=131: raw_crossings=67 lockout_rejected=7 barrier_pct_rejected=0 passed=60
+t=0.55 fold=131: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
 t=0.60 fold=131: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=131: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=131: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -2525,15 +2525,15 @@ t=0.85 fold=131: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=131: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=131: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 131 | Train Rows: 9417   | Tested on forward 150 rows. Purged: 15
-t=0.20 fold=132: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.25 fold=132: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.30 fold=132: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.35 fold=132: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.40 fold=132: raw_crossings=148 lockout_rejected=38 barrier_pct_rejected=0 passed=110
-t=0.45 fold=132: raw_crossings=129 lockout_rejected=32 barrier_pct_rejected=0 passed=97
-t=0.50 fold=132: raw_crossings=52 lockout_rejected=11 barrier_pct_rejected=0 passed=41
+t=0.20 fold=132: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
+t=0.25 fold=132: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
+t=0.30 fold=132: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
+t=0.35 fold=132: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
+t=0.40 fold=132: raw_crossings=148 lockout_rejected=21 barrier_pct_rejected=0 passed=127
+t=0.45 fold=132: raw_crossings=139 lockout_rejected=18 barrier_pct_rejected=0 passed=121
+t=0.50 fold=132: raw_crossings=64 lockout_rejected=6 barrier_pct_rejected=0 passed=58
 t=0.55 fold=132: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
-t=0.60 fold=132: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.60 fold=132: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=132: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=132: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=132: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -2542,14 +2542,14 @@ t=0.85 fold=132: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=132: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=132: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 132 | Train Rows: 9447   | Tested on forward 150 rows. Purged: 12
-t=0.20 fold=133: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.25 fold=133: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.30 fold=133: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.35 fold=133: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.40 fold=133: raw_crossings=147 lockout_rejected=46 barrier_pct_rejected=0 passed=101
-t=0.45 fold=133: raw_crossings=136 lockout_rejected=42 barrier_pct_rejected=0 passed=94
-t=0.50 fold=133: raw_crossings=52 lockout_rejected=10 barrier_pct_rejected=0 passed=42
-t=0.55 fold=133: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.20 fold=133: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
+t=0.25 fold=133: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
+t=0.30 fold=133: raw_crossings=149 lockout_rejected=23 barrier_pct_rejected=0 passed=126
+t=0.35 fold=133: raw_crossings=148 lockout_rejected=23 barrier_pct_rejected=0 passed=125
+t=0.40 fold=133: raw_crossings=144 lockout_rejected=22 barrier_pct_rejected=0 passed=122
+t=0.45 fold=133: raw_crossings=130 lockout_rejected=17 barrier_pct_rejected=0 passed=113
+t=0.50 fold=133: raw_crossings=65 lockout_rejected=4 barrier_pct_rejected=0 passed=61
+t=0.55 fold=133: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
 t=0.60 fold=133: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=133: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=133: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -2559,13 +2559,13 @@ t=0.85 fold=133: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=133: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=133: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 133 | Train Rows: 9471   | Tested on forward 150 rows. Purged: 15
-t=0.20 fold=134: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.25 fold=134: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.30 fold=134: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.35 fold=134: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.40 fold=134: raw_crossings=149 lockout_rejected=44 barrier_pct_rejected=0 passed=105
-t=0.45 fold=134: raw_crossings=129 lockout_rejected=35 barrier_pct_rejected=0 passed=94
-t=0.50 fold=134: raw_crossings=50 lockout_rejected=7 barrier_pct_rejected=0 passed=43
+t=0.20 fold=134: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.25 fold=134: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.30 fold=134: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.35 fold=134: raw_crossings=149 lockout_rejected=26 barrier_pct_rejected=0 passed=123
+t=0.40 fold=134: raw_crossings=144 lockout_rejected=26 barrier_pct_rejected=0 passed=118
+t=0.45 fold=134: raw_crossings=129 lockout_rejected=19 barrier_pct_rejected=0 passed=110
+t=0.50 fold=134: raw_crossings=63 lockout_rejected=6 barrier_pct_rejected=0 passed=57
 t=0.55 fold=134: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
 t=0.60 fold=134: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=134: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -2576,14 +2576,14 @@ t=0.85 fold=134: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=134: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=134: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 134 | Train Rows: 9499   | Tested on forward 150 rows. Purged: 14
-t=0.20 fold=135: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.25 fold=135: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.30 fold=135: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.35 fold=135: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.40 fold=135: raw_crossings=146 lockout_rejected=46 barrier_pct_rejected=0 passed=100
-t=0.45 fold=135: raw_crossings=126 lockout_rejected=37 barrier_pct_rejected=0 passed=89
-t=0.50 fold=135: raw_crossings=48 lockout_rejected=9 barrier_pct_rejected=0 passed=39
-t=0.55 fold=135: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.20 fold=135: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.25 fold=135: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.30 fold=135: raw_crossings=149 lockout_rejected=26 barrier_pct_rejected=0 passed=123
+t=0.35 fold=135: raw_crossings=149 lockout_rejected=26 barrier_pct_rejected=0 passed=123
+t=0.40 fold=135: raw_crossings=142 lockout_rejected=25 barrier_pct_rejected=0 passed=117
+t=0.45 fold=135: raw_crossings=125 lockout_rejected=18 barrier_pct_rejected=0 passed=107
+t=0.50 fold=135: raw_crossings=57 lockout_rejected=6 barrier_pct_rejected=0 passed=51
+t=0.55 fold=135: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
 t=0.60 fold=135: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=135: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=135: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -2593,16 +2593,16 @@ t=0.85 fold=135: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=135: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=135: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 135 | Train Rows: 9526   | Tested on forward 150 rows. Purged: 14
-t=0.20 fold=136: raw_crossings=150 lockout_rejected=46 barrier_pct_rejected=0 passed=104
-t=0.25 fold=136: raw_crossings=150 lockout_rejected=46 barrier_pct_rejected=0 passed=104
-t=0.30 fold=136: raw_crossings=150 lockout_rejected=46 barrier_pct_rejected=0 passed=104
-t=0.35 fold=136: raw_crossings=150 lockout_rejected=46 barrier_pct_rejected=0 passed=104
-t=0.40 fold=136: raw_crossings=146 lockout_rejected=45 barrier_pct_rejected=0 passed=101
-t=0.45 fold=136: raw_crossings=127 lockout_rejected=39 barrier_pct_rejected=0 passed=88
-t=0.50 fold=136: raw_crossings=51 lockout_rejected=8 barrier_pct_rejected=0 passed=43
-t=0.55 fold=136: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
-t=0.60 fold=136: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
-t=0.65 fold=136: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.20 fold=136: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.25 fold=136: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.30 fold=136: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.35 fold=136: raw_crossings=147 lockout_rejected=26 barrier_pct_rejected=0 passed=121
+t=0.40 fold=136: raw_crossings=139 lockout_rejected=23 barrier_pct_rejected=0 passed=116
+t=0.45 fold=136: raw_crossings=120 lockout_rejected=17 barrier_pct_rejected=0 passed=103
+t=0.50 fold=136: raw_crossings=47 lockout_rejected=6 barrier_pct_rejected=0 passed=41
+t=0.55 fold=136: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.60 fold=136: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.65 fold=136: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.70 fold=136: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=136: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.80 fold=136: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -2610,16 +2610,16 @@ t=0.85 fold=136: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=136: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=136: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 136 | Train Rows: 9552   | Tested on forward 150 rows. Purged: 15
-t=0.20 fold=137: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.25 fold=137: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.30 fold=137: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.35 fold=137: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.40 fold=137: raw_crossings=149 lockout_rejected=43 barrier_pct_rejected=0 passed=106
-t=0.45 fold=137: raw_crossings=139 lockout_rejected=38 barrier_pct_rejected=0 passed=101
-t=0.50 fold=137: raw_crossings=61 lockout_rejected=8 barrier_pct_rejected=0 passed=53
-t=0.55 fold=137: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
-t=0.60 fold=137: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
-t=0.65 fold=137: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.20 fold=137: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.25 fold=137: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.30 fold=137: raw_crossings=149 lockout_rejected=28 barrier_pct_rejected=0 passed=121
+t=0.35 fold=137: raw_crossings=144 lockout_rejected=25 barrier_pct_rejected=0 passed=119
+t=0.40 fold=137: raw_crossings=135 lockout_rejected=21 barrier_pct_rejected=0 passed=114
+t=0.45 fold=137: raw_crossings=121 lockout_rejected=15 barrier_pct_rejected=0 passed=106
+t=0.50 fold=137: raw_crossings=46 lockout_rejected=5 barrier_pct_rejected=0 passed=41
+t=0.55 fold=137: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.60 fold=137: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.65 fold=137: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.70 fold=137: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=137: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.80 fold=137: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -2627,15 +2627,15 @@ t=0.85 fold=137: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=137: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=137: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 137 | Train Rows: 9586   | Tested on forward 150 rows. Purged: 8
-t=0.20 fold=138: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.25 fold=138: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.30 fold=138: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.35 fold=138: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.40 fold=138: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.45 fold=138: raw_crossings=142 lockout_rejected=36 barrier_pct_rejected=0 passed=106
-t=0.50 fold=138: raw_crossings=67 lockout_rejected=11 barrier_pct_rejected=0 passed=56
-t=0.55 fold=138: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
-t=0.60 fold=138: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.20 fold=138: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.25 fold=138: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.30 fold=138: raw_crossings=148 lockout_rejected=26 barrier_pct_rejected=0 passed=122
+t=0.35 fold=138: raw_crossings=145 lockout_rejected=26 barrier_pct_rejected=0 passed=119
+t=0.40 fold=138: raw_crossings=137 lockout_rejected=24 barrier_pct_rejected=0 passed=113
+t=0.45 fold=138: raw_crossings=121 lockout_rejected=17 barrier_pct_rejected=0 passed=104
+t=0.50 fold=138: raw_crossings=54 lockout_rejected=5 barrier_pct_rejected=0 passed=49
+t=0.55 fold=138: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.60 fold=138: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.65 fold=138: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=138: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=138: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -2644,14 +2644,14 @@ t=0.85 fold=138: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=138: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=138: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 138 | Train Rows: 9602   | Tested on forward 150 rows. Purged: 19
-t=0.20 fold=139: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.25 fold=139: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.30 fold=139: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.35 fold=139: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.40 fold=139: raw_crossings=149 lockout_rejected=39 barrier_pct_rejected=0 passed=110
-t=0.45 fold=139: raw_crossings=141 lockout_rejected=36 barrier_pct_rejected=0 passed=105
-t=0.50 fold=139: raw_crossings=71 lockout_rejected=15 barrier_pct_rejected=0 passed=56
-t=0.55 fold=139: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
+t=0.20 fold=139: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.25 fold=139: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.30 fold=139: raw_crossings=145 lockout_rejected=25 barrier_pct_rejected=0 passed=120
+t=0.35 fold=139: raw_crossings=143 lockout_rejected=25 barrier_pct_rejected=0 passed=118
+t=0.40 fold=139: raw_crossings=139 lockout_rejected=22 barrier_pct_rejected=0 passed=117
+t=0.45 fold=139: raw_crossings=128 lockout_rejected=17 barrier_pct_rejected=0 passed=111
+t=0.50 fold=139: raw_crossings=63 lockout_rejected=6 barrier_pct_rejected=0 passed=57
+t=0.55 fold=139: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
 t=0.60 fold=139: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.65 fold=139: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=139: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -2661,15 +2661,15 @@ t=0.85 fold=139: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=139: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=139: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 139 | Train Rows: 9635   | Tested on forward 150 rows. Purged: 13
-t=0.20 fold=140: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.25 fold=140: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.30 fold=140: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.35 fold=140: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.40 fold=140: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.45 fold=140: raw_crossings=142 lockout_rejected=38 barrier_pct_rejected=0 passed=104
-t=0.50 fold=140: raw_crossings=70 lockout_rejected=6 barrier_pct_rejected=0 passed=64
+t=0.20 fold=140: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.25 fold=140: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.30 fold=140: raw_crossings=147 lockout_rejected=22 barrier_pct_rejected=0 passed=125
+t=0.35 fold=140: raw_crossings=144 lockout_rejected=21 barrier_pct_rejected=0 passed=123
+t=0.40 fold=140: raw_crossings=141 lockout_rejected=21 barrier_pct_rejected=0 passed=120
+t=0.45 fold=140: raw_crossings=133 lockout_rejected=17 barrier_pct_rejected=0 passed=116
+t=0.50 fold=140: raw_crossings=62 lockout_rejected=6 barrier_pct_rejected=0 passed=56
 t=0.55 fold=140: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
-t=0.60 fold=140: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.60 fold=140: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.65 fold=140: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=140: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=140: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -2678,15 +2678,15 @@ t=0.85 fold=140: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=140: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=140: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 140 | Train Rows: 9661   | Tested on forward 150 rows. Purged: 14
-t=0.20 fold=141: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.25 fold=141: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.30 fold=141: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.35 fold=141: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.40 fold=141: raw_crossings=149 lockout_rejected=44 barrier_pct_rejected=0 passed=105
-t=0.45 fold=141: raw_crossings=137 lockout_rejected=42 barrier_pct_rejected=0 passed=95
-t=0.50 fold=141: raw_crossings=79 lockout_rejected=18 barrier_pct_rejected=0 passed=61
-t=0.55 fold=141: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
-t=0.60 fold=141: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.20 fold=141: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.25 fold=141: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.30 fold=141: raw_crossings=148 lockout_rejected=21 barrier_pct_rejected=0 passed=127
+t=0.35 fold=141: raw_crossings=146 lockout_rejected=21 barrier_pct_rejected=0 passed=125
+t=0.40 fold=141: raw_crossings=145 lockout_rejected=21 barrier_pct_rejected=0 passed=124
+t=0.45 fold=141: raw_crossings=131 lockout_rejected=18 barrier_pct_rejected=0 passed=113
+t=0.50 fold=141: raw_crossings=62 lockout_rejected=5 barrier_pct_rejected=0 passed=57
+t=0.55 fold=141: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
+t=0.60 fold=141: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.65 fold=141: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=141: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=141: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -2695,15 +2695,15 @@ t=0.85 fold=141: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=141: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=141: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 141 | Train Rows: 9683   | Tested on forward 150 rows. Purged: 19
-t=0.20 fold=142: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
-t=0.25 fold=142: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
-t=0.30 fold=142: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
-t=0.35 fold=142: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
-t=0.40 fold=142: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
-t=0.45 fold=142: raw_crossings=142 lockout_rejected=41 barrier_pct_rejected=0 passed=101
-t=0.50 fold=142: raw_crossings=65 lockout_rejected=13 barrier_pct_rejected=0 passed=52
-t=0.55 fold=142: raw_crossings=5 lockout_rejected=0 barrier_pct_rejected=0 passed=5
-t=0.60 fold=142: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=142: raw_crossings=150 lockout_rejected=21 barrier_pct_rejected=0 passed=129
+t=0.25 fold=142: raw_crossings=150 lockout_rejected=21 barrier_pct_rejected=0 passed=129
+t=0.30 fold=142: raw_crossings=150 lockout_rejected=21 barrier_pct_rejected=0 passed=129
+t=0.35 fold=142: raw_crossings=148 lockout_rejected=20 barrier_pct_rejected=0 passed=128
+t=0.40 fold=142: raw_crossings=147 lockout_rejected=20 barrier_pct_rejected=0 passed=127
+t=0.45 fold=142: raw_crossings=137 lockout_rejected=18 barrier_pct_rejected=0 passed=119
+t=0.50 fold=142: raw_crossings=61 lockout_rejected=6 barrier_pct_rejected=0 passed=55
+t=0.55 fold=142: raw_crossings=6 lockout_rejected=1 barrier_pct_rejected=0 passed=5
+t=0.60 fold=142: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=142: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=142: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=142: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -2712,15 +2712,15 @@ t=0.85 fold=142: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=142: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=142: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 142 | Train Rows: 9719   | Tested on forward 150 rows. Purged: 10
-t=0.20 fold=143: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.25 fold=143: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.30 fold=143: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.35 fold=143: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.40 fold=143: raw_crossings=149 lockout_rejected=46 barrier_pct_rejected=0 passed=103
-t=0.45 fold=143: raw_crossings=139 lockout_rejected=40 barrier_pct_rejected=0 passed=99
-t=0.50 fold=143: raw_crossings=54 lockout_rejected=9 barrier_pct_rejected=0 passed=45
-t=0.55 fold=143: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
-t=0.60 fold=143: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=143: raw_crossings=150 lockout_rejected=21 barrier_pct_rejected=0 passed=129
+t=0.25 fold=143: raw_crossings=150 lockout_rejected=21 barrier_pct_rejected=0 passed=129
+t=0.30 fold=143: raw_crossings=150 lockout_rejected=21 barrier_pct_rejected=0 passed=129
+t=0.35 fold=143: raw_crossings=149 lockout_rejected=20 barrier_pct_rejected=0 passed=129
+t=0.40 fold=143: raw_crossings=147 lockout_rejected=20 barrier_pct_rejected=0 passed=127
+t=0.45 fold=143: raw_crossings=139 lockout_rejected=17 barrier_pct_rejected=0 passed=122
+t=0.50 fold=143: raw_crossings=60 lockout_rejected=7 barrier_pct_rejected=0 passed=53
+t=0.55 fold=143: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
+t=0.60 fold=143: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=143: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=143: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=143: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -2729,14 +2729,14 @@ t=0.85 fold=143: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=143: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=143: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 143 | Train Rows: 9740   | Tested on forward 150 rows. Purged: 16
-t=0.20 fold=144: raw_crossings=150 lockout_rejected=52 barrier_pct_rejected=0 passed=98
-t=0.25 fold=144: raw_crossings=150 lockout_rejected=52 barrier_pct_rejected=0 passed=98
-t=0.30 fold=144: raw_crossings=150 lockout_rejected=52 barrier_pct_rejected=0 passed=98
-t=0.35 fold=144: raw_crossings=150 lockout_rejected=52 barrier_pct_rejected=0 passed=98
-t=0.40 fold=144: raw_crossings=150 lockout_rejected=52 barrier_pct_rejected=0 passed=98
-t=0.45 fold=144: raw_crossings=143 lockout_rejected=49 barrier_pct_rejected=0 passed=94
-t=0.50 fold=144: raw_crossings=60 lockout_rejected=13 barrier_pct_rejected=0 passed=47
-t=0.55 fold=144: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
+t=0.20 fold=144: raw_crossings=150 lockout_rejected=19 barrier_pct_rejected=0 passed=131
+t=0.25 fold=144: raw_crossings=150 lockout_rejected=19 barrier_pct_rejected=0 passed=131
+t=0.30 fold=144: raw_crossings=150 lockout_rejected=19 barrier_pct_rejected=0 passed=131
+t=0.35 fold=144: raw_crossings=150 lockout_rejected=19 barrier_pct_rejected=0 passed=131
+t=0.40 fold=144: raw_crossings=149 lockout_rejected=19 barrier_pct_rejected=0 passed=130
+t=0.45 fold=144: raw_crossings=141 lockout_rejected=15 barrier_pct_rejected=0 passed=126
+t=0.50 fold=144: raw_crossings=62 lockout_rejected=5 barrier_pct_rejected=0 passed=57
+t=0.55 fold=144: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.60 fold=144: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=144: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=144: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -2746,13 +2746,13 @@ t=0.85 fold=144: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=144: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=144: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 144 | Train Rows: 9780   | Tested on forward 150 rows. Purged: 3
-t=0.20 fold=145: raw_crossings=150 lockout_rejected=48 barrier_pct_rejected=0 passed=102
-t=0.25 fold=145: raw_crossings=150 lockout_rejected=48 barrier_pct_rejected=0 passed=102
-t=0.30 fold=145: raw_crossings=150 lockout_rejected=48 barrier_pct_rejected=0 passed=102
-t=0.35 fold=145: raw_crossings=150 lockout_rejected=48 barrier_pct_rejected=0 passed=102
-t=0.40 fold=145: raw_crossings=149 lockout_rejected=48 barrier_pct_rejected=0 passed=101
-t=0.45 fold=145: raw_crossings=141 lockout_rejected=43 barrier_pct_rejected=0 passed=98
-t=0.50 fold=145: raw_crossings=61 lockout_rejected=18 barrier_pct_rejected=0 passed=43
+t=0.20 fold=145: raw_crossings=150 lockout_rejected=17 barrier_pct_rejected=0 passed=133
+t=0.25 fold=145: raw_crossings=150 lockout_rejected=17 barrier_pct_rejected=0 passed=133
+t=0.30 fold=145: raw_crossings=150 lockout_rejected=17 barrier_pct_rejected=0 passed=133
+t=0.35 fold=145: raw_crossings=150 lockout_rejected=17 barrier_pct_rejected=0 passed=133
+t=0.40 fold=145: raw_crossings=148 lockout_rejected=17 barrier_pct_rejected=0 passed=131
+t=0.45 fold=145: raw_crossings=141 lockout_rejected=14 barrier_pct_rejected=0 passed=127
+t=0.50 fold=145: raw_crossings=61 lockout_rejected=4 barrier_pct_rejected=0 passed=57
 t=0.55 fold=145: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.60 fold=145: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=145: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -2763,14 +2763,14 @@ t=0.85 fold=145: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=145: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=145: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 145 | Train Rows: 9796   | Tested on forward 150 rows. Purged: 14
-t=0.20 fold=146: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
-t=0.25 fold=146: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
-t=0.30 fold=146: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
-t=0.35 fold=146: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
-t=0.40 fold=146: raw_crossings=149 lockout_rejected=44 barrier_pct_rejected=0 passed=105
-t=0.45 fold=146: raw_crossings=144 lockout_rejected=39 barrier_pct_rejected=0 passed=105
-t=0.50 fold=146: raw_crossings=59 lockout_rejected=12 barrier_pct_rejected=0 passed=47
-t=0.55 fold=146: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
+t=0.20 fold=146: raw_crossings=150 lockout_rejected=18 barrier_pct_rejected=0 passed=132
+t=0.25 fold=146: raw_crossings=150 lockout_rejected=18 barrier_pct_rejected=0 passed=132
+t=0.30 fold=146: raw_crossings=150 lockout_rejected=18 barrier_pct_rejected=0 passed=132
+t=0.35 fold=146: raw_crossings=150 lockout_rejected=18 barrier_pct_rejected=0 passed=132
+t=0.40 fold=146: raw_crossings=147 lockout_rejected=15 barrier_pct_rejected=0 passed=132
+t=0.45 fold=146: raw_crossings=137 lockout_rejected=11 barrier_pct_rejected=0 passed=126
+t=0.50 fold=146: raw_crossings=64 lockout_rejected=4 barrier_pct_rejected=0 passed=60
+t=0.55 fold=146: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.60 fold=146: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=146: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=146: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -2780,14 +2780,14 @@ t=0.85 fold=146: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=146: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=146: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 146 | Train Rows: 9830   | Tested on forward 150 rows. Purged: 7
-t=0.20 fold=147: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
-t=0.25 fold=147: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
-t=0.30 fold=147: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
-t=0.35 fold=147: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
-t=0.40 fold=147: raw_crossings=149 lockout_rejected=36 barrier_pct_rejected=0 passed=113
-t=0.45 fold=147: raw_crossings=143 lockout_rejected=34 barrier_pct_rejected=0 passed=109
-t=0.50 fold=147: raw_crossings=74 lockout_rejected=14 barrier_pct_rejected=0 passed=60
-t=0.55 fold=147: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=147: raw_crossings=150 lockout_rejected=20 barrier_pct_rejected=0 passed=130
+t=0.25 fold=147: raw_crossings=150 lockout_rejected=20 barrier_pct_rejected=0 passed=130
+t=0.30 fold=147: raw_crossings=150 lockout_rejected=20 barrier_pct_rejected=0 passed=130
+t=0.35 fold=147: raw_crossings=150 lockout_rejected=20 barrier_pct_rejected=0 passed=130
+t=0.40 fold=147: raw_crossings=148 lockout_rejected=20 barrier_pct_rejected=0 passed=128
+t=0.45 fold=147: raw_crossings=138 lockout_rejected=12 barrier_pct_rejected=0 passed=126
+t=0.50 fold=147: raw_crossings=65 lockout_rejected=4 barrier_pct_rejected=0 passed=61
+t=0.55 fold=147: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
 t=0.60 fold=147: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=147: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=147: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -2797,14 +2797,14 @@ t=0.85 fold=147: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=147: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=147: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 147 | Train Rows: 9852   | Tested on forward 150 rows. Purged: 12
-t=0.20 fold=148: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.25 fold=148: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.30 fold=148: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.35 fold=148: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.40 fold=148: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.45 fold=148: raw_crossings=144 lockout_rejected=35 barrier_pct_rejected=0 passed=109
-t=0.50 fold=148: raw_crossings=71 lockout_rejected=15 barrier_pct_rejected=0 passed=56
-t=0.55 fold=148: raw_crossings=5 lockout_rejected=0 barrier_pct_rejected=0 passed=5
+t=0.20 fold=148: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
+t=0.25 fold=148: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
+t=0.30 fold=148: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
+t=0.35 fold=148: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
+t=0.40 fold=148: raw_crossings=147 lockout_rejected=20 barrier_pct_rejected=0 passed=127
+t=0.45 fold=148: raw_crossings=139 lockout_rejected=16 barrier_pct_rejected=0 passed=123
+t=0.50 fold=148: raw_crossings=74 lockout_rejected=5 barrier_pct_rejected=0 passed=69
+t=0.55 fold=148: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
 t=0.60 fold=148: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=148: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=148: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -2814,14 +2814,14 @@ t=0.85 fold=148: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=148: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=148: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 148 | Train Rows: 9878   | Tested on forward 150 rows. Purged: 13
-t=0.20 fold=149: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
-t=0.25 fold=149: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
-t=0.30 fold=149: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
-t=0.35 fold=149: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
-t=0.40 fold=149: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
-t=0.45 fold=149: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
-t=0.50 fold=149: raw_crossings=79 lockout_rejected=15 barrier_pct_rejected=0 passed=64
-t=0.55 fold=149: raw_crossings=5 lockout_rejected=0 barrier_pct_rejected=0 passed=5
+t=0.20 fold=149: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.25 fold=149: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.30 fold=149: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.35 fold=149: raw_crossings=149 lockout_rejected=25 barrier_pct_rejected=0 passed=124
+t=0.40 fold=149: raw_crossings=148 lockout_rejected=25 barrier_pct_rejected=0 passed=123
+t=0.45 fold=149: raw_crossings=141 lockout_rejected=23 barrier_pct_rejected=0 passed=118
+t=0.50 fold=149: raw_crossings=64 lockout_rejected=5 barrier_pct_rejected=0 passed=59
+t=0.55 fold=149: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
 t=0.60 fold=149: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=149: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=149: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -2831,14 +2831,14 @@ t=0.85 fold=149: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=149: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=149: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 149 | Train Rows: 9909   | Tested on forward 150 rows. Purged: 9
-t=0.20 fold=150: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
-t=0.25 fold=150: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
-t=0.30 fold=150: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
-t=0.35 fold=150: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
-t=0.40 fold=150: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
-t=0.45 fold=150: raw_crossings=149 lockout_rejected=26 barrier_pct_rejected=0 passed=123
-t=0.50 fold=150: raw_crossings=83 lockout_rejected=9 barrier_pct_rejected=0 passed=74
-t=0.55 fold=150: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
+t=0.20 fold=150: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
+t=0.25 fold=150: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
+t=0.30 fold=150: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
+t=0.35 fold=150: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
+t=0.40 fold=150: raw_crossings=149 lockout_rejected=27 barrier_pct_rejected=0 passed=122
+t=0.45 fold=150: raw_crossings=140 lockout_rejected=25 barrier_pct_rejected=0 passed=115
+t=0.50 fold=150: raw_crossings=52 lockout_rejected=4 barrier_pct_rejected=0 passed=48
+t=0.55 fold=150: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
 t=0.60 fold=150: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=150: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=150: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -2848,13 +2848,13 @@ t=0.85 fold=150: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=150: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=150: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 150 | Train Rows: 9933   | Tested on forward 150 rows. Purged: 12
-t=0.20 fold=151: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
-t=0.25 fold=151: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
-t=0.30 fold=151: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
-t=0.35 fold=151: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
-t=0.40 fold=151: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
-t=0.45 fold=151: raw_crossings=148 lockout_rejected=30 barrier_pct_rejected=0 passed=118
-t=0.50 fold=151: raw_crossings=83 lockout_rejected=12 barrier_pct_rejected=0 passed=71
+t=0.20 fold=151: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
+t=0.25 fold=151: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
+t=0.30 fold=151: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
+t=0.35 fold=151: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
+t=0.40 fold=151: raw_crossings=148 lockout_rejected=32 barrier_pct_rejected=0 passed=116
+t=0.45 fold=151: raw_crossings=138 lockout_rejected=31 barrier_pct_rejected=0 passed=107
+t=0.50 fold=151: raw_crossings=50 lockout_rejected=4 barrier_pct_rejected=0 passed=46
 t=0.55 fold=151: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
 t=0.60 fold=151: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=151: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -2865,14 +2865,14 @@ t=0.85 fold=151: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=151: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=151: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 151 | Train Rows: 9961   | Tested on forward 150 rows. Purged: 11
-t=0.20 fold=152: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
-t=0.25 fold=152: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
-t=0.30 fold=152: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
-t=0.35 fold=152: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
-t=0.40 fold=152: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
-t=0.45 fold=152: raw_crossings=146 lockout_rejected=29 barrier_pct_rejected=0 passed=117
-t=0.50 fold=152: raw_crossings=75 lockout_rejected=12 barrier_pct_rejected=0 passed=63
-t=0.55 fold=152: raw_crossings=6 lockout_rejected=0 barrier_pct_rejected=0 passed=6
+t=0.20 fold=152: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
+t=0.25 fold=152: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
+t=0.30 fold=152: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
+t=0.35 fold=152: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
+t=0.40 fold=152: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
+t=0.45 fold=152: raw_crossings=141 lockout_rejected=29 barrier_pct_rejected=0 passed=112
+t=0.50 fold=152: raw_crossings=56 lockout_rejected=3 barrier_pct_rejected=0 passed=53
+t=0.55 fold=152: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.60 fold=152: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=152: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=152: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -2882,14 +2882,14 @@ t=0.85 fold=152: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=152: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=152: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 152 | Train Rows: 9987   | Tested on forward 150 rows. Purged: 12
-t=0.20 fold=153: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.25 fold=153: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.30 fold=153: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.35 fold=153: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.40 fold=153: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.45 fold=153: raw_crossings=146 lockout_rejected=37 barrier_pct_rejected=0 passed=109
-t=0.50 fold=153: raw_crossings=72 lockout_rejected=12 barrier_pct_rejected=0 passed=60
-t=0.55 fold=153: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
+t=0.20 fold=153: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.25 fold=153: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.30 fold=153: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.35 fold=153: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.40 fold=153: raw_crossings=149 lockout_rejected=33 barrier_pct_rejected=0 passed=116
+t=0.45 fold=153: raw_crossings=140 lockout_rejected=32 barrier_pct_rejected=0 passed=108
+t=0.50 fold=153: raw_crossings=52 lockout_rejected=4 barrier_pct_rejected=0 passed=48
+t=0.55 fold=153: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.60 fold=153: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=153: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=153: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -2899,14 +2899,14 @@ t=0.85 fold=153: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=153: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=153: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 153 | Train Rows: 10013  | Tested on forward 150 rows. Purged: 13
-t=0.20 fold=154: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
-t=0.25 fold=154: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
-t=0.30 fold=154: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
-t=0.35 fold=154: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
-t=0.40 fold=154: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
-t=0.45 fold=154: raw_crossings=146 lockout_rejected=37 barrier_pct_rejected=0 passed=109
-t=0.50 fold=154: raw_crossings=72 lockout_rejected=11 barrier_pct_rejected=0 passed=61
-t=0.55 fold=154: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.20 fold=154: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
+t=0.25 fold=154: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
+t=0.30 fold=154: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
+t=0.35 fold=154: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
+t=0.40 fold=154: raw_crossings=149 lockout_rejected=32 barrier_pct_rejected=0 passed=117
+t=0.45 fold=154: raw_crossings=142 lockout_rejected=30 barrier_pct_rejected=0 passed=112
+t=0.50 fold=154: raw_crossings=56 lockout_rejected=4 barrier_pct_rejected=0 passed=52
+t=0.55 fold=154: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.60 fold=154: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=154: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=154: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -2916,16 +2916,16 @@ t=0.85 fold=154: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=154: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=154: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 154 | Train Rows: 10037  | Tested on forward 150 rows. Purged: 16
-t=0.20 fold=155: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.25 fold=155: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.30 fold=155: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.35 fold=155: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.40 fold=155: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.45 fold=155: raw_crossings=145 lockout_rejected=39 barrier_pct_rejected=0 passed=106
-t=0.50 fold=155: raw_crossings=59 lockout_rejected=10 barrier_pct_rejected=0 passed=49
-t=0.55 fold=155: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
-t=0.60 fold=155: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
-t=0.65 fold=155: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=155: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
+t=0.25 fold=155: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
+t=0.30 fold=155: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
+t=0.35 fold=155: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
+t=0.40 fold=155: raw_crossings=149 lockout_rejected=37 barrier_pct_rejected=0 passed=112
+t=0.45 fold=155: raw_crossings=141 lockout_rejected=34 barrier_pct_rejected=0 passed=107
+t=0.50 fold=155: raw_crossings=58 lockout_rejected=5 barrier_pct_rejected=0 passed=53
+t=0.55 fold=155: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.60 fold=155: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.65 fold=155: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=155: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=155: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.80 fold=155: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -2933,16 +2933,16 @@ t=0.85 fold=155: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=155: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=155: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 155 | Train Rows: 10065  | Tested on forward 150 rows. Purged: 15
-t=0.20 fold=156: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.25 fold=156: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.30 fold=156: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.35 fold=156: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.40 fold=156: raw_crossings=149 lockout_rejected=38 barrier_pct_rejected=0 passed=111
-t=0.45 fold=156: raw_crossings=138 lockout_rejected=33 barrier_pct_rejected=0 passed=105
-t=0.50 fold=156: raw_crossings=56 lockout_rejected=6 barrier_pct_rejected=0 passed=50
-t=0.55 fold=156: raw_crossings=5 lockout_rejected=0 barrier_pct_rejected=0 passed=5
-t=0.60 fold=156: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
-t=0.65 fold=156: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=156: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.25 fold=156: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.30 fold=156: raw_crossings=149 lockout_rejected=33 barrier_pct_rejected=0 passed=116
+t=0.35 fold=156: raw_crossings=149 lockout_rejected=33 barrier_pct_rejected=0 passed=116
+t=0.40 fold=156: raw_crossings=149 lockout_rejected=33 barrier_pct_rejected=0 passed=116
+t=0.45 fold=156: raw_crossings=144 lockout_rejected=32 barrier_pct_rejected=0 passed=112
+t=0.50 fold=156: raw_crossings=61 lockout_rejected=5 barrier_pct_rejected=0 passed=56
+t=0.55 fold=156: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.60 fold=156: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.65 fold=156: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=156: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=156: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.80 fold=156: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -2950,15 +2950,15 @@ t=0.85 fold=156: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=156: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=156: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 156 | Train Rows: 10091  | Tested on forward 150 rows. Purged: 16
-t=0.20 fold=157: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
-t=0.25 fold=157: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
-t=0.30 fold=157: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
-t=0.35 fold=157: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
-t=0.40 fold=157: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
-t=0.45 fold=157: raw_crossings=146 lockout_rejected=31 barrier_pct_rejected=0 passed=115
-t=0.50 fold=157: raw_crossings=50 lockout_rejected=3 barrier_pct_rejected=0 passed=47
+t=0.20 fold=157: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
+t=0.25 fold=157: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
+t=0.30 fold=157: raw_crossings=149 lockout_rejected=37 barrier_pct_rejected=0 passed=112
+t=0.35 fold=157: raw_crossings=149 lockout_rejected=37 barrier_pct_rejected=0 passed=112
+t=0.40 fold=157: raw_crossings=148 lockout_rejected=37 barrier_pct_rejected=0 passed=111
+t=0.45 fold=157: raw_crossings=142 lockout_rejected=35 barrier_pct_rejected=0 passed=107
+t=0.50 fold=157: raw_crossings=66 lockout_rejected=5 barrier_pct_rejected=0 passed=61
 t=0.55 fold=157: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
-t=0.60 fold=157: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.60 fold=157: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=157: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=157: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=157: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -2967,15 +2967,15 @@ t=0.85 fold=157: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=157: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=157: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 157 | Train Rows: 10126  | Tested on forward 150 rows. Purged: 8
-t=0.20 fold=158: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.25 fold=158: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.30 fold=158: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.35 fold=158: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.40 fold=158: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.45 fold=158: raw_crossings=143 lockout_rejected=32 barrier_pct_rejected=0 passed=111
-t=0.50 fold=158: raw_crossings=50 lockout_rejected=5 barrier_pct_rejected=0 passed=45
+t=0.20 fold=158: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
+t=0.25 fold=158: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
+t=0.30 fold=158: raw_crossings=149 lockout_rejected=31 barrier_pct_rejected=0 passed=118
+t=0.35 fold=158: raw_crossings=149 lockout_rejected=31 barrier_pct_rejected=0 passed=118
+t=0.40 fold=158: raw_crossings=149 lockout_rejected=31 barrier_pct_rejected=0 passed=118
+t=0.45 fold=158: raw_crossings=136 lockout_rejected=28 barrier_pct_rejected=0 passed=108
+t=0.50 fold=158: raw_crossings=66 lockout_rejected=3 barrier_pct_rejected=0 passed=63
 t=0.55 fold=158: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
-t=0.60 fold=158: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.60 fold=158: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=158: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=158: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=158: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -2984,15 +2984,15 @@ t=0.85 fold=158: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=158: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=158: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 158 | Train Rows: 10149  | Tested on forward 150 rows. Purged: 12
-t=0.20 fold=159: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
-t=0.25 fold=159: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
-t=0.30 fold=159: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
-t=0.35 fold=159: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
-t=0.40 fold=159: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
-t=0.45 fold=159: raw_crossings=147 lockout_rejected=29 barrier_pct_rejected=0 passed=118
-t=0.50 fold=159: raw_crossings=50 lockout_rejected=5 barrier_pct_rejected=0 passed=45
+t=0.20 fold=159: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.25 fold=159: raw_crossings=149 lockout_rejected=33 barrier_pct_rejected=0 passed=116
+t=0.30 fold=159: raw_crossings=149 lockout_rejected=33 barrier_pct_rejected=0 passed=116
+t=0.35 fold=159: raw_crossings=149 lockout_rejected=33 barrier_pct_rejected=0 passed=116
+t=0.40 fold=159: raw_crossings=149 lockout_rejected=33 barrier_pct_rejected=0 passed=116
+t=0.45 fold=159: raw_crossings=137 lockout_rejected=31 barrier_pct_rejected=0 passed=106
+t=0.50 fold=159: raw_crossings=67 lockout_rejected=6 barrier_pct_rejected=0 passed=61
 t=0.55 fold=159: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
-t=0.60 fold=159: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.60 fold=159: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=159: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=159: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=159: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -3001,15 +3001,15 @@ t=0.85 fold=159: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=159: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=159: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 159 | Train Rows: 10173  | Tested on forward 150 rows. Purged: 15
-t=0.20 fold=160: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
-t=0.25 fold=160: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
-t=0.30 fold=160: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
-t=0.35 fold=160: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
-t=0.40 fold=160: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
-t=0.45 fold=160: raw_crossings=141 lockout_rejected=29 barrier_pct_rejected=0 passed=112
-t=0.50 fold=160: raw_crossings=58 lockout_rejected=6 barrier_pct_rejected=0 passed=52
-t=0.55 fold=160: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
-t=0.60 fold=160: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=160: raw_crossings=150 lockout_rejected=40 barrier_pct_rejected=0 passed=110
+t=0.25 fold=160: raw_crossings=149 lockout_rejected=40 barrier_pct_rejected=0 passed=109
+t=0.30 fold=160: raw_crossings=149 lockout_rejected=40 barrier_pct_rejected=0 passed=109
+t=0.35 fold=160: raw_crossings=145 lockout_rejected=37 barrier_pct_rejected=0 passed=108
+t=0.40 fold=160: raw_crossings=137 lockout_rejected=32 barrier_pct_rejected=0 passed=105
+t=0.45 fold=160: raw_crossings=124 lockout_rejected=27 barrier_pct_rejected=0 passed=97
+t=0.50 fold=160: raw_crossings=50 lockout_rejected=5 barrier_pct_rejected=0 passed=45
+t=0.55 fold=160: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
+t=0.60 fold=160: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=160: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=160: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=160: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -3018,15 +3018,15 @@ t=0.85 fold=160: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=160: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=160: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 160 | Train Rows: 10197  | Tested on forward 150 rows. Purged: 18
-t=0.20 fold=161: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.25 fold=161: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.30 fold=161: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.35 fold=161: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.40 fold=161: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.45 fold=161: raw_crossings=138 lockout_rejected=30 barrier_pct_rejected=0 passed=108
-t=0.50 fold=161: raw_crossings=65 lockout_rejected=10 barrier_pct_rejected=0 passed=55
-t=0.55 fold=161: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
-t=0.60 fold=161: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.20 fold=161: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
+t=0.25 fold=161: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
+t=0.30 fold=161: raw_crossings=149 lockout_rejected=43 barrier_pct_rejected=0 passed=106
+t=0.35 fold=161: raw_crossings=145 lockout_rejected=39 barrier_pct_rejected=0 passed=106
+t=0.40 fold=161: raw_crossings=141 lockout_rejected=35 barrier_pct_rejected=0 passed=106
+t=0.45 fold=161: raw_crossings=132 lockout_rejected=33 barrier_pct_rejected=0 passed=99
+t=0.50 fold=161: raw_crossings=45 lockout_rejected=6 barrier_pct_rejected=0 passed=39
+t=0.55 fold=161: raw_crossings=5 lockout_rejected=0 barrier_pct_rejected=0 passed=5
+t=0.60 fold=161: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.65 fold=161: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=161: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=161: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -3035,15 +3035,15 @@ t=0.85 fold=161: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=161: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=161: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 161 | Train Rows: 10232  | Tested on forward 150 rows. Purged: 10
-t=0.20 fold=162: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.25 fold=162: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.30 fold=162: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.35 fold=162: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.40 fold=162: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.45 fold=162: raw_crossings=140 lockout_rejected=39 barrier_pct_rejected=0 passed=101
-t=0.50 fold=162: raw_crossings=68 lockout_rejected=12 barrier_pct_rejected=0 passed=56
-t=0.55 fold=162: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
-t=0.60 fold=162: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.20 fold=162: raw_crossings=150 lockout_rejected=48 barrier_pct_rejected=0 passed=102
+t=0.25 fold=162: raw_crossings=150 lockout_rejected=48 barrier_pct_rejected=0 passed=102
+t=0.30 fold=162: raw_crossings=149 lockout_rejected=48 barrier_pct_rejected=0 passed=101
+t=0.35 fold=162: raw_crossings=146 lockout_rejected=45 barrier_pct_rejected=0 passed=101
+t=0.40 fold=162: raw_crossings=140 lockout_rejected=40 barrier_pct_rejected=0 passed=100
+t=0.45 fold=162: raw_crossings=126 lockout_rejected=35 barrier_pct_rejected=0 passed=91
+t=0.50 fold=162: raw_crossings=47 lockout_rejected=9 barrier_pct_rejected=0 passed=38
+t=0.55 fold=162: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
+t=0.60 fold=162: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.65 fold=162: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=162: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=162: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -3052,15 +3052,15 @@ t=0.85 fold=162: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=162: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=162: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 162 | Train Rows: 10256  | Tested on forward 150 rows. Purged: 13
-t=0.20 fold=163: raw_crossings=150 lockout_rejected=53 barrier_pct_rejected=0 passed=97
-t=0.25 fold=163: raw_crossings=150 lockout_rejected=53 barrier_pct_rejected=0 passed=97
-t=0.30 fold=163: raw_crossings=150 lockout_rejected=53 barrier_pct_rejected=0 passed=97
-t=0.35 fold=163: raw_crossings=150 lockout_rejected=53 barrier_pct_rejected=0 passed=97
-t=0.40 fold=163: raw_crossings=149 lockout_rejected=52 barrier_pct_rejected=0 passed=97
-t=0.45 fold=163: raw_crossings=141 lockout_rejected=47 barrier_pct_rejected=0 passed=94
-t=0.50 fold=163: raw_crossings=79 lockout_rejected=24 barrier_pct_rejected=0 passed=55
-t=0.55 fold=163: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
-t=0.60 fold=163: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.20 fold=163: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
+t=0.25 fold=163: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
+t=0.30 fold=163: raw_crossings=149 lockout_rejected=47 barrier_pct_rejected=0 passed=102
+t=0.35 fold=163: raw_crossings=145 lockout_rejected=43 barrier_pct_rejected=0 passed=102
+t=0.40 fold=163: raw_crossings=139 lockout_rejected=38 barrier_pct_rejected=0 passed=101
+t=0.45 fold=163: raw_crossings=129 lockout_rejected=35 barrier_pct_rejected=0 passed=94
+t=0.50 fold=163: raw_crossings=42 lockout_rejected=7 barrier_pct_rejected=0 passed=35
+t=0.55 fold=163: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
+t=0.60 fold=163: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.65 fold=163: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=163: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=163: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -3069,15 +3069,15 @@ t=0.85 fold=163: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=163: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=163: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 163 | Train Rows: 10283  | Tested on forward 150 rows. Purged: 13
-t=0.20 fold=164: raw_crossings=150 lockout_rejected=62 barrier_pct_rejected=0 passed=88
-t=0.25 fold=164: raw_crossings=150 lockout_rejected=62 barrier_pct_rejected=0 passed=88
-t=0.30 fold=164: raw_crossings=150 lockout_rejected=62 barrier_pct_rejected=0 passed=88
-t=0.35 fold=164: raw_crossings=150 lockout_rejected=62 barrier_pct_rejected=0 passed=88
-t=0.40 fold=164: raw_crossings=148 lockout_rejected=60 barrier_pct_rejected=0 passed=88
-t=0.45 fold=164: raw_crossings=138 lockout_rejected=54 barrier_pct_rejected=0 passed=84
-t=0.50 fold=164: raw_crossings=84 lockout_rejected=31 barrier_pct_rejected=0 passed=53
+t=0.20 fold=164: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
+t=0.25 fold=164: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
+t=0.30 fold=164: raw_crossings=149 lockout_rejected=47 barrier_pct_rejected=0 passed=102
+t=0.35 fold=164: raw_crossings=147 lockout_rejected=45 barrier_pct_rejected=0 passed=102
+t=0.40 fold=164: raw_crossings=140 lockout_rejected=38 barrier_pct_rejected=0 passed=102
+t=0.45 fold=164: raw_crossings=132 lockout_rejected=35 barrier_pct_rejected=0 passed=97
+t=0.50 fold=164: raw_crossings=51 lockout_rejected=11 barrier_pct_rejected=0 passed=40
 t=0.55 fold=164: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
-t=0.60 fold=164: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.60 fold=164: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.65 fold=164: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=164: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=164: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -3086,15 +3086,15 @@ t=0.85 fold=164: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=164: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=164: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 164 | Train Rows: 10308  | Tested on forward 150 rows. Purged: 15
-t=0.20 fold=165: raw_crossings=150 lockout_rejected=62 barrier_pct_rejected=0 passed=88
-t=0.25 fold=165: raw_crossings=150 lockout_rejected=62 barrier_pct_rejected=0 passed=88
-t=0.30 fold=165: raw_crossings=150 lockout_rejected=62 barrier_pct_rejected=0 passed=88
-t=0.35 fold=165: raw_crossings=149 lockout_rejected=62 barrier_pct_rejected=0 passed=87
-t=0.40 fold=165: raw_crossings=148 lockout_rejected=61 barrier_pct_rejected=0 passed=87
-t=0.45 fold=165: raw_crossings=140 lockout_rejected=57 barrier_pct_rejected=0 passed=83
-t=0.50 fold=165: raw_crossings=79 lockout_rejected=28 barrier_pct_rejected=0 passed=51
-t=0.55 fold=165: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
-t=0.60 fold=165: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.20 fold=165: raw_crossings=150 lockout_rejected=46 barrier_pct_rejected=0 passed=104
+t=0.25 fold=165: raw_crossings=150 lockout_rejected=46 barrier_pct_rejected=0 passed=104
+t=0.30 fold=165: raw_crossings=149 lockout_rejected=45 barrier_pct_rejected=0 passed=104
+t=0.35 fold=165: raw_crossings=147 lockout_rejected=43 barrier_pct_rejected=0 passed=104
+t=0.40 fold=165: raw_crossings=142 lockout_rejected=37 barrier_pct_rejected=0 passed=105
+t=0.45 fold=165: raw_crossings=132 lockout_rejected=33 barrier_pct_rejected=0 passed=99
+t=0.50 fold=165: raw_crossings=55 lockout_rejected=9 barrier_pct_rejected=0 passed=46
+t=0.55 fold=165: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
+t=0.60 fold=165: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.65 fold=165: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=165: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=165: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -3103,15 +3103,15 @@ t=0.85 fold=165: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=165: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=165: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 165 | Train Rows: 10335  | Tested on forward 150 rows. Purged: 15
-t=0.20 fold=166: raw_crossings=150 lockout_rejected=53 barrier_pct_rejected=0 passed=97
-t=0.25 fold=166: raw_crossings=150 lockout_rejected=53 barrier_pct_rejected=0 passed=97
-t=0.30 fold=166: raw_crossings=150 lockout_rejected=53 barrier_pct_rejected=0 passed=97
-t=0.35 fold=166: raw_crossings=149 lockout_rejected=53 barrier_pct_rejected=0 passed=96
-t=0.40 fold=166: raw_crossings=148 lockout_rejected=53 barrier_pct_rejected=0 passed=95
-t=0.45 fold=166: raw_crossings=138 lockout_rejected=51 barrier_pct_rejected=0 passed=87
-t=0.50 fold=166: raw_crossings=80 lockout_rejected=29 barrier_pct_rejected=0 passed=51
-t=0.55 fold=166: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
-t=0.60 fold=166: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.20 fold=166: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
+t=0.25 fold=166: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
+t=0.30 fold=166: raw_crossings=149 lockout_rejected=34 barrier_pct_rejected=0 passed=115
+t=0.35 fold=166: raw_crossings=149 lockout_rejected=34 barrier_pct_rejected=0 passed=115
+t=0.40 fold=166: raw_crossings=149 lockout_rejected=34 barrier_pct_rejected=0 passed=115
+t=0.45 fold=166: raw_crossings=142 lockout_rejected=33 barrier_pct_rejected=0 passed=109
+t=0.50 fold=166: raw_crossings=50 lockout_rejected=8 barrier_pct_rejected=0 passed=42
+t=0.55 fold=166: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
+t=0.60 fold=166: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.65 fold=166: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=166: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=166: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -3120,15 +3120,15 @@ t=0.85 fold=166: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=166: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=166: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 166 | Train Rows: 10371  | Tested on forward 150 rows. Purged: 6
-t=0.20 fold=167: raw_crossings=150 lockout_rejected=46 barrier_pct_rejected=0 passed=104
-t=0.25 fold=167: raw_crossings=150 lockout_rejected=46 barrier_pct_rejected=0 passed=104
-t=0.30 fold=167: raw_crossings=150 lockout_rejected=46 barrier_pct_rejected=0 passed=104
-t=0.35 fold=167: raw_crossings=149 lockout_rejected=46 barrier_pct_rejected=0 passed=103
-t=0.40 fold=167: raw_crossings=146 lockout_rejected=45 barrier_pct_rejected=0 passed=101
-t=0.45 fold=167: raw_crossings=139 lockout_rejected=44 barrier_pct_rejected=0 passed=95
-t=0.50 fold=167: raw_crossings=66 lockout_rejected=21 barrier_pct_rejected=0 passed=45
+t=0.20 fold=167: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.25 fold=167: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.30 fold=167: raw_crossings=149 lockout_rejected=27 barrier_pct_rejected=0 passed=122
+t=0.35 fold=167: raw_crossings=149 lockout_rejected=27 barrier_pct_rejected=0 passed=122
+t=0.40 fold=167: raw_crossings=148 lockout_rejected=27 barrier_pct_rejected=0 passed=121
+t=0.45 fold=167: raw_crossings=143 lockout_rejected=26 barrier_pct_rejected=0 passed=117
+t=0.50 fold=167: raw_crossings=48 lockout_rejected=4 barrier_pct_rejected=0 passed=44
 t=0.55 fold=167: raw_crossings=5 lockout_rejected=0 barrier_pct_rejected=0 passed=5
-t=0.60 fold=167: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.60 fold=167: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.65 fold=167: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=167: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=167: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -3137,15 +3137,15 @@ t=0.85 fold=167: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=167: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=167: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 167 | Train Rows: 10389  | Tested on forward 150 rows. Purged: 15
-t=0.20 fold=168: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.25 fold=168: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.30 fold=168: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.35 fold=168: raw_crossings=149 lockout_rejected=38 barrier_pct_rejected=0 passed=111
-t=0.40 fold=168: raw_crossings=148 lockout_rejected=38 barrier_pct_rejected=0 passed=110
-t=0.45 fold=168: raw_crossings=141 lockout_rejected=37 barrier_pct_rejected=0 passed=104
-t=0.50 fold=168: raw_crossings=76 lockout_rejected=19 barrier_pct_rejected=0 passed=57
-t=0.55 fold=168: raw_crossings=8 lockout_rejected=0 barrier_pct_rejected=0 passed=8
-t=0.60 fold=168: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.20 fold=168: raw_crossings=150 lockout_rejected=22 barrier_pct_rejected=0 passed=128
+t=0.25 fold=168: raw_crossings=150 lockout_rejected=22 barrier_pct_rejected=0 passed=128
+t=0.30 fold=168: raw_crossings=149 lockout_rejected=21 barrier_pct_rejected=0 passed=128
+t=0.35 fold=168: raw_crossings=149 lockout_rejected=21 barrier_pct_rejected=0 passed=128
+t=0.40 fold=168: raw_crossings=148 lockout_rejected=21 barrier_pct_rejected=0 passed=127
+t=0.45 fold=168: raw_crossings=141 lockout_rejected=19 barrier_pct_rejected=0 passed=122
+t=0.50 fold=168: raw_crossings=55 lockout_rejected=7 barrier_pct_rejected=0 passed=48
+t=0.55 fold=168: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.60 fold=168: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.65 fold=168: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=168: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=168: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -3154,14 +3154,14 @@ t=0.85 fold=168: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=168: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=168: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 168 | Train Rows: 10416  | Tested on forward 150 rows. Purged: 15
-t=0.20 fold=169: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
-t=0.25 fold=169: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
-t=0.30 fold=169: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
-t=0.35 fold=169: raw_crossings=149 lockout_rejected=26 barrier_pct_rejected=0 passed=123
-t=0.40 fold=169: raw_crossings=148 lockout_rejected=26 barrier_pct_rejected=0 passed=122
-t=0.45 fold=169: raw_crossings=136 lockout_rejected=24 barrier_pct_rejected=0 passed=112
-t=0.50 fold=169: raw_crossings=70 lockout_rejected=9 barrier_pct_rejected=0 passed=61
-t=0.55 fold=169: raw_crossings=6 lockout_rejected=0 barrier_pct_rejected=0 passed=6
+t=0.20 fold=169: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.25 fold=169: raw_crossings=149 lockout_rejected=27 barrier_pct_rejected=0 passed=122
+t=0.30 fold=169: raw_crossings=149 lockout_rejected=27 barrier_pct_rejected=0 passed=122
+t=0.35 fold=169: raw_crossings=148 lockout_rejected=27 barrier_pct_rejected=0 passed=121
+t=0.40 fold=169: raw_crossings=148 lockout_rejected=27 barrier_pct_rejected=0 passed=121
+t=0.45 fold=169: raw_crossings=142 lockout_rejected=25 barrier_pct_rejected=0 passed=117
+t=0.50 fold=169: raw_crossings=52 lockout_rejected=7 barrier_pct_rejected=0 passed=45
+t=0.55 fold=169: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
 t=0.60 fold=169: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=169: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=169: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -3176,9 +3176,9 @@ t=0.25 fold=170: raw_crossings=150 lockout_rejected=24 barrier_pct_rejected=0 pa
 t=0.30 fold=170: raw_crossings=150 lockout_rejected=24 barrier_pct_rejected=0 passed=126
 t=0.35 fold=170: raw_crossings=149 lockout_rejected=24 barrier_pct_rejected=0 passed=125
 t=0.40 fold=170: raw_crossings=148 lockout_rejected=24 barrier_pct_rejected=0 passed=124
-t=0.45 fold=170: raw_crossings=135 lockout_rejected=22 barrier_pct_rejected=0 passed=113
-t=0.50 fold=170: raw_crossings=65 lockout_rejected=4 barrier_pct_rejected=0 passed=61
-t=0.55 fold=170: raw_crossings=8 lockout_rejected=0 barrier_pct_rejected=0 passed=8
+t=0.45 fold=170: raw_crossings=144 lockout_rejected=23 barrier_pct_rejected=0 passed=121
+t=0.50 fold=170: raw_crossings=50 lockout_rejected=6 barrier_pct_rejected=0 passed=44
+t=0.55 fold=170: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
 t=0.60 fold=170: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=170: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=170: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -3188,14 +3188,14 @@ t=0.85 fold=170: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=170: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=170: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 170 | Train Rows: 10474  | Tested on forward 150 rows. Purged: 11
-t=0.20 fold=171: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
-t=0.25 fold=171: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
-t=0.30 fold=171: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
-t=0.35 fold=171: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
-t=0.40 fold=171: raw_crossings=149 lockout_rejected=30 barrier_pct_rejected=0 passed=119
-t=0.45 fold=171: raw_crossings=139 lockout_rejected=29 barrier_pct_rejected=0 passed=110
-t=0.50 fold=171: raw_crossings=76 lockout_rejected=16 barrier_pct_rejected=0 passed=60
-t=0.55 fold=171: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
+t=0.20 fold=171: raw_crossings=150 lockout_rejected=24 barrier_pct_rejected=0 passed=126
+t=0.25 fold=171: raw_crossings=150 lockout_rejected=24 barrier_pct_rejected=0 passed=126
+t=0.30 fold=171: raw_crossings=150 lockout_rejected=24 barrier_pct_rejected=0 passed=126
+t=0.35 fold=171: raw_crossings=149 lockout_rejected=24 barrier_pct_rejected=0 passed=125
+t=0.40 fold=171: raw_crossings=148 lockout_rejected=23 barrier_pct_rejected=0 passed=125
+t=0.45 fold=171: raw_crossings=141 lockout_rejected=21 barrier_pct_rejected=0 passed=120
+t=0.50 fold=171: raw_crossings=47 lockout_rejected=3 barrier_pct_rejected=0 passed=44
+t=0.55 fold=171: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
 t=0.60 fold=171: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=171: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=171: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -3205,15 +3205,15 @@ t=0.85 fold=171: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=171: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=171: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 171 | Train Rows: 10507  | Tested on forward 150 rows. Purged: 5
-t=0.20 fold=172: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.25 fold=172: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.30 fold=172: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.35 fold=172: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.40 fold=172: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.45 fold=172: raw_crossings=141 lockout_rejected=36 barrier_pct_rejected=0 passed=105
-t=0.50 fold=172: raw_crossings=73 lockout_rejected=20 barrier_pct_rejected=0 passed=53
-t=0.55 fold=172: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
-t=0.60 fold=172: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.20 fold=172: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.25 fold=172: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.30 fold=172: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.35 fold=172: raw_crossings=149 lockout_rejected=26 barrier_pct_rejected=0 passed=123
+t=0.40 fold=172: raw_crossings=148 lockout_rejected=25 barrier_pct_rejected=0 passed=123
+t=0.45 fold=172: raw_crossings=140 lockout_rejected=23 barrier_pct_rejected=0 passed=117
+t=0.50 fold=172: raw_crossings=49 lockout_rejected=5 barrier_pct_rejected=0 passed=44
+t=0.55 fold=172: raw_crossings=5 lockout_rejected=1 barrier_pct_rejected=0 passed=4
+t=0.60 fold=172: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.65 fold=172: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=172: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=172: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -3222,14 +3222,14 @@ t=0.85 fold=172: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=172: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=172: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 172 | Train Rows: 10529  | Tested on forward 150 rows. Purged: 10
-t=0.20 fold=173: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.25 fold=173: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.30 fold=173: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.35 fold=173: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.40 fold=173: raw_crossings=149 lockout_rejected=38 barrier_pct_rejected=0 passed=111
-t=0.45 fold=173: raw_crossings=141 lockout_rejected=37 barrier_pct_rejected=0 passed=104
-t=0.50 fold=173: raw_crossings=63 lockout_rejected=15 barrier_pct_rejected=0 passed=48
-t=0.55 fold=173: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.20 fold=173: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
+t=0.25 fold=173: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
+t=0.30 fold=173: raw_crossings=149 lockout_rejected=30 barrier_pct_rejected=0 passed=119
+t=0.35 fold=173: raw_crossings=148 lockout_rejected=30 barrier_pct_rejected=0 passed=118
+t=0.40 fold=173: raw_crossings=147 lockout_rejected=30 barrier_pct_rejected=0 passed=117
+t=0.45 fold=173: raw_crossings=141 lockout_rejected=27 barrier_pct_rejected=0 passed=114
+t=0.50 fold=173: raw_crossings=54 lockout_rejected=5 barrier_pct_rejected=0 passed=49
+t=0.55 fold=173: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
 t=0.60 fold=173: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=173: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=173: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -3239,14 +3239,14 @@ t=0.85 fold=173: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=173: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=173: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 173 | Train Rows: 10556  | Tested on forward 150 rows. Purged: 10
-t=0.20 fold=174: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.25 fold=174: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.30 fold=174: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.35 fold=174: raw_crossings=149 lockout_rejected=42 barrier_pct_rejected=0 passed=107
-t=0.40 fold=174: raw_crossings=148 lockout_rejected=42 barrier_pct_rejected=0 passed=106
-t=0.45 fold=174: raw_crossings=140 lockout_rejected=40 barrier_pct_rejected=0 passed=100
-t=0.50 fold=174: raw_crossings=70 lockout_rejected=15 barrier_pct_rejected=0 passed=55
-t=0.55 fold=174: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=174: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
+t=0.25 fold=174: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
+t=0.30 fold=174: raw_crossings=149 lockout_rejected=29 barrier_pct_rejected=0 passed=120
+t=0.35 fold=174: raw_crossings=148 lockout_rejected=29 barrier_pct_rejected=0 passed=119
+t=0.40 fold=174: raw_crossings=147 lockout_rejected=29 barrier_pct_rejected=0 passed=118
+t=0.45 fold=174: raw_crossings=139 lockout_rejected=27 barrier_pct_rejected=0 passed=112
+t=0.50 fold=174: raw_crossings=54 lockout_rejected=6 barrier_pct_rejected=0 passed=48
+t=0.55 fold=174: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
 t=0.60 fold=174: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=174: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=174: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -3256,14 +3256,14 @@ t=0.85 fold=174: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=174: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=174: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 174 | Train Rows: 10576  | Tested on forward 150 rows. Purged: 17
-t=0.20 fold=175: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.25 fold=175: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.30 fold=175: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.35 fold=175: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.40 fold=175: raw_crossings=149 lockout_rejected=44 barrier_pct_rejected=0 passed=105
-t=0.45 fold=175: raw_crossings=141 lockout_rejected=40 barrier_pct_rejected=0 passed=101
-t=0.50 fold=175: raw_crossings=81 lockout_rejected=15 barrier_pct_rejected=0 passed=66
-t=0.55 fold=175: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=175: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.25 fold=175: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.30 fold=175: raw_crossings=149 lockout_rejected=27 barrier_pct_rejected=0 passed=122
+t=0.35 fold=175: raw_crossings=149 lockout_rejected=27 barrier_pct_rejected=0 passed=122
+t=0.40 fold=175: raw_crossings=147 lockout_rejected=27 barrier_pct_rejected=0 passed=120
+t=0.45 fold=175: raw_crossings=143 lockout_rejected=25 barrier_pct_rejected=0 passed=118
+t=0.50 fold=175: raw_crossings=61 lockout_rejected=7 barrier_pct_rejected=0 passed=54
+t=0.55 fold=175: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
 t=0.60 fold=175: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=175: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=175: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -3273,15 +3273,15 @@ t=0.85 fold=175: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=175: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=175: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 175 | Train Rows: 10603  | Tested on forward 150 rows. Purged: 17
-t=0.20 fold=176: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.25 fold=176: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.30 fold=176: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.35 fold=176: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.40 fold=176: raw_crossings=149 lockout_rejected=38 barrier_pct_rejected=0 passed=111
-t=0.45 fold=176: raw_crossings=141 lockout_rejected=34 barrier_pct_rejected=0 passed=107
-t=0.50 fold=176: raw_crossings=76 lockout_rejected=13 barrier_pct_rejected=0 passed=63
-t=0.55 fold=176: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
-t=0.60 fold=176: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=176: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
+t=0.25 fold=176: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
+t=0.30 fold=176: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
+t=0.35 fold=176: raw_crossings=149 lockout_rejected=26 barrier_pct_rejected=0 passed=123
+t=0.40 fold=176: raw_crossings=148 lockout_rejected=26 barrier_pct_rejected=0 passed=122
+t=0.45 fold=176: raw_crossings=144 lockout_rejected=25 barrier_pct_rejected=0 passed=119
+t=0.50 fold=176: raw_crossings=55 lockout_rejected=6 barrier_pct_rejected=0 passed=49
+t=0.55 fold=176: raw_crossings=4 lockout_rejected=1 barrier_pct_rejected=0 passed=3
+t=0.60 fold=176: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=176: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=176: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=176: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -3290,15 +3290,15 @@ t=0.85 fold=176: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=176: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=176: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 176 | Train Rows: 10639  | Tested on forward 150 rows. Purged: 8
-t=0.20 fold=177: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.25 fold=177: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.30 fold=177: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.35 fold=177: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.40 fold=177: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.45 fold=177: raw_crossings=143 lockout_rejected=35 barrier_pct_rejected=0 passed=108
-t=0.50 fold=177: raw_crossings=74 lockout_rejected=12 barrier_pct_rejected=0 passed=62
+t=0.20 fold=177: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.25 fold=177: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.30 fold=177: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.35 fold=177: raw_crossings=149 lockout_rejected=28 barrier_pct_rejected=0 passed=121
+t=0.40 fold=177: raw_crossings=148 lockout_rejected=28 barrier_pct_rejected=0 passed=120
+t=0.45 fold=177: raw_crossings=145 lockout_rejected=26 barrier_pct_rejected=0 passed=119
+t=0.50 fold=177: raw_crossings=55 lockout_rejected=7 barrier_pct_rejected=0 passed=48
 t=0.55 fold=177: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
-t=0.60 fold=177: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.60 fold=177: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=177: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=177: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=177: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -3307,15 +3307,15 @@ t=0.85 fold=177: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=177: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=177: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 177 | Train Rows: 10664  | Tested on forward 150 rows. Purged: 10
-t=0.20 fold=178: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
-t=0.25 fold=178: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
-t=0.30 fold=178: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
-t=0.35 fold=178: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
-t=0.40 fold=178: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
-t=0.45 fold=178: raw_crossings=145 lockout_rejected=28 barrier_pct_rejected=0 passed=117
-t=0.50 fold=178: raw_crossings=69 lockout_rejected=8 barrier_pct_rejected=0 passed=61
-t=0.55 fold=178: raw_crossings=4 lockout_rejected=1 barrier_pct_rejected=0 passed=3
-t=0.60 fold=178: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=178: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.25 fold=178: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.30 fold=178: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.35 fold=178: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.40 fold=178: raw_crossings=148 lockout_rejected=24 barrier_pct_rejected=0 passed=124
+t=0.45 fold=178: raw_crossings=142 lockout_rejected=21 barrier_pct_rejected=0 passed=121
+t=0.50 fold=178: raw_crossings=63 lockout_rejected=9 barrier_pct_rejected=0 passed=54
+t=0.55 fold=178: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
+t=0.60 fold=178: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=178: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=178: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=178: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -3324,15 +3324,15 @@ t=0.85 fold=178: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=178: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=178: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 178 | Train Rows: 10688  | Tested on forward 150 rows. Purged: 13
-t=0.20 fold=179: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.25 fold=179: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.30 fold=179: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.35 fold=179: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.40 fold=179: raw_crossings=149 lockout_rejected=36 barrier_pct_rejected=0 passed=113
-t=0.45 fold=179: raw_crossings=144 lockout_rejected=35 barrier_pct_rejected=0 passed=109
-t=0.50 fold=179: raw_crossings=72 lockout_rejected=13 barrier_pct_rejected=0 passed=59
-t=0.55 fold=179: raw_crossings=4 lockout_rejected=1 barrier_pct_rejected=0 passed=3
-t=0.60 fold=179: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=179: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.25 fold=179: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.30 fold=179: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.35 fold=179: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.40 fold=179: raw_crossings=148 lockout_rejected=24 barrier_pct_rejected=0 passed=124
+t=0.45 fold=179: raw_crossings=145 lockout_rejected=24 barrier_pct_rejected=0 passed=121
+t=0.50 fold=179: raw_crossings=61 lockout_rejected=3 barrier_pct_rejected=0 passed=58
+t=0.55 fold=179: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
+t=0.60 fold=179: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=179: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=179: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=179: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -3341,15 +3341,15 @@ t=0.85 fold=179: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=179: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=179: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 179 | Train Rows: 10715  | Tested on forward 150 rows. Purged: 13
-t=0.20 fold=180: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
-t=0.25 fold=180: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
-t=0.30 fold=180: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
-t=0.35 fold=180: raw_crossings=148 lockout_rejected=30 barrier_pct_rejected=0 passed=118
-t=0.40 fold=180: raw_crossings=148 lockout_rejected=30 barrier_pct_rejected=0 passed=118
-t=0.45 fold=180: raw_crossings=141 lockout_rejected=30 barrier_pct_rejected=0 passed=111
-t=0.50 fold=180: raw_crossings=80 lockout_rejected=13 barrier_pct_rejected=0 passed=67
-t=0.55 fold=180: raw_crossings=4 lockout_rejected=1 barrier_pct_rejected=0 passed=3
-t=0.60 fold=180: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.20 fold=180: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.25 fold=180: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.30 fold=180: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.35 fold=180: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.40 fold=180: raw_crossings=149 lockout_rejected=27 barrier_pct_rejected=0 passed=122
+t=0.45 fold=180: raw_crossings=143 lockout_rejected=26 barrier_pct_rejected=0 passed=117
+t=0.50 fold=180: raw_crossings=65 lockout_rejected=8 barrier_pct_rejected=0 passed=57
+t=0.55 fold=180: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
+t=0.60 fold=180: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=180: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=180: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=180: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -3358,15 +3358,15 @@ t=0.85 fold=180: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=180: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=180: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 180 | Train Rows: 10738  | Tested on forward 150 rows. Purged: 17
-t=0.20 fold=181: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
-t=0.25 fold=181: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
-t=0.30 fold=181: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
-t=0.35 fold=181: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
-t=0.40 fold=181: raw_crossings=147 lockout_rejected=33 barrier_pct_rejected=0 passed=114
-t=0.45 fold=181: raw_crossings=141 lockout_rejected=33 barrier_pct_rejected=0 passed=108
-t=0.50 fold=181: raw_crossings=78 lockout_rejected=15 barrier_pct_rejected=0 passed=63
-t=0.55 fold=181: raw_crossings=5 lockout_rejected=1 barrier_pct_rejected=0 passed=4
-t=0.60 fold=181: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.20 fold=181: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.25 fold=181: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.30 fold=181: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.35 fold=181: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.40 fold=181: raw_crossings=149 lockout_rejected=28 barrier_pct_rejected=0 passed=121
+t=0.45 fold=181: raw_crossings=141 lockout_rejected=25 barrier_pct_rejected=0 passed=116
+t=0.50 fold=181: raw_crossings=62 lockout_rejected=6 barrier_pct_rejected=0 passed=56
+t=0.55 fold=181: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.60 fold=181: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=181: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=181: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=181: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -3375,15 +3375,15 @@ t=0.85 fold=181: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=181: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=181: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 181 | Train Rows: 10770  | Tested on forward 150 rows. Purged: 12
-t=0.20 fold=182: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.25 fold=182: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.30 fold=182: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.35 fold=182: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.40 fold=182: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.45 fold=182: raw_crossings=146 lockout_rejected=35 barrier_pct_rejected=0 passed=111
-t=0.50 fold=182: raw_crossings=76 lockout_rejected=16 barrier_pct_rejected=0 passed=60
-t=0.55 fold=182: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
-t=0.60 fold=182: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=182: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.25 fold=182: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.30 fold=182: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.35 fold=182: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.40 fold=182: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.45 fold=182: raw_crossings=140 lockout_rejected=26 barrier_pct_rejected=0 passed=114
+t=0.50 fold=182: raw_crossings=58 lockout_rejected=7 barrier_pct_rejected=0 passed=51
+t=0.55 fold=182: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.60 fold=182: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=182: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=182: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=182: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -3392,15 +3392,15 @@ t=0.85 fold=182: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=182: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=182: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 182 | Train Rows: 10794  | Tested on forward 150 rows. Purged: 15
-t=0.20 fold=183: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
-t=0.25 fold=183: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
-t=0.30 fold=183: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
-t=0.35 fold=183: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
-t=0.40 fold=183: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
-t=0.45 fold=183: raw_crossings=145 lockout_rejected=30 barrier_pct_rejected=0 passed=115
-t=0.50 fold=183: raw_crossings=83 lockout_rejected=18 barrier_pct_rejected=0 passed=65
-t=0.55 fold=183: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
-t=0.60 fold=183: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=183: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.25 fold=183: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.30 fold=183: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.35 fold=183: raw_crossings=148 lockout_rejected=28 barrier_pct_rejected=0 passed=120
+t=0.40 fold=183: raw_crossings=148 lockout_rejected=28 barrier_pct_rejected=0 passed=120
+t=0.45 fold=183: raw_crossings=140 lockout_rejected=25 barrier_pct_rejected=0 passed=115
+t=0.50 fold=183: raw_crossings=55 lockout_rejected=1 barrier_pct_rejected=0 passed=54
+t=0.55 fold=183: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.60 fold=183: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=183: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=183: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=183: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -3409,15 +3409,15 @@ t=0.85 fold=183: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=183: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=183: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 183 | Train Rows: 10824  | Tested on forward 150 rows. Purged: 12
-t=0.20 fold=184: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.25 fold=184: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.30 fold=184: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.35 fold=184: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.40 fold=184: raw_crossings=149 lockout_rejected=35 barrier_pct_rejected=0 passed=114
-t=0.45 fold=184: raw_crossings=143 lockout_rejected=35 barrier_pct_rejected=0 passed=108
-t=0.50 fold=184: raw_crossings=74 lockout_rejected=12 barrier_pct_rejected=0 passed=62
-t=0.55 fold=184: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
-t=0.60 fold=184: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=184: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.25 fold=184: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.30 fold=184: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.35 fold=184: raw_crossings=148 lockout_rejected=27 barrier_pct_rejected=0 passed=121
+t=0.40 fold=184: raw_crossings=147 lockout_rejected=27 barrier_pct_rejected=0 passed=120
+t=0.45 fold=184: raw_crossings=140 lockout_rejected=25 barrier_pct_rejected=0 passed=115
+t=0.50 fold=184: raw_crossings=60 lockout_rejected=5 barrier_pct_rejected=0 passed=55
+t=0.55 fold=184: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.60 fold=184: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=184: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=184: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=184: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -3426,15 +3426,15 @@ t=0.85 fold=184: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=184: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=184: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 184 | Train Rows: 10856  | Tested on forward 150 rows. Purged: 7
-t=0.20 fold=185: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
-t=0.25 fold=185: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
-t=0.30 fold=185: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
-t=0.35 fold=185: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
-t=0.40 fold=185: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
-t=0.45 fold=185: raw_crossings=144 lockout_rejected=34 barrier_pct_rejected=0 passed=110
-t=0.50 fold=185: raw_crossings=72 lockout_rejected=7 barrier_pct_rejected=0 passed=65
-t=0.55 fold=185: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
-t=0.60 fold=185: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=185: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
+t=0.25 fold=185: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
+t=0.30 fold=185: raw_crossings=149 lockout_rejected=27 barrier_pct_rejected=0 passed=122
+t=0.35 fold=185: raw_crossings=148 lockout_rejected=27 barrier_pct_rejected=0 passed=121
+t=0.40 fold=185: raw_crossings=146 lockout_rejected=26 barrier_pct_rejected=0 passed=120
+t=0.45 fold=185: raw_crossings=138 lockout_rejected=23 barrier_pct_rejected=0 passed=115
+t=0.50 fold=185: raw_crossings=56 lockout_rejected=3 barrier_pct_rejected=0 passed=53
+t=0.55 fold=185: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.60 fold=185: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=185: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=185: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=185: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -3443,15 +3443,15 @@ t=0.85 fold=185: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=185: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=185: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 185 | Train Rows: 10876  | Tested on forward 150 rows. Purged: 14
-t=0.20 fold=186: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
-t=0.25 fold=186: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
-t=0.30 fold=186: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
-t=0.35 fold=186: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
-t=0.40 fold=186: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
-t=0.45 fold=186: raw_crossings=145 lockout_rejected=34 barrier_pct_rejected=0 passed=111
-t=0.50 fold=186: raw_crossings=75 lockout_rejected=13 barrier_pct_rejected=0 passed=62
-t=0.55 fold=186: raw_crossings=6 lockout_rejected=0 barrier_pct_rejected=0 passed=6
-t=0.60 fold=186: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.20 fold=186: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.25 fold=186: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.30 fold=186: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.35 fold=186: raw_crossings=149 lockout_rejected=29 barrier_pct_rejected=0 passed=120
+t=0.40 fold=186: raw_crossings=145 lockout_rejected=28 barrier_pct_rejected=0 passed=117
+t=0.45 fold=186: raw_crossings=136 lockout_rejected=26 barrier_pct_rejected=0 passed=110
+t=0.50 fold=186: raw_crossings=55 lockout_rejected=5 barrier_pct_rejected=0 passed=50
+t=0.55 fold=186: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.60 fold=186: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=186: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=186: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=186: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -3460,14 +3460,14 @@ t=0.85 fold=186: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=186: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=186: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 186 | Train Rows: 10907  | Tested on forward 150 rows. Purged: 10
-t=0.20 fold=187: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.25 fold=187: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.30 fold=187: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.35 fold=187: raw_crossings=149 lockout_rejected=34 barrier_pct_rejected=0 passed=115
-t=0.40 fold=187: raw_crossings=149 lockout_rejected=34 barrier_pct_rejected=0 passed=115
-t=0.45 fold=187: raw_crossings=146 lockout_rejected=34 barrier_pct_rejected=0 passed=112
-t=0.50 fold=187: raw_crossings=84 lockout_rejected=15 barrier_pct_rejected=0 passed=69
-t=0.55 fold=187: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
+t=0.20 fold=187: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.25 fold=187: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.30 fold=187: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.35 fold=187: raw_crossings=147 lockout_rejected=27 barrier_pct_rejected=0 passed=120
+t=0.40 fold=187: raw_crossings=141 lockout_rejected=26 barrier_pct_rejected=0 passed=115
+t=0.45 fold=187: raw_crossings=139 lockout_rejected=25 barrier_pct_rejected=0 passed=114
+t=0.50 fold=187: raw_crossings=60 lockout_rejected=7 barrier_pct_rejected=0 passed=53
+t=0.55 fold=187: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.60 fold=187: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=187: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=187: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -3477,15 +3477,15 @@ t=0.85 fold=187: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=187: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=187: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 187 | Train Rows: 10926  | Tested on forward 150 rows. Purged: 18
-t=0.20 fold=188: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.25 fold=188: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.30 fold=188: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.35 fold=188: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.40 fold=188: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.45 fold=188: raw_crossings=147 lockout_rejected=41 barrier_pct_rejected=0 passed=106
-t=0.50 fold=188: raw_crossings=75 lockout_rejected=10 barrier_pct_rejected=0 passed=65
-t=0.55 fold=188: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
-t=0.60 fold=188: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.20 fold=188: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.25 fold=188: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.30 fold=188: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.35 fold=188: raw_crossings=149 lockout_rejected=28 barrier_pct_rejected=0 passed=121
+t=0.40 fold=188: raw_crossings=143 lockout_rejected=28 barrier_pct_rejected=0 passed=115
+t=0.45 fold=188: raw_crossings=138 lockout_rejected=27 barrier_pct_rejected=0 passed=111
+t=0.50 fold=188: raw_crossings=59 lockout_rejected=6 barrier_pct_rejected=0 passed=53
+t=0.55 fold=188: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.60 fold=188: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=188: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=188: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=188: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -3494,15 +3494,15 @@ t=0.85 fold=188: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=188: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=188: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 188 | Train Rows: 10958  | Tested on forward 150 rows. Purged: 13
-t=0.20 fold=189: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.25 fold=189: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.30 fold=189: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.35 fold=189: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.40 fold=189: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.45 fold=189: raw_crossings=147 lockout_rejected=43 barrier_pct_rejected=0 passed=104
-t=0.50 fold=189: raw_crossings=77 lockout_rejected=14 barrier_pct_rejected=0 passed=63
-t=0.55 fold=189: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
-t=0.60 fold=189: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.20 fold=189: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
+t=0.25 fold=189: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
+t=0.30 fold=189: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
+t=0.35 fold=189: raw_crossings=149 lockout_rejected=26 barrier_pct_rejected=0 passed=123
+t=0.40 fold=189: raw_crossings=141 lockout_rejected=26 barrier_pct_rejected=0 passed=115
+t=0.45 fold=189: raw_crossings=134 lockout_rejected=24 barrier_pct_rejected=0 passed=110
+t=0.50 fold=189: raw_crossings=55 lockout_rejected=4 barrier_pct_rejected=0 passed=51
+t=0.55 fold=189: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.60 fold=189: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=189: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=189: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=189: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -3511,16 +3511,16 @@ t=0.85 fold=189: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=189: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=189: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 189 | Train Rows: 10984  | Tested on forward 150 rows. Purged: 14
-t=0.20 fold=190: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
-t=0.25 fold=190: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
-t=0.30 fold=190: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
-t=0.35 fold=190: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
-t=0.40 fold=190: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
-t=0.45 fold=190: raw_crossings=146 lockout_rejected=44 barrier_pct_rejected=0 passed=102
-t=0.50 fold=190: raw_crossings=72 lockout_rejected=13 barrier_pct_rejected=0 passed=59
-t=0.55 fold=190: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
-t=0.60 fold=190: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
-t=0.65 fold=190: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=190: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
+t=0.25 fold=190: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
+t=0.30 fold=190: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
+t=0.35 fold=190: raw_crossings=149 lockout_rejected=26 barrier_pct_rejected=0 passed=123
+t=0.40 fold=190: raw_crossings=143 lockout_rejected=25 barrier_pct_rejected=0 passed=118
+t=0.45 fold=190: raw_crossings=130 lockout_rejected=24 barrier_pct_rejected=0 passed=106
+t=0.50 fold=190: raw_crossings=50 lockout_rejected=5 barrier_pct_rejected=0 passed=45
+t=0.55 fold=190: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.60 fold=190: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.65 fold=190: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=190: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=190: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.80 fold=190: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -3528,16 +3528,16 @@ t=0.85 fold=190: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=190: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=190: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 190 | Train Rows: 11015  | Tested on forward 150 rows. Purged: 10
-t=0.20 fold=191: raw_crossings=150 lockout_rejected=40 barrier_pct_rejected=0 passed=110
-t=0.25 fold=191: raw_crossings=150 lockout_rejected=40 barrier_pct_rejected=0 passed=110
-t=0.30 fold=191: raw_crossings=150 lockout_rejected=40 barrier_pct_rejected=0 passed=110
-t=0.35 fold=191: raw_crossings=150 lockout_rejected=40 barrier_pct_rejected=0 passed=110
-t=0.40 fold=191: raw_crossings=149 lockout_rejected=40 barrier_pct_rejected=0 passed=109
-t=0.45 fold=191: raw_crossings=145 lockout_rejected=39 barrier_pct_rejected=0 passed=106
-t=0.50 fold=191: raw_crossings=61 lockout_rejected=11 barrier_pct_rejected=0 passed=50
-t=0.55 fold=191: raw_crossings=6 lockout_rejected=0 barrier_pct_rejected=0 passed=6
-t=0.60 fold=191: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
-t=0.65 fold=191: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=191: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
+t=0.25 fold=191: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
+t=0.30 fold=191: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
+t=0.35 fold=191: raw_crossings=148 lockout_rejected=29 barrier_pct_rejected=0 passed=119
+t=0.40 fold=191: raw_crossings=139 lockout_rejected=28 barrier_pct_rejected=0 passed=111
+t=0.45 fold=191: raw_crossings=130 lockout_rejected=24 barrier_pct_rejected=0 passed=106
+t=0.50 fold=191: raw_crossings=55 lockout_rejected=5 barrier_pct_rejected=0 passed=50
+t=0.55 fold=191: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.60 fold=191: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.65 fold=191: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=191: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=191: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.80 fold=191: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -3545,16 +3545,16 @@ t=0.85 fold=191: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=191: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=191: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 191 | Train Rows: 11039  | Tested on forward 150 rows. Purged: 13
-t=0.20 fold=192: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
-t=0.25 fold=192: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
-t=0.30 fold=192: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
-t=0.35 fold=192: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
-t=0.40 fold=192: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
-t=0.45 fold=192: raw_crossings=140 lockout_rejected=40 barrier_pct_rejected=0 passed=100
-t=0.50 fold=192: raw_crossings=52 lockout_rejected=12 barrier_pct_rejected=0 passed=40
-t=0.55 fold=192: raw_crossings=5 lockout_rejected=0 barrier_pct_rejected=0 passed=5
-t=0.60 fold=192: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
-t=0.65 fold=192: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=192: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.25 fold=192: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.30 fold=192: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.35 fold=192: raw_crossings=149 lockout_rejected=26 barrier_pct_rejected=0 passed=123
+t=0.40 fold=192: raw_crossings=143 lockout_rejected=25 barrier_pct_rejected=0 passed=118
+t=0.45 fold=192: raw_crossings=131 lockout_rejected=21 barrier_pct_rejected=0 passed=110
+t=0.50 fold=192: raw_crossings=58 lockout_rejected=5 barrier_pct_rejected=0 passed=53
+t=0.55 fold=192: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.60 fold=192: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.65 fold=192: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=192: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=192: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.80 fold=192: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -3562,16 +3562,16 @@ t=0.85 fold=192: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=192: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=192: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 192 | Train Rows: 11068  | Tested on forward 150 rows. Purged: 11
-t=0.20 fold=193: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.25 fold=193: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.30 fold=193: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.35 fold=193: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.40 fold=193: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.45 fold=193: raw_crossings=137 lockout_rejected=37 barrier_pct_rejected=0 passed=100
-t=0.50 fold=193: raw_crossings=62 lockout_rejected=14 barrier_pct_rejected=0 passed=48
-t=0.55 fold=193: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
-t=0.60 fold=193: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
-t=0.65 fold=193: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=193: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.25 fold=193: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.30 fold=193: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.35 fold=193: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.40 fold=193: raw_crossings=147 lockout_rejected=24 barrier_pct_rejected=0 passed=123
+t=0.45 fold=193: raw_crossings=134 lockout_rejected=19 barrier_pct_rejected=0 passed=115
+t=0.50 fold=193: raw_crossings=50 lockout_rejected=2 barrier_pct_rejected=0 passed=48
+t=0.55 fold=193: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
+t=0.60 fold=193: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.65 fold=193: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=193: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=193: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.80 fold=193: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -3579,16 +3579,16 @@ t=0.85 fold=193: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=193: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=193: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 193 | Train Rows: 11094  | Tested on forward 150 rows. Purged: 12
-t=0.20 fold=194: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.25 fold=194: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.30 fold=194: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.35 fold=194: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.40 fold=194: raw_crossings=149 lockout_rejected=44 barrier_pct_rejected=0 passed=105
-t=0.45 fold=194: raw_crossings=139 lockout_rejected=39 barrier_pct_rejected=0 passed=100
-t=0.50 fold=194: raw_crossings=53 lockout_rejected=11 barrier_pct_rejected=0 passed=42
-t=0.55 fold=194: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
-t=0.60 fold=194: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
-t=0.65 fold=194: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=194: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
+t=0.25 fold=194: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
+t=0.30 fold=194: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
+t=0.35 fold=194: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
+t=0.40 fold=194: raw_crossings=149 lockout_rejected=27 barrier_pct_rejected=0 passed=122
+t=0.45 fold=194: raw_crossings=129 lockout_rejected=19 barrier_pct_rejected=0 passed=110
+t=0.50 fold=194: raw_crossings=54 lockout_rejected=4 barrier_pct_rejected=0 passed=50
+t=0.55 fold=194: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
+t=0.60 fold=194: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.65 fold=194: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=194: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=194: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.80 fold=194: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -3596,14 +3596,14 @@ t=0.85 fold=194: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=194: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=194: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 194 | Train Rows: 11119  | Tested on forward 150 rows. Purged: 14
-t=0.20 fold=195: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.25 fold=195: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.30 fold=195: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.35 fold=195: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.40 fold=195: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.45 fold=195: raw_crossings=141 lockout_rejected=35 barrier_pct_rejected=0 passed=106
-t=0.50 fold=195: raw_crossings=44 lockout_rejected=7 barrier_pct_rejected=0 passed=37
-t=0.55 fold=195: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.20 fold=195: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.25 fold=195: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.30 fold=195: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.35 fold=195: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.40 fold=195: raw_crossings=149 lockout_rejected=29 barrier_pct_rejected=0 passed=120
+t=0.45 fold=195: raw_crossings=138 lockout_rejected=25 barrier_pct_rejected=0 passed=113
+t=0.50 fold=195: raw_crossings=58 lockout_rejected=4 barrier_pct_rejected=0 passed=54
+t=0.55 fold=195: raw_crossings=6 lockout_rejected=0 barrier_pct_rejected=0 passed=6
 t=0.60 fold=195: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=195: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=195: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -3613,14 +3613,14 @@ t=0.85 fold=195: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=195: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=195: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 195 | Train Rows: 11142  | Tested on forward 150 rows. Purged: 18
-t=0.20 fold=196: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
-t=0.25 fold=196: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
-t=0.30 fold=196: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
-t=0.35 fold=196: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
-t=0.40 fold=196: raw_crossings=149 lockout_rejected=37 barrier_pct_rejected=0 passed=112
-t=0.45 fold=196: raw_crossings=135 lockout_rejected=30 barrier_pct_rejected=0 passed=105
-t=0.50 fold=196: raw_crossings=41 lockout_rejected=8 barrier_pct_rejected=0 passed=33
-t=0.55 fold=196: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.20 fold=196: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
+t=0.25 fold=196: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
+t=0.30 fold=196: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
+t=0.35 fold=196: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
+t=0.40 fold=196: raw_crossings=149 lockout_rejected=27 barrier_pct_rejected=0 passed=122
+t=0.45 fold=196: raw_crossings=139 lockout_rejected=24 barrier_pct_rejected=0 passed=115
+t=0.50 fold=196: raw_crossings=65 lockout_rejected=6 barrier_pct_rejected=0 passed=59
+t=0.55 fold=196: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
 t=0.60 fold=196: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=196: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=196: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -3630,14 +3630,14 @@ t=0.85 fold=196: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=196: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=196: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 196 | Train Rows: 11172  | Tested on forward 150 rows. Purged: 15
-t=0.20 fold=197: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.25 fold=197: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.30 fold=197: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.35 fold=197: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.40 fold=197: raw_crossings=149 lockout_rejected=36 barrier_pct_rejected=0 passed=113
-t=0.45 fold=197: raw_crossings=138 lockout_rejected=32 barrier_pct_rejected=0 passed=106
-t=0.50 fold=197: raw_crossings=36 lockout_rejected=7 barrier_pct_rejected=0 passed=29
-t=0.55 fold=197: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.20 fold=197: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.25 fold=197: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.30 fold=197: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.35 fold=197: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.40 fold=197: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.45 fold=197: raw_crossings=134 lockout_rejected=21 barrier_pct_rejected=0 passed=113
+t=0.50 fold=197: raw_crossings=62 lockout_rejected=5 barrier_pct_rejected=0 passed=57
+t=0.55 fold=197: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
 t=0.60 fold=197: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=197: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=197: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -3647,14 +3647,14 @@ t=0.85 fold=197: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=197: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=197: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 197 | Train Rows: 11193  | Tested on forward 150 rows. Purged: 21
-t=0.20 fold=198: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
-t=0.25 fold=198: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
-t=0.30 fold=198: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
-t=0.35 fold=198: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
-t=0.40 fold=198: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
-t=0.45 fold=198: raw_crossings=140 lockout_rejected=33 barrier_pct_rejected=0 passed=107
-t=0.50 fold=198: raw_crossings=35 lockout_rejected=5 barrier_pct_rejected=0 passed=30
-t=0.55 fold=198: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=198: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.25 fold=198: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.30 fold=198: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.35 fold=198: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.40 fold=198: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.45 fold=198: raw_crossings=134 lockout_rejected=21 barrier_pct_rejected=0 passed=113
+t=0.50 fold=198: raw_crossings=67 lockout_rejected=5 barrier_pct_rejected=0 passed=62
+t=0.55 fold=198: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
 t=0.60 fold=198: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=198: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=198: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -3664,14 +3664,14 @@ t=0.85 fold=198: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=198: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=198: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 198 | Train Rows: 11225  | Tested on forward 150 rows. Purged: 16
-t=0.20 fold=199: raw_crossings=150 lockout_rejected=40 barrier_pct_rejected=0 passed=110
-t=0.25 fold=199: raw_crossings=150 lockout_rejected=40 barrier_pct_rejected=0 passed=110
-t=0.30 fold=199: raw_crossings=150 lockout_rejected=40 barrier_pct_rejected=0 passed=110
-t=0.35 fold=199: raw_crossings=149 lockout_rejected=39 barrier_pct_rejected=0 passed=110
-t=0.40 fold=199: raw_crossings=149 lockout_rejected=39 barrier_pct_rejected=0 passed=110
-t=0.45 fold=199: raw_crossings=141 lockout_rejected=35 barrier_pct_rejected=0 passed=106
-t=0.50 fold=199: raw_crossings=41 lockout_rejected=6 barrier_pct_rejected=0 passed=35
-t=0.55 fold=199: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.20 fold=199: raw_crossings=150 lockout_rejected=24 barrier_pct_rejected=0 passed=126
+t=0.25 fold=199: raw_crossings=150 lockout_rejected=24 barrier_pct_rejected=0 passed=126
+t=0.30 fold=199: raw_crossings=150 lockout_rejected=24 barrier_pct_rejected=0 passed=126
+t=0.35 fold=199: raw_crossings=150 lockout_rejected=24 barrier_pct_rejected=0 passed=126
+t=0.40 fold=199: raw_crossings=150 lockout_rejected=24 barrier_pct_rejected=0 passed=126
+t=0.45 fold=199: raw_crossings=136 lockout_rejected=21 barrier_pct_rejected=0 passed=115
+t=0.50 fold=199: raw_crossings=61 lockout_rejected=2 barrier_pct_rejected=0 passed=59
+t=0.55 fold=199: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
 t=0.60 fold=199: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=199: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=199: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -3681,15 +3681,15 @@ t=0.85 fold=199: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=199: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=199: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 199 | Train Rows: 11256  | Tested on forward 150 rows. Purged: 12
-t=0.20 fold=200: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.25 fold=200: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.30 fold=200: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.35 fold=200: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.40 fold=200: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.45 fold=200: raw_crossings=143 lockout_rejected=34 barrier_pct_rejected=0 passed=109
-t=0.50 fold=200: raw_crossings=44 lockout_rejected=6 barrier_pct_rejected=0 passed=38
-t=0.55 fold=200: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
-t=0.60 fold=200: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=200: raw_crossings=150 lockout_rejected=20 barrier_pct_rejected=0 passed=130
+t=0.25 fold=200: raw_crossings=150 lockout_rejected=20 barrier_pct_rejected=0 passed=130
+t=0.30 fold=200: raw_crossings=150 lockout_rejected=20 barrier_pct_rejected=0 passed=130
+t=0.35 fold=200: raw_crossings=150 lockout_rejected=20 barrier_pct_rejected=0 passed=130
+t=0.40 fold=200: raw_crossings=150 lockout_rejected=20 barrier_pct_rejected=0 passed=130
+t=0.45 fold=200: raw_crossings=142 lockout_rejected=19 barrier_pct_rejected=0 passed=123
+t=0.50 fold=200: raw_crossings=77 lockout_rejected=3 barrier_pct_rejected=0 passed=74
+t=0.55 fold=200: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
+t=0.60 fold=200: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=200: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=200: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=200: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -3698,15 +3698,15 @@ t=0.85 fold=200: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=200: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=200: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 200 | Train Rows: 11276  | Tested on forward 150 rows. Purged: 19
-t=0.20 fold=201: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.25 fold=201: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.30 fold=201: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.35 fold=201: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.40 fold=201: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.45 fold=201: raw_crossings=144 lockout_rejected=38 barrier_pct_rejected=0 passed=106
-t=0.50 fold=201: raw_crossings=51 lockout_rejected=8 barrier_pct_rejected=0 passed=43
+t=0.20 fold=201: raw_crossings=150 lockout_rejected=20 barrier_pct_rejected=0 passed=130
+t=0.25 fold=201: raw_crossings=150 lockout_rejected=20 barrier_pct_rejected=0 passed=130
+t=0.30 fold=201: raw_crossings=150 lockout_rejected=20 barrier_pct_rejected=0 passed=130
+t=0.35 fold=201: raw_crossings=150 lockout_rejected=20 barrier_pct_rejected=0 passed=130
+t=0.40 fold=201: raw_crossings=150 lockout_rejected=20 barrier_pct_rejected=0 passed=130
+t=0.45 fold=201: raw_crossings=137 lockout_rejected=18 barrier_pct_rejected=0 passed=119
+t=0.50 fold=201: raw_crossings=71 lockout_rejected=2 barrier_pct_rejected=0 passed=69
 t=0.55 fold=201: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
-t=0.60 fold=201: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.60 fold=201: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=201: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=201: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=201: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -3715,15 +3715,15 @@ t=0.85 fold=201: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=201: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=201: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 201 | Train Rows: 11308  | Tested on forward 150 rows. Purged: 14
-t=0.20 fold=202: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.25 fold=202: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.30 fold=202: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.35 fold=202: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.40 fold=202: raw_crossings=149 lockout_rejected=43 barrier_pct_rejected=0 passed=106
-t=0.45 fold=202: raw_crossings=137 lockout_rejected=37 barrier_pct_rejected=0 passed=100
-t=0.50 fold=202: raw_crossings=42 lockout_rejected=3 barrier_pct_rejected=0 passed=39
-t=0.55 fold=202: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
-t=0.60 fold=202: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=202: raw_crossings=150 lockout_rejected=18 barrier_pct_rejected=0 passed=132
+t=0.25 fold=202: raw_crossings=150 lockout_rejected=18 barrier_pct_rejected=0 passed=132
+t=0.30 fold=202: raw_crossings=150 lockout_rejected=18 barrier_pct_rejected=0 passed=132
+t=0.35 fold=202: raw_crossings=150 lockout_rejected=18 barrier_pct_rejected=0 passed=132
+t=0.40 fold=202: raw_crossings=149 lockout_rejected=18 barrier_pct_rejected=0 passed=131
+t=0.45 fold=202: raw_crossings=140 lockout_rejected=17 barrier_pct_rejected=0 passed=123
+t=0.50 fold=202: raw_crossings=75 lockout_rejected=2 barrier_pct_rejected=0 passed=73
+t=0.55 fold=202: raw_crossings=7 lockout_rejected=0 barrier_pct_rejected=0 passed=7
+t=0.60 fold=202: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=202: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=202: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=202: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -3732,15 +3732,15 @@ t=0.85 fold=202: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=202: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=202: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 202 | Train Rows: 11333  | Tested on forward 150 rows. Purged: 16
-t=0.20 fold=203: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.25 fold=203: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.30 fold=203: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.35 fold=203: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.40 fold=203: raw_crossings=149 lockout_rejected=42 barrier_pct_rejected=0 passed=107
-t=0.45 fold=203: raw_crossings=141 lockout_rejected=36 barrier_pct_rejected=0 passed=105
-t=0.50 fold=203: raw_crossings=40 lockout_rejected=5 barrier_pct_rejected=0 passed=35
-t=0.55 fold=203: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
-t=0.60 fold=203: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=203: raw_crossings=150 lockout_rejected=16 barrier_pct_rejected=0 passed=134
+t=0.25 fold=203: raw_crossings=150 lockout_rejected=16 barrier_pct_rejected=0 passed=134
+t=0.30 fold=203: raw_crossings=150 lockout_rejected=16 barrier_pct_rejected=0 passed=134
+t=0.35 fold=203: raw_crossings=150 lockout_rejected=16 barrier_pct_rejected=0 passed=134
+t=0.40 fold=203: raw_crossings=149 lockout_rejected=16 barrier_pct_rejected=0 passed=133
+t=0.45 fold=203: raw_crossings=141 lockout_rejected=15 barrier_pct_rejected=0 passed=126
+t=0.50 fold=203: raw_crossings=74 lockout_rejected=2 barrier_pct_rejected=0 passed=72
+t=0.55 fold=203: raw_crossings=10 lockout_rejected=1 barrier_pct_rejected=0 passed=9
+t=0.60 fold=203: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=203: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=203: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=203: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -3749,15 +3749,15 @@ t=0.85 fold=203: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=203: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=203: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 203 | Train Rows: 11364  | Tested on forward 150 rows. Purged: 12
-t=0.20 fold=204: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.25 fold=204: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.30 fold=204: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.35 fold=204: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.40 fold=204: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.45 fold=204: raw_crossings=139 lockout_rejected=32 barrier_pct_rejected=0 passed=107
-t=0.50 fold=204: raw_crossings=35 lockout_rejected=5 barrier_pct_rejected=0 passed=30
-t=0.55 fold=204: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
-t=0.60 fold=204: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=204: raw_crossings=150 lockout_rejected=19 barrier_pct_rejected=0 passed=131
+t=0.25 fold=204: raw_crossings=150 lockout_rejected=19 barrier_pct_rejected=0 passed=131
+t=0.30 fold=204: raw_crossings=150 lockout_rejected=19 barrier_pct_rejected=0 passed=131
+t=0.35 fold=204: raw_crossings=150 lockout_rejected=19 barrier_pct_rejected=0 passed=131
+t=0.40 fold=204: raw_crossings=147 lockout_rejected=17 barrier_pct_rejected=0 passed=130
+t=0.45 fold=204: raw_crossings=138 lockout_rejected=16 barrier_pct_rejected=0 passed=122
+t=0.50 fold=204: raw_crossings=74 lockout_rejected=3 barrier_pct_rejected=0 passed=71
+t=0.55 fold=204: raw_crossings=9 lockout_rejected=0 barrier_pct_rejected=0 passed=9
+t=0.60 fold=204: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=204: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=204: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=204: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -3766,15 +3766,15 @@ t=0.85 fold=204: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=204: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=204: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 204 | Train Rows: 11390  | Tested on forward 150 rows. Purged: 13
-t=0.20 fold=205: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
-t=0.25 fold=205: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
-t=0.30 fold=205: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
-t=0.35 fold=205: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
-t=0.40 fold=205: raw_crossings=149 lockout_rejected=37 barrier_pct_rejected=0 passed=112
-t=0.45 fold=205: raw_crossings=136 lockout_rejected=29 barrier_pct_rejected=0 passed=107
-t=0.50 fold=205: raw_crossings=37 lockout_rejected=5 barrier_pct_rejected=0 passed=32
-t=0.55 fold=205: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
-t=0.60 fold=205: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=205: raw_crossings=150 lockout_rejected=18 barrier_pct_rejected=0 passed=132
+t=0.25 fold=205: raw_crossings=150 lockout_rejected=18 barrier_pct_rejected=0 passed=132
+t=0.30 fold=205: raw_crossings=150 lockout_rejected=18 barrier_pct_rejected=0 passed=132
+t=0.35 fold=205: raw_crossings=150 lockout_rejected=18 barrier_pct_rejected=0 passed=132
+t=0.40 fold=205: raw_crossings=148 lockout_rejected=16 barrier_pct_rejected=0 passed=132
+t=0.45 fold=205: raw_crossings=139 lockout_rejected=14 barrier_pct_rejected=0 passed=125
+t=0.50 fold=205: raw_crossings=75 lockout_rejected=2 barrier_pct_rejected=0 passed=73
+t=0.55 fold=205: raw_crossings=8 lockout_rejected=0 barrier_pct_rejected=0 passed=8
+t=0.60 fold=205: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=205: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=205: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=205: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -3783,14 +3783,14 @@ t=0.85 fold=205: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=205: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=205: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 205 | Train Rows: 11414  | Tested on forward 150 rows. Purged: 16
-t=0.20 fold=206: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.25 fold=206: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.30 fold=206: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.35 fold=206: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.40 fold=206: raw_crossings=149 lockout_rejected=35 barrier_pct_rejected=0 passed=114
-t=0.45 fold=206: raw_crossings=136 lockout_rejected=31 barrier_pct_rejected=0 passed=105
-t=0.50 fold=206: raw_crossings=36 lockout_rejected=5 barrier_pct_rejected=0 passed=31
-t=0.55 fold=206: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=206: raw_crossings=150 lockout_rejected=21 barrier_pct_rejected=0 passed=129
+t=0.25 fold=206: raw_crossings=150 lockout_rejected=21 barrier_pct_rejected=0 passed=129
+t=0.30 fold=206: raw_crossings=150 lockout_rejected=21 barrier_pct_rejected=0 passed=129
+t=0.35 fold=206: raw_crossings=150 lockout_rejected=21 barrier_pct_rejected=0 passed=129
+t=0.40 fold=206: raw_crossings=147 lockout_rejected=20 barrier_pct_rejected=0 passed=127
+t=0.45 fold=206: raw_crossings=140 lockout_rejected=17 barrier_pct_rejected=0 passed=123
+t=0.50 fold=206: raw_crossings=73 lockout_rejected=4 barrier_pct_rejected=0 passed=69
+t=0.55 fold=206: raw_crossings=9 lockout_rejected=0 barrier_pct_rejected=0 passed=9
 t=0.60 fold=206: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=206: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=206: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -3800,14 +3800,14 @@ t=0.85 fold=206: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=206: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=206: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 206 | Train Rows: 11444  | Tested on forward 150 rows. Purged: 13
-t=0.20 fold=207: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
-t=0.25 fold=207: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
-t=0.30 fold=207: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
-t=0.35 fold=207: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
-t=0.40 fold=207: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
-t=0.45 fold=207: raw_crossings=147 lockout_rejected=33 barrier_pct_rejected=0 passed=114
-t=0.50 fold=207: raw_crossings=33 lockout_rejected=3 barrier_pct_rejected=0 passed=30
-t=0.55 fold=207: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=207: raw_crossings=150 lockout_rejected=17 barrier_pct_rejected=0 passed=133
+t=0.25 fold=207: raw_crossings=150 lockout_rejected=17 barrier_pct_rejected=0 passed=133
+t=0.30 fold=207: raw_crossings=150 lockout_rejected=17 barrier_pct_rejected=0 passed=133
+t=0.35 fold=207: raw_crossings=150 lockout_rejected=17 barrier_pct_rejected=0 passed=133
+t=0.40 fold=207: raw_crossings=144 lockout_rejected=16 barrier_pct_rejected=0 passed=128
+t=0.45 fold=207: raw_crossings=135 lockout_rejected=15 barrier_pct_rejected=0 passed=120
+t=0.50 fold=207: raw_crossings=72 lockout_rejected=5 barrier_pct_rejected=0 passed=67
+t=0.55 fold=207: raw_crossings=5 lockout_rejected=0 barrier_pct_rejected=0 passed=5
 t=0.60 fold=207: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=207: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=207: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -3817,14 +3817,14 @@ t=0.85 fold=207: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=207: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=207: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 207 | Train Rows: 11477  | Tested on forward 150 rows. Purged: 7
-t=0.20 fold=208: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
-t=0.25 fold=208: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
-t=0.30 fold=208: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
-t=0.35 fold=208: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
-t=0.40 fold=208: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
-t=0.45 fold=208: raw_crossings=146 lockout_rejected=29 barrier_pct_rejected=0 passed=117
-t=0.50 fold=208: raw_crossings=31 lockout_rejected=4 barrier_pct_rejected=0 passed=27
-t=0.55 fold=208: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.20 fold=208: raw_crossings=150 lockout_rejected=22 barrier_pct_rejected=0 passed=128
+t=0.25 fold=208: raw_crossings=150 lockout_rejected=22 barrier_pct_rejected=0 passed=128
+t=0.30 fold=208: raw_crossings=150 lockout_rejected=22 barrier_pct_rejected=0 passed=128
+t=0.35 fold=208: raw_crossings=149 lockout_rejected=22 barrier_pct_rejected=0 passed=127
+t=0.40 fold=208: raw_crossings=143 lockout_rejected=21 barrier_pct_rejected=0 passed=122
+t=0.45 fold=208: raw_crossings=131 lockout_rejected=16 barrier_pct_rejected=0 passed=115
+t=0.50 fold=208: raw_crossings=76 lockout_rejected=6 barrier_pct_rejected=0 passed=70
+t=0.55 fold=208: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
 t=0.60 fold=208: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=208: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=208: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -3834,14 +3834,14 @@ t=0.85 fold=208: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=208: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=208: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 208 | Train Rows: 11491  | Tested on forward 150 rows. Purged: 20
-t=0.20 fold=209: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
-t=0.25 fold=209: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
-t=0.30 fold=209: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
-t=0.35 fold=209: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
-t=0.40 fold=209: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
-t=0.45 fold=209: raw_crossings=143 lockout_rejected=27 barrier_pct_rejected=0 passed=116
-t=0.50 fold=209: raw_crossings=28 lockout_rejected=0 barrier_pct_rejected=0 passed=28
-t=0.55 fold=209: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.20 fold=209: raw_crossings=150 lockout_rejected=20 barrier_pct_rejected=0 passed=130
+t=0.25 fold=209: raw_crossings=150 lockout_rejected=20 barrier_pct_rejected=0 passed=130
+t=0.30 fold=209: raw_crossings=150 lockout_rejected=20 barrier_pct_rejected=0 passed=130
+t=0.35 fold=209: raw_crossings=149 lockout_rejected=20 barrier_pct_rejected=0 passed=129
+t=0.40 fold=209: raw_crossings=143 lockout_rejected=19 barrier_pct_rejected=0 passed=124
+t=0.45 fold=209: raw_crossings=136 lockout_rejected=16 barrier_pct_rejected=0 passed=120
+t=0.50 fold=209: raw_crossings=73 lockout_rejected=8 barrier_pct_rejected=0 passed=65
+t=0.55 fold=209: raw_crossings=6 lockout_rejected=0 barrier_pct_rejected=0 passed=6
 t=0.60 fold=209: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=209: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=209: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -3851,14 +3851,14 @@ t=0.85 fold=209: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=209: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=209: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 209 | Train Rows: 11522  | Tested on forward 150 rows. Purged: 16
-t=0.20 fold=210: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
-t=0.25 fold=210: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
-t=0.30 fold=210: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
-t=0.35 fold=210: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
-t=0.40 fold=210: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
-t=0.45 fold=210: raw_crossings=142 lockout_rejected=26 barrier_pct_rejected=0 passed=116
-t=0.50 fold=210: raw_crossings=31 lockout_rejected=1 barrier_pct_rejected=0 passed=30
-t=0.55 fold=210: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.20 fold=210: raw_crossings=150 lockout_rejected=21 barrier_pct_rejected=0 passed=129
+t=0.25 fold=210: raw_crossings=150 lockout_rejected=21 barrier_pct_rejected=0 passed=129
+t=0.30 fold=210: raw_crossings=150 lockout_rejected=21 barrier_pct_rejected=0 passed=129
+t=0.35 fold=210: raw_crossings=149 lockout_rejected=21 barrier_pct_rejected=0 passed=128
+t=0.40 fold=210: raw_crossings=141 lockout_rejected=20 barrier_pct_rejected=0 passed=121
+t=0.45 fold=210: raw_crossings=132 lockout_rejected=18 barrier_pct_rejected=0 passed=114
+t=0.50 fold=210: raw_crossings=82 lockout_rejected=12 barrier_pct_rejected=0 passed=70
+t=0.55 fold=210: raw_crossings=6 lockout_rejected=0 barrier_pct_rejected=0 passed=6
 t=0.60 fold=210: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=210: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=210: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -3868,14 +3868,14 @@ t=0.85 fold=210: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=210: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=210: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 210 | Train Rows: 11550  | Tested on forward 150 rows. Purged: 15
-t=0.20 fold=211: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
-t=0.25 fold=211: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
-t=0.30 fold=211: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
-t=0.35 fold=211: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
-t=0.40 fold=211: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
-t=0.45 fold=211: raw_crossings=141 lockout_rejected=28 barrier_pct_rejected=0 passed=113
-t=0.50 fold=211: raw_crossings=42 lockout_rejected=1 barrier_pct_rejected=0 passed=41
-t=0.55 fold=211: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=211: raw_crossings=150 lockout_rejected=22 barrier_pct_rejected=0 passed=128
+t=0.25 fold=211: raw_crossings=150 lockout_rejected=22 barrier_pct_rejected=0 passed=128
+t=0.30 fold=211: raw_crossings=150 lockout_rejected=22 barrier_pct_rejected=0 passed=128
+t=0.35 fold=211: raw_crossings=149 lockout_rejected=22 barrier_pct_rejected=0 passed=127
+t=0.40 fold=211: raw_crossings=140 lockout_rejected=21 barrier_pct_rejected=0 passed=119
+t=0.45 fold=211: raw_crossings=132 lockout_rejected=19 barrier_pct_rejected=0 passed=113
+t=0.50 fold=211: raw_crossings=78 lockout_rejected=6 barrier_pct_rejected=0 passed=72
+t=0.55 fold=211: raw_crossings=7 lockout_rejected=0 barrier_pct_rejected=0 passed=7
 t=0.60 fold=211: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=211: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=211: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -3885,14 +3885,14 @@ t=0.85 fold=211: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=211: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=211: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 211 | Train Rows: 11577  | Tested on forward 150 rows. Purged: 15
-t=0.20 fold=212: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
-t=0.25 fold=212: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
-t=0.30 fold=212: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
-t=0.35 fold=212: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
-t=0.40 fold=212: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
-t=0.45 fold=212: raw_crossings=146 lockout_rejected=33 barrier_pct_rejected=0 passed=113
-t=0.50 fold=212: raw_crossings=41 lockout_rejected=1 barrier_pct_rejected=0 passed=40
-t=0.55 fold=212: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.20 fold=212: raw_crossings=150 lockout_rejected=22 barrier_pct_rejected=0 passed=128
+t=0.25 fold=212: raw_crossings=150 lockout_rejected=22 barrier_pct_rejected=0 passed=128
+t=0.30 fold=212: raw_crossings=150 lockout_rejected=22 barrier_pct_rejected=0 passed=128
+t=0.35 fold=212: raw_crossings=150 lockout_rejected=22 barrier_pct_rejected=0 passed=128
+t=0.40 fold=212: raw_crossings=145 lockout_rejected=22 barrier_pct_rejected=0 passed=123
+t=0.45 fold=212: raw_crossings=136 lockout_rejected=19 barrier_pct_rejected=0 passed=117
+t=0.50 fold=212: raw_crossings=84 lockout_rejected=8 barrier_pct_rejected=0 passed=76
+t=0.55 fold=212: raw_crossings=9 lockout_rejected=0 barrier_pct_rejected=0 passed=9
 t=0.60 fold=212: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=212: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=212: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -3902,14 +3902,14 @@ t=0.85 fold=212: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=212: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=212: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 212 | Train Rows: 11610  | Tested on forward 150 rows. Purged: 9
-t=0.20 fold=213: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.25 fold=213: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.30 fold=213: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.35 fold=213: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.40 fold=213: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.45 fold=213: raw_crossings=147 lockout_rejected=38 barrier_pct_rejected=0 passed=109
-t=0.50 fold=213: raw_crossings=53 lockout_rejected=7 barrier_pct_rejected=0 passed=46
-t=0.55 fold=213: raw_crossings=6 lockout_rejected=0 barrier_pct_rejected=0 passed=6
+t=0.20 fold=213: raw_crossings=150 lockout_rejected=21 barrier_pct_rejected=0 passed=129
+t=0.25 fold=213: raw_crossings=150 lockout_rejected=21 barrier_pct_rejected=0 passed=129
+t=0.30 fold=213: raw_crossings=150 lockout_rejected=21 barrier_pct_rejected=0 passed=129
+t=0.35 fold=213: raw_crossings=150 lockout_rejected=21 barrier_pct_rejected=0 passed=129
+t=0.40 fold=213: raw_crossings=146 lockout_rejected=20 barrier_pct_rejected=0 passed=126
+t=0.45 fold=213: raw_crossings=140 lockout_rejected=19 barrier_pct_rejected=0 passed=121
+t=0.50 fold=213: raw_crossings=85 lockout_rejected=7 barrier_pct_rejected=0 passed=78
+t=0.55 fold=213: raw_crossings=7 lockout_rejected=0 barrier_pct_rejected=0 passed=7
 t=0.60 fold=213: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=213: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=213: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -3919,14 +3919,14 @@ t=0.85 fold=213: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=213: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=213: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 213 | Train Rows: 11632  | Tested on forward 150 rows. Purged: 14
-t=0.20 fold=214: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.25 fold=214: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.30 fold=214: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.35 fold=214: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.40 fold=214: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.45 fold=214: raw_crossings=145 lockout_rejected=35 barrier_pct_rejected=0 passed=110
-t=0.50 fold=214: raw_crossings=54 lockout_rejected=9 barrier_pct_rejected=0 passed=45
-t=0.55 fold=214: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
+t=0.20 fold=214: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.25 fold=214: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.30 fold=214: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.35 fold=214: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.40 fold=214: raw_crossings=148 lockout_rejected=25 barrier_pct_rejected=0 passed=123
+t=0.45 fold=214: raw_crossings=144 lockout_rejected=24 barrier_pct_rejected=0 passed=120
+t=0.50 fold=214: raw_crossings=82 lockout_rejected=7 barrier_pct_rejected=0 passed=75
+t=0.55 fold=214: raw_crossings=7 lockout_rejected=0 barrier_pct_rejected=0 passed=7
 t=0.60 fold=214: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=214: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=214: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -3936,14 +3936,14 @@ t=0.85 fold=214: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=214: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=214: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 214 | Train Rows: 11659  | Tested on forward 150 rows. Purged: 14
-t=0.20 fold=215: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.25 fold=215: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.30 fold=215: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.35 fold=215: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.40 fold=215: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.45 fold=215: raw_crossings=147 lockout_rejected=40 barrier_pct_rejected=0 passed=107
-t=0.50 fold=215: raw_crossings=61 lockout_rejected=10 barrier_pct_rejected=0 passed=51
-t=0.55 fold=215: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
+t=0.20 fold=215: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.25 fold=215: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.30 fold=215: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.35 fold=215: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.40 fold=215: raw_crossings=149 lockout_rejected=29 barrier_pct_rejected=0 passed=120
+t=0.45 fold=215: raw_crossings=144 lockout_rejected=29 barrier_pct_rejected=0 passed=115
+t=0.50 fold=215: raw_crossings=74 lockout_rejected=3 barrier_pct_rejected=0 passed=71
+t=0.55 fold=215: raw_crossings=5 lockout_rejected=0 barrier_pct_rejected=0 passed=5
 t=0.60 fold=215: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=215: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=215: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -3953,14 +3953,14 @@ t=0.85 fold=215: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=215: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=215: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 215 | Train Rows: 11676  | Tested on forward 150 rows. Purged: 24
-t=0.20 fold=216: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.25 fold=216: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.30 fold=216: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.35 fold=216: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.40 fold=216: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.45 fold=216: raw_crossings=145 lockout_rejected=46 barrier_pct_rejected=0 passed=99
-t=0.50 fold=216: raw_crossings=60 lockout_rejected=10 barrier_pct_rejected=0 passed=50
-t=0.55 fold=216: raw_crossings=7 lockout_rejected=0 barrier_pct_rejected=0 passed=7
+t=0.20 fold=216: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
+t=0.25 fold=216: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
+t=0.30 fold=216: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
+t=0.35 fold=216: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
+t=0.40 fold=216: raw_crossings=148 lockout_rejected=23 barrier_pct_rejected=0 passed=125
+t=0.45 fold=216: raw_crossings=142 lockout_rejected=22 barrier_pct_rejected=0 passed=120
+t=0.50 fold=216: raw_crossings=74 lockout_rejected=10 barrier_pct_rejected=0 passed=64
+t=0.55 fold=216: raw_crossings=6 lockout_rejected=0 barrier_pct_rejected=0 passed=6
 t=0.60 fold=216: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=216: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=216: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -3970,14 +3970,14 @@ t=0.85 fold=216: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=216: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=216: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 216 | Train Rows: 11715  | Tested on forward 150 rows. Purged: 12
-t=0.20 fold=217: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.25 fold=217: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.30 fold=217: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.35 fold=217: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.40 fold=217: raw_crossings=149 lockout_rejected=44 barrier_pct_rejected=0 passed=105
-t=0.45 fold=217: raw_crossings=144 lockout_rejected=42 barrier_pct_rejected=0 passed=102
-t=0.50 fold=217: raw_crossings=66 lockout_rejected=9 barrier_pct_rejected=0 passed=57
-t=0.55 fold=217: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
+t=0.20 fold=217: raw_crossings=150 lockout_rejected=24 barrier_pct_rejected=0 passed=126
+t=0.25 fold=217: raw_crossings=150 lockout_rejected=24 barrier_pct_rejected=0 passed=126
+t=0.30 fold=217: raw_crossings=150 lockout_rejected=24 barrier_pct_rejected=0 passed=126
+t=0.35 fold=217: raw_crossings=150 lockout_rejected=24 barrier_pct_rejected=0 passed=126
+t=0.40 fold=217: raw_crossings=148 lockout_rejected=24 barrier_pct_rejected=0 passed=124
+t=0.45 fold=217: raw_crossings=143 lockout_rejected=23 barrier_pct_rejected=0 passed=120
+t=0.50 fold=217: raw_crossings=68 lockout_rejected=6 barrier_pct_rejected=0 passed=62
+t=0.55 fold=217: raw_crossings=6 lockout_rejected=0 barrier_pct_rejected=0 passed=6
 t=0.60 fold=217: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=217: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=217: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -3987,15 +3987,15 @@ t=0.85 fold=217: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=217: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=217: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 217 | Train Rows: 11742  | Tested on forward 150 rows. Purged: 12
-t=0.20 fold=218: raw_crossings=150 lockout_rejected=40 barrier_pct_rejected=0 passed=110
-t=0.25 fold=218: raw_crossings=150 lockout_rejected=40 barrier_pct_rejected=0 passed=110
-t=0.30 fold=218: raw_crossings=150 lockout_rejected=40 barrier_pct_rejected=0 passed=110
-t=0.35 fold=218: raw_crossings=150 lockout_rejected=40 barrier_pct_rejected=0 passed=110
-t=0.40 fold=218: raw_crossings=150 lockout_rejected=40 barrier_pct_rejected=0 passed=110
-t=0.45 fold=218: raw_crossings=149 lockout_rejected=42 barrier_pct_rejected=0 passed=107
-t=0.50 fold=218: raw_crossings=53 lockout_rejected=9 barrier_pct_rejected=0 passed=44
-t=0.55 fold=218: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
-t=0.60 fold=218: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=218: raw_crossings=150 lockout_rejected=22 barrier_pct_rejected=0 passed=128
+t=0.25 fold=218: raw_crossings=150 lockout_rejected=22 barrier_pct_rejected=0 passed=128
+t=0.30 fold=218: raw_crossings=150 lockout_rejected=22 barrier_pct_rejected=0 passed=128
+t=0.35 fold=218: raw_crossings=149 lockout_rejected=22 barrier_pct_rejected=0 passed=127
+t=0.40 fold=218: raw_crossings=148 lockout_rejected=22 barrier_pct_rejected=0 passed=126
+t=0.45 fold=218: raw_crossings=143 lockout_rejected=22 barrier_pct_rejected=0 passed=121
+t=0.50 fold=218: raw_crossings=69 lockout_rejected=11 barrier_pct_rejected=0 passed=58
+t=0.55 fold=218: raw_crossings=6 lockout_rejected=0 barrier_pct_rejected=0 passed=6
+t=0.60 fold=218: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=218: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=218: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=218: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -4004,14 +4004,14 @@ t=0.85 fold=218: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=218: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=218: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 218 | Train Rows: 11769  | Tested on forward 150 rows. Purged: 12
-t=0.20 fold=219: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.25 fold=219: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.30 fold=219: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.35 fold=219: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.40 fold=219: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.45 fold=219: raw_crossings=148 lockout_rejected=45 barrier_pct_rejected=0 passed=103
-t=0.50 fold=219: raw_crossings=41 lockout_rejected=6 barrier_pct_rejected=0 passed=35
-t=0.55 fold=219: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
+t=0.20 fold=219: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
+t=0.25 fold=219: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
+t=0.30 fold=219: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
+t=0.35 fold=219: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
+t=0.40 fold=219: raw_crossings=146 lockout_rejected=22 barrier_pct_rejected=0 passed=124
+t=0.45 fold=219: raw_crossings=144 lockout_rejected=22 barrier_pct_rejected=0 passed=122
+t=0.50 fold=219: raw_crossings=71 lockout_rejected=6 barrier_pct_rejected=0 passed=65
+t=0.55 fold=219: raw_crossings=8 lockout_rejected=0 barrier_pct_rejected=0 passed=8
 t=0.60 fold=219: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=219: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=219: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -4021,14 +4021,14 @@ t=0.85 fold=219: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=219: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=219: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 219 | Train Rows: 11790  | Tested on forward 150 rows. Purged: 18
-t=0.20 fold=220: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
-t=0.25 fold=220: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
-t=0.30 fold=220: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
-t=0.35 fold=220: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
-t=0.40 fold=220: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
-t=0.45 fold=220: raw_crossings=146 lockout_rejected=47 barrier_pct_rejected=0 passed=99
-t=0.50 fold=220: raw_crossings=40 lockout_rejected=3 barrier_pct_rejected=0 passed=37
-t=0.55 fold=220: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=220: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.25 fold=220: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.30 fold=220: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.35 fold=220: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.40 fold=220: raw_crossings=149 lockout_rejected=29 barrier_pct_rejected=0 passed=120
+t=0.45 fold=220: raw_crossings=146 lockout_rejected=28 barrier_pct_rejected=0 passed=118
+t=0.50 fold=220: raw_crossings=79 lockout_rejected=16 barrier_pct_rejected=0 passed=63
+t=0.55 fold=220: raw_crossings=8 lockout_rejected=0 barrier_pct_rejected=0 passed=8
 t=0.60 fold=220: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=220: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=220: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -4038,14 +4038,14 @@ t=0.85 fold=220: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=220: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=220: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 220 | Train Rows: 11823  | Tested on forward 150 rows. Purged: 12
-t=0.20 fold=221: raw_crossings=150 lockout_rejected=40 barrier_pct_rejected=0 passed=110
-t=0.25 fold=221: raw_crossings=150 lockout_rejected=40 barrier_pct_rejected=0 passed=110
-t=0.30 fold=221: raw_crossings=150 lockout_rejected=40 barrier_pct_rejected=0 passed=110
-t=0.35 fold=221: raw_crossings=150 lockout_rejected=40 barrier_pct_rejected=0 passed=110
-t=0.40 fold=221: raw_crossings=150 lockout_rejected=40 barrier_pct_rejected=0 passed=110
-t=0.45 fold=221: raw_crossings=147 lockout_rejected=39 barrier_pct_rejected=0 passed=108
-t=0.50 fold=221: raw_crossings=30 lockout_rejected=1 barrier_pct_rejected=0 passed=29
-t=0.55 fold=221: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=221: raw_crossings=150 lockout_rejected=24 barrier_pct_rejected=0 passed=126
+t=0.25 fold=221: raw_crossings=150 lockout_rejected=24 barrier_pct_rejected=0 passed=126
+t=0.30 fold=221: raw_crossings=150 lockout_rejected=24 barrier_pct_rejected=0 passed=126
+t=0.35 fold=221: raw_crossings=150 lockout_rejected=24 barrier_pct_rejected=0 passed=126
+t=0.40 fold=221: raw_crossings=150 lockout_rejected=24 barrier_pct_rejected=0 passed=126
+t=0.45 fold=221: raw_crossings=146 lockout_rejected=23 barrier_pct_rejected=0 passed=123
+t=0.50 fold=221: raw_crossings=69 lockout_rejected=10 barrier_pct_rejected=0 passed=59
+t=0.55 fold=221: raw_crossings=6 lockout_rejected=0 barrier_pct_rejected=0 passed=6
 t=0.60 fold=221: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=221: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=221: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -4055,14 +4055,14 @@ t=0.85 fold=221: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=221: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=221: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 221 | Train Rows: 11850  | Tested on forward 150 rows. Purged: 12
-t=0.20 fold=222: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.25 fold=222: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.30 fold=222: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.35 fold=222: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.40 fold=222: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.45 fold=222: raw_crossings=147 lockout_rejected=41 barrier_pct_rejected=0 passed=106
-t=0.50 fold=222: raw_crossings=38 lockout_rejected=2 barrier_pct_rejected=0 passed=36
-t=0.55 fold=222: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
+t=0.20 fold=222: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.25 fold=222: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.30 fold=222: raw_crossings=149 lockout_rejected=28 barrier_pct_rejected=0 passed=121
+t=0.35 fold=222: raw_crossings=148 lockout_rejected=28 barrier_pct_rejected=0 passed=120
+t=0.40 fold=222: raw_crossings=148 lockout_rejected=28 barrier_pct_rejected=0 passed=120
+t=0.45 fold=222: raw_crossings=143 lockout_rejected=27 barrier_pct_rejected=0 passed=116
+t=0.50 fold=222: raw_crossings=77 lockout_rejected=11 barrier_pct_rejected=0 passed=66
+t=0.55 fold=222: raw_crossings=8 lockout_rejected=0 barrier_pct_rejected=0 passed=8
 t=0.60 fold=222: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=222: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=222: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -4072,14 +4072,14 @@ t=0.85 fold=222: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=222: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=222: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 222 | Train Rows: 11879  | Tested on forward 150 rows. Purged: 10
-t=0.20 fold=223: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.25 fold=223: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.30 fold=223: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.35 fold=223: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.40 fold=223: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.45 fold=223: raw_crossings=146 lockout_rejected=38 barrier_pct_rejected=0 passed=108
-t=0.50 fold=223: raw_crossings=31 lockout_rejected=4 barrier_pct_rejected=0 passed=27
-t=0.55 fold=223: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
+t=0.20 fold=223: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
+t=0.25 fold=223: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
+t=0.30 fold=223: raw_crossings=149 lockout_rejected=27 barrier_pct_rejected=0 passed=122
+t=0.35 fold=223: raw_crossings=148 lockout_rejected=27 barrier_pct_rejected=0 passed=121
+t=0.40 fold=223: raw_crossings=146 lockout_rejected=26 barrier_pct_rejected=0 passed=120
+t=0.45 fold=223: raw_crossings=144 lockout_rejected=26 barrier_pct_rejected=0 passed=118
+t=0.50 fold=223: raw_crossings=85 lockout_rejected=9 barrier_pct_rejected=0 passed=76
+t=0.55 fold=223: raw_crossings=6 lockout_rejected=0 barrier_pct_rejected=0 passed=6
 t=0.60 fold=223: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=223: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=223: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -4089,14 +4089,14 @@ t=0.85 fold=223: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=223: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=223: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 223 | Train Rows: 11903  | Tested on forward 150 rows. Purged: 13
-t=0.20 fold=224: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
-t=0.25 fold=224: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
-t=0.30 fold=224: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
-t=0.35 fold=224: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
-t=0.40 fold=224: raw_crossings=149 lockout_rejected=33 barrier_pct_rejected=0 passed=116
-t=0.45 fold=224: raw_crossings=142 lockout_rejected=30 barrier_pct_rejected=0 passed=112
-t=0.50 fold=224: raw_crossings=30 lockout_rejected=3 barrier_pct_rejected=0 passed=27
-t=0.55 fold=224: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
+t=0.20 fold=224: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.25 fold=224: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.30 fold=224: raw_crossings=149 lockout_rejected=29 barrier_pct_rejected=0 passed=120
+t=0.35 fold=224: raw_crossings=149 lockout_rejected=29 barrier_pct_rejected=0 passed=120
+t=0.40 fold=224: raw_crossings=148 lockout_rejected=29 barrier_pct_rejected=0 passed=119
+t=0.45 fold=224: raw_crossings=142 lockout_rejected=27 barrier_pct_rejected=0 passed=115
+t=0.50 fold=224: raw_crossings=79 lockout_rejected=8 barrier_pct_rejected=0 passed=71
+t=0.55 fold=224: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
 t=0.60 fold=224: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=224: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=224: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -4106,14 +4106,14 @@ t=0.85 fold=224: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=224: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=224: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 224 | Train Rows: 11927  | Tested on forward 150 rows. Purged: 16
-t=0.20 fold=225: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
-t=0.25 fold=225: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
-t=0.30 fold=225: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
-t=0.35 fold=225: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
-t=0.40 fold=225: raw_crossings=149 lockout_rejected=34 barrier_pct_rejected=0 passed=115
-t=0.45 fold=225: raw_crossings=139 lockout_rejected=30 barrier_pct_rejected=0 passed=109
-t=0.50 fold=225: raw_crossings=23 lockout_rejected=1 barrier_pct_rejected=0 passed=22
-t=0.55 fold=225: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.20 fold=225: raw_crossings=150 lockout_rejected=24 barrier_pct_rejected=0 passed=126
+t=0.25 fold=225: raw_crossings=150 lockout_rejected=24 barrier_pct_rejected=0 passed=126
+t=0.30 fold=225: raw_crossings=149 lockout_rejected=24 barrier_pct_rejected=0 passed=125
+t=0.35 fold=225: raw_crossings=148 lockout_rejected=24 barrier_pct_rejected=0 passed=124
+t=0.40 fold=225: raw_crossings=148 lockout_rejected=24 barrier_pct_rejected=0 passed=124
+t=0.45 fold=225: raw_crossings=142 lockout_rejected=23 barrier_pct_rejected=0 passed=119
+t=0.50 fold=225: raw_crossings=74 lockout_rejected=6 barrier_pct_rejected=0 passed=68
+t=0.55 fold=225: raw_crossings=5 lockout_rejected=0 barrier_pct_rejected=0 passed=5
 t=0.60 fold=225: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=225: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=225: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -4123,14 +4123,14 @@ t=0.85 fold=225: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=225: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=225: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 225 | Train Rows: 11957  | Tested on forward 150 rows. Purged: 13
-t=0.20 fold=226: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.25 fold=226: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.30 fold=226: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.35 fold=226: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.40 fold=226: raw_crossings=148 lockout_rejected=38 barrier_pct_rejected=0 passed=110
-t=0.45 fold=226: raw_crossings=133 lockout_rejected=34 barrier_pct_rejected=0 passed=99
-t=0.50 fold=226: raw_crossings=25 lockout_rejected=2 barrier_pct_rejected=0 passed=23
-t=0.55 fold=226: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
+t=0.20 fold=226: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.25 fold=226: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.30 fold=226: raw_crossings=149 lockout_rejected=25 barrier_pct_rejected=0 passed=124
+t=0.35 fold=226: raw_crossings=148 lockout_rejected=25 barrier_pct_rejected=0 passed=123
+t=0.40 fold=226: raw_crossings=147 lockout_rejected=24 barrier_pct_rejected=0 passed=123
+t=0.45 fold=226: raw_crossings=139 lockout_rejected=22 barrier_pct_rejected=0 passed=117
+t=0.50 fold=226: raw_crossings=71 lockout_rejected=6 barrier_pct_rejected=0 passed=65
+t=0.55 fold=226: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
 t=0.60 fold=226: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=226: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=226: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -4140,14 +4140,14 @@ t=0.85 fold=226: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=226: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=226: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 226 | Train Rows: 11980  | Tested on forward 150 rows. Purged: 17
-t=0.20 fold=227: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.25 fold=227: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.30 fold=227: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.35 fold=227: raw_crossings=149 lockout_rejected=41 barrier_pct_rejected=0 passed=108
-t=0.40 fold=227: raw_crossings=149 lockout_rejected=41 barrier_pct_rejected=0 passed=108
-t=0.45 fold=227: raw_crossings=135 lockout_rejected=35 barrier_pct_rejected=0 passed=100
-t=0.50 fold=227: raw_crossings=37 lockout_rejected=4 barrier_pct_rejected=0 passed=33
-t=0.55 fold=227: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
+t=0.20 fold=227: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.25 fold=227: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.30 fold=227: raw_crossings=149 lockout_rejected=26 barrier_pct_rejected=0 passed=123
+t=0.35 fold=227: raw_crossings=148 lockout_rejected=26 barrier_pct_rejected=0 passed=122
+t=0.40 fold=227: raw_crossings=148 lockout_rejected=26 barrier_pct_rejected=0 passed=122
+t=0.45 fold=227: raw_crossings=142 lockout_rejected=22 barrier_pct_rejected=0 passed=120
+t=0.50 fold=227: raw_crossings=75 lockout_rejected=7 barrier_pct_rejected=0 passed=68
+t=0.55 fold=227: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.60 fold=227: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=227: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=227: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -4157,14 +4157,14 @@ t=0.85 fold=227: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=227: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=227: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 227 | Train Rows: 12018  | Tested on forward 150 rows. Purged: 6
-t=0.20 fold=228: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
-t=0.25 fold=228: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
-t=0.30 fold=228: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
-t=0.35 fold=228: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
-t=0.40 fold=228: raw_crossings=149 lockout_rejected=34 barrier_pct_rejected=0 passed=115
-t=0.45 fold=228: raw_crossings=138 lockout_rejected=32 barrier_pct_rejected=0 passed=106
-t=0.50 fold=228: raw_crossings=43 lockout_rejected=4 barrier_pct_rejected=0 passed=39
-t=0.55 fold=228: raw_crossings=5 lockout_rejected=0 barrier_pct_rejected=0 passed=5
+t=0.20 fold=228: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.25 fold=228: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.30 fold=228: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.35 fold=228: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.40 fold=228: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.45 fold=228: raw_crossings=145 lockout_rejected=21 barrier_pct_rejected=0 passed=124
+t=0.50 fold=228: raw_crossings=64 lockout_rejected=4 barrier_pct_rejected=0 passed=60
+t=0.55 fold=228: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
 t=0.60 fold=228: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=228: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=228: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -4174,14 +4174,14 @@ t=0.85 fold=228: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=228: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=228: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 228 | Train Rows: 12038  | Tested on forward 150 rows. Purged: 13
-t=0.20 fold=229: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.25 fold=229: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.30 fold=229: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.35 fold=229: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.40 fold=229: raw_crossings=149 lockout_rejected=35 barrier_pct_rejected=0 passed=114
-t=0.45 fold=229: raw_crossings=142 lockout_rejected=34 barrier_pct_rejected=0 passed=108
-t=0.50 fold=229: raw_crossings=56 lockout_rejected=5 barrier_pct_rejected=0 passed=51
-t=0.55 fold=229: raw_crossings=6 lockout_rejected=0 barrier_pct_rejected=0 passed=6
+t=0.20 fold=229: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
+t=0.25 fold=229: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
+t=0.30 fold=229: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
+t=0.35 fold=229: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
+t=0.40 fold=229: raw_crossings=148 lockout_rejected=31 barrier_pct_rejected=0 passed=117
+t=0.45 fold=229: raw_crossings=143 lockout_rejected=28 barrier_pct_rejected=0 passed=115
+t=0.50 fold=229: raw_crossings=61 lockout_rejected=4 barrier_pct_rejected=0 passed=57
+t=0.55 fold=229: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
 t=0.60 fold=229: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=229: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=229: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -4191,15 +4191,15 @@ t=0.85 fold=229: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=229: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=229: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 229 | Train Rows: 12062  | Tested on forward 150 rows. Purged: 16
-t=0.20 fold=230: raw_crossings=150 lockout_rejected=40 barrier_pct_rejected=0 passed=110
-t=0.25 fold=230: raw_crossings=150 lockout_rejected=40 barrier_pct_rejected=0 passed=110
-t=0.30 fold=230: raw_crossings=150 lockout_rejected=40 barrier_pct_rejected=0 passed=110
-t=0.35 fold=230: raw_crossings=150 lockout_rejected=40 barrier_pct_rejected=0 passed=110
-t=0.40 fold=230: raw_crossings=150 lockout_rejected=40 barrier_pct_rejected=0 passed=110
-t=0.45 fold=230: raw_crossings=145 lockout_rejected=39 barrier_pct_rejected=0 passed=106
-t=0.50 fold=230: raw_crossings=63 lockout_rejected=10 barrier_pct_rejected=0 passed=53
-t=0.55 fold=230: raw_crossings=12 lockout_rejected=0 barrier_pct_rejected=0 passed=12
-t=0.60 fold=230: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
+t=0.20 fold=230: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
+t=0.25 fold=230: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
+t=0.30 fold=230: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
+t=0.35 fold=230: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
+t=0.40 fold=230: raw_crossings=148 lockout_rejected=30 barrier_pct_rejected=0 passed=118
+t=0.45 fold=230: raw_crossings=142 lockout_rejected=29 barrier_pct_rejected=0 passed=113
+t=0.50 fold=230: raw_crossings=58 lockout_rejected=4 barrier_pct_rejected=0 passed=54
+t=0.55 fold=230: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.60 fold=230: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=230: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=230: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=230: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -4208,15 +4208,15 @@ t=0.85 fold=230: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=230: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=230: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 230 | Train Rows: 12093  | Tested on forward 150 rows. Purged: 12
-t=0.20 fold=231: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
-t=0.25 fold=231: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
-t=0.30 fold=231: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
-t=0.35 fold=231: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
-t=0.40 fold=231: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
-t=0.45 fold=231: raw_crossings=146 lockout_rejected=36 barrier_pct_rejected=0 passed=110
-t=0.50 fold=231: raw_crossings=73 lockout_rejected=10 barrier_pct_rejected=0 passed=63
-t=0.55 fold=231: raw_crossings=11 lockout_rejected=0 barrier_pct_rejected=0 passed=11
-t=0.60 fold=231: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
+t=0.20 fold=231: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
+t=0.25 fold=231: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
+t=0.30 fold=231: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
+t=0.35 fold=231: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
+t=0.40 fold=231: raw_crossings=147 lockout_rejected=32 barrier_pct_rejected=0 passed=115
+t=0.45 fold=231: raw_crossings=145 lockout_rejected=31 barrier_pct_rejected=0 passed=114
+t=0.50 fold=231: raw_crossings=56 lockout_rejected=4 barrier_pct_rejected=0 passed=52
+t=0.55 fold=231: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.60 fold=231: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=231: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=231: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=231: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -4225,15 +4225,15 @@ t=0.85 fold=231: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=231: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=231: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 231 | Train Rows: 12115  | Tested on forward 150 rows. Purged: 17
-t=0.20 fold=232: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.25 fold=232: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.30 fold=232: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.35 fold=232: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.40 fold=232: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.45 fold=232: raw_crossings=147 lockout_rejected=35 barrier_pct_rejected=0 passed=112
-t=0.50 fold=232: raw_crossings=68 lockout_rejected=8 barrier_pct_rejected=0 passed=60
-t=0.55 fold=232: raw_crossings=13 lockout_rejected=0 barrier_pct_rejected=0 passed=13
-t=0.60 fold=232: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
+t=0.20 fold=232: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.25 fold=232: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.30 fold=232: raw_crossings=149 lockout_rejected=29 barrier_pct_rejected=0 passed=120
+t=0.35 fold=232: raw_crossings=149 lockout_rejected=29 barrier_pct_rejected=0 passed=120
+t=0.40 fold=232: raw_crossings=147 lockout_rejected=29 barrier_pct_rejected=0 passed=118
+t=0.45 fold=232: raw_crossings=143 lockout_rejected=27 barrier_pct_rejected=0 passed=116
+t=0.50 fold=232: raw_crossings=68 lockout_rejected=7 barrier_pct_rejected=0 passed=61
+t=0.55 fold=232: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.60 fold=232: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=232: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=232: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=232: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -4242,15 +4242,15 @@ t=0.85 fold=232: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=232: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=232: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 232 | Train Rows: 12146  | Tested on forward 150 rows. Purged: 13
-t=0.20 fold=233: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.25 fold=233: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.30 fold=233: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.35 fold=233: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.40 fold=233: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.45 fold=233: raw_crossings=146 lockout_rejected=35 barrier_pct_rejected=0 passed=111
-t=0.50 fold=233: raw_crossings=70 lockout_rejected=10 barrier_pct_rejected=0 passed=60
-t=0.55 fold=233: raw_crossings=17 lockout_rejected=0 barrier_pct_rejected=0 passed=17
-t=0.60 fold=233: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
+t=0.20 fold=233: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
+t=0.25 fold=233: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
+t=0.30 fold=233: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
+t=0.35 fold=233: raw_crossings=149 lockout_rejected=30 barrier_pct_rejected=0 passed=119
+t=0.40 fold=233: raw_crossings=144 lockout_rejected=28 barrier_pct_rejected=0 passed=116
+t=0.45 fold=233: raw_crossings=138 lockout_rejected=27 barrier_pct_rejected=0 passed=111
+t=0.50 fold=233: raw_crossings=58 lockout_rejected=5 barrier_pct_rejected=0 passed=53
+t=0.55 fold=233: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
+t=0.60 fold=233: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=233: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=233: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=233: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -4262,12 +4262,12 @@ Fold 233 | Train Rows: 12174  | Tested on forward 150 rows. Purged: 12
 t=0.20 fold=234: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
 t=0.25 fold=234: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
 t=0.30 fold=234: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
-t=0.35 fold=234: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
-t=0.40 fold=234: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
-t=0.45 fold=234: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
-t=0.50 fold=234: raw_crossings=82 lockout_rejected=9 barrier_pct_rejected=0 passed=73
-t=0.55 fold=234: raw_crossings=19 lockout_rejected=1 barrier_pct_rejected=0 passed=18
-t=0.60 fold=234: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
+t=0.35 fold=234: raw_crossings=146 lockout_rejected=28 barrier_pct_rejected=0 passed=118
+t=0.40 fold=234: raw_crossings=143 lockout_rejected=26 barrier_pct_rejected=0 passed=117
+t=0.45 fold=234: raw_crossings=136 lockout_rejected=25 barrier_pct_rejected=0 passed=111
+t=0.50 fold=234: raw_crossings=61 lockout_rejected=6 barrier_pct_rejected=0 passed=55
+t=0.55 fold=234: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.60 fold=234: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=234: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=234: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=234: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -4276,15 +4276,15 @@ t=0.85 fold=234: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=234: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=234: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 234 | Train Rows: 12202  | Tested on forward 150 rows. Purged: 11
-t=0.20 fold=235: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.25 fold=235: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.30 fold=235: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.35 fold=235: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.40 fold=235: raw_crossings=149 lockout_rejected=35 barrier_pct_rejected=0 passed=114
-t=0.45 fold=235: raw_crossings=145 lockout_rejected=31 barrier_pct_rejected=0 passed=114
-t=0.50 fold=235: raw_crossings=80 lockout_rejected=14 barrier_pct_rejected=0 passed=66
-t=0.55 fold=235: raw_crossings=16 lockout_rejected=0 barrier_pct_rejected=0 passed=16
-t=0.60 fold=235: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
+t=0.20 fold=235: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
+t=0.25 fold=235: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
+t=0.30 fold=235: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
+t=0.35 fold=235: raw_crossings=147 lockout_rejected=32 barrier_pct_rejected=0 passed=115
+t=0.40 fold=235: raw_crossings=145 lockout_rejected=30 barrier_pct_rejected=0 passed=115
+t=0.45 fold=235: raw_crossings=139 lockout_rejected=28 barrier_pct_rejected=0 passed=111
+t=0.50 fold=235: raw_crossings=70 lockout_rejected=7 barrier_pct_rejected=0 passed=63
+t=0.55 fold=235: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.60 fold=235: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=235: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=235: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=235: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -4293,15 +4293,15 @@ t=0.85 fold=235: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=235: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=235: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 235 | Train Rows: 12230  | Tested on forward 150 rows. Purged: 10
-t=0.20 fold=236: raw_crossings=150 lockout_rejected=40 barrier_pct_rejected=0 passed=110
-t=0.25 fold=236: raw_crossings=150 lockout_rejected=40 barrier_pct_rejected=0 passed=110
-t=0.30 fold=236: raw_crossings=150 lockout_rejected=40 barrier_pct_rejected=0 passed=110
-t=0.35 fold=236: raw_crossings=150 lockout_rejected=40 barrier_pct_rejected=0 passed=110
-t=0.40 fold=236: raw_crossings=150 lockout_rejected=40 barrier_pct_rejected=0 passed=110
-t=0.45 fold=236: raw_crossings=147 lockout_rejected=38 barrier_pct_rejected=0 passed=109
-t=0.50 fold=236: raw_crossings=81 lockout_rejected=19 barrier_pct_rejected=0 passed=62
-t=0.55 fold=236: raw_crossings=16 lockout_rejected=0 barrier_pct_rejected=0 passed=16
-t=0.60 fold=236: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.20 fold=236: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
+t=0.25 fold=236: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
+t=0.30 fold=236: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
+t=0.35 fold=236: raw_crossings=147 lockout_rejected=34 barrier_pct_rejected=0 passed=113
+t=0.40 fold=236: raw_crossings=141 lockout_rejected=30 barrier_pct_rejected=0 passed=111
+t=0.45 fold=236: raw_crossings=136 lockout_rejected=29 barrier_pct_rejected=0 passed=107
+t=0.50 fold=236: raw_crossings=65 lockout_rejected=6 barrier_pct_rejected=0 passed=59
+t=0.55 fold=236: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.60 fold=236: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=236: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=236: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=236: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -4310,15 +4310,15 @@ t=0.85 fold=236: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=236: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=236: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 236 | Train Rows: 12254  | Tested on forward 150 rows. Purged: 13
-t=0.20 fold=237: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
-t=0.25 fold=237: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
-t=0.30 fold=237: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
-t=0.35 fold=237: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
-t=0.40 fold=237: raw_crossings=149 lockout_rejected=32 barrier_pct_rejected=0 passed=117
-t=0.45 fold=237: raw_crossings=145 lockout_rejected=32 barrier_pct_rejected=0 passed=113
-t=0.50 fold=237: raw_crossings=83 lockout_rejected=16 barrier_pct_rejected=0 passed=67
-t=0.55 fold=237: raw_crossings=17 lockout_rejected=0 barrier_pct_rejected=0 passed=17
-t=0.60 fold=237: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
+t=0.20 fold=237: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
+t=0.25 fold=237: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
+t=0.30 fold=237: raw_crossings=149 lockout_rejected=39 barrier_pct_rejected=0 passed=110
+t=0.35 fold=237: raw_crossings=144 lockout_rejected=35 barrier_pct_rejected=0 passed=109
+t=0.40 fold=237: raw_crossings=141 lockout_rejected=33 barrier_pct_rejected=0 passed=108
+t=0.45 fold=237: raw_crossings=136 lockout_rejected=31 barrier_pct_rejected=0 passed=105
+t=0.50 fold=237: raw_crossings=56 lockout_rejected=6 barrier_pct_rejected=0 passed=50
+t=0.55 fold=237: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.60 fold=237: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=237: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=237: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=237: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -4327,15 +4327,15 @@ t=0.85 fold=237: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=237: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=237: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 237 | Train Rows: 12281  | Tested on forward 150 rows. Purged: 13
-t=0.20 fold=238: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
-t=0.25 fold=238: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
-t=0.30 fold=238: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
-t=0.35 fold=238: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
-t=0.40 fold=238: raw_crossings=149 lockout_rejected=30 barrier_pct_rejected=0 passed=119
-t=0.45 fold=238: raw_crossings=147 lockout_rejected=30 barrier_pct_rejected=0 passed=117
-t=0.50 fold=238: raw_crossings=77 lockout_rejected=16 barrier_pct_rejected=0 passed=61
-t=0.55 fold=238: raw_crossings=19 lockout_rejected=1 barrier_pct_rejected=0 passed=18
-t=0.60 fold=238: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
+t=0.20 fold=238: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
+t=0.25 fold=238: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
+t=0.30 fold=238: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
+t=0.35 fold=238: raw_crossings=146 lockout_rejected=45 barrier_pct_rejected=0 passed=101
+t=0.40 fold=238: raw_crossings=144 lockout_rejected=43 barrier_pct_rejected=0 passed=101
+t=0.45 fold=238: raw_crossings=138 lockout_rejected=39 barrier_pct_rejected=0 passed=99
+t=0.50 fold=238: raw_crossings=62 lockout_rejected=8 barrier_pct_rejected=0 passed=54
+t=0.55 fold=238: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.60 fold=238: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=238: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=238: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=238: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -4344,15 +4344,15 @@ t=0.85 fold=238: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=238: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=238: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 238 | Train Rows: 12311  | Tested on forward 150 rows. Purged: 10
-t=0.20 fold=239: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
-t=0.25 fold=239: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
-t=0.30 fold=239: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
-t=0.35 fold=239: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
-t=0.40 fold=239: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
-t=0.45 fold=239: raw_crossings=149 lockout_rejected=32 barrier_pct_rejected=0 passed=117
-t=0.50 fold=239: raw_crossings=84 lockout_rejected=17 barrier_pct_rejected=0 passed=67
-t=0.55 fold=239: raw_crossings=13 lockout_rejected=1 barrier_pct_rejected=0 passed=12
-t=0.60 fold=239: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.20 fold=239: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
+t=0.25 fold=239: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
+t=0.30 fold=239: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
+t=0.35 fold=239: raw_crossings=148 lockout_rejected=45 barrier_pct_rejected=0 passed=103
+t=0.40 fold=239: raw_crossings=142 lockout_rejected=39 barrier_pct_rejected=0 passed=103
+t=0.45 fold=239: raw_crossings=138 lockout_rejected=36 barrier_pct_rejected=0 passed=102
+t=0.50 fold=239: raw_crossings=60 lockout_rejected=11 barrier_pct_rejected=0 passed=49
+t=0.55 fold=239: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.60 fold=239: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=239: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=239: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=239: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -4361,14 +4361,14 @@ t=0.85 fold=239: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=239: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=239: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 239 | Train Rows: 12340  | Tested on forward 150 rows. Purged: 8
-t=0.20 fold=240: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
-t=0.25 fold=240: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
-t=0.30 fold=240: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
-t=0.35 fold=240: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
-t=0.40 fold=240: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
-t=0.45 fold=240: raw_crossings=146 lockout_rejected=30 barrier_pct_rejected=0 passed=116
-t=0.50 fold=240: raw_crossings=84 lockout_rejected=18 barrier_pct_rejected=0 passed=66
-t=0.55 fold=240: raw_crossings=14 lockout_rejected=1 barrier_pct_rejected=0 passed=13
+t=0.20 fold=240: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
+t=0.25 fold=240: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
+t=0.30 fold=240: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
+t=0.35 fold=240: raw_crossings=147 lockout_rejected=41 barrier_pct_rejected=0 passed=106
+t=0.40 fold=240: raw_crossings=141 lockout_rejected=36 barrier_pct_rejected=0 passed=105
+t=0.45 fold=240: raw_crossings=139 lockout_rejected=36 barrier_pct_rejected=0 passed=103
+t=0.50 fold=240: raw_crossings=56 lockout_rejected=9 barrier_pct_rejected=0 passed=47
+t=0.55 fold=240: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.60 fold=240: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=240: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=240: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -4378,15 +4378,15 @@ t=0.85 fold=240: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=240: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=240: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 240 | Train Rows: 12367  | Tested on forward 150 rows. Purged: 8
-t=0.20 fold=241: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
-t=0.25 fold=241: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
-t=0.30 fold=241: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
-t=0.35 fold=241: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
-t=0.40 fold=241: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
-t=0.45 fold=241: raw_crossings=146 lockout_rejected=29 barrier_pct_rejected=0 passed=117
-t=0.50 fold=241: raw_crossings=76 lockout_rejected=16 barrier_pct_rejected=0 passed=60
-t=0.55 fold=241: raw_crossings=12 lockout_rejected=1 barrier_pct_rejected=0 passed=11
-t=0.60 fold=241: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=241: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
+t=0.25 fold=241: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
+t=0.30 fold=241: raw_crossings=149 lockout_rejected=44 barrier_pct_rejected=0 passed=105
+t=0.35 fold=241: raw_crossings=148 lockout_rejected=44 barrier_pct_rejected=0 passed=104
+t=0.40 fold=241: raw_crossings=141 lockout_rejected=38 barrier_pct_rejected=0 passed=103
+t=0.45 fold=241: raw_crossings=138 lockout_rejected=36 barrier_pct_rejected=0 passed=102
+t=0.50 fold=241: raw_crossings=57 lockout_rejected=9 barrier_pct_rejected=0 passed=48
+t=0.55 fold=241: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.60 fold=241: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=241: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=241: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=241: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -4395,14 +4395,14 @@ t=0.85 fold=241: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=241: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=241: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 241 | Train Rows: 12385  | Tested on forward 150 rows. Purged: 17
-t=0.20 fold=242: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
-t=0.25 fold=242: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
-t=0.30 fold=242: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
-t=0.35 fold=242: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
-t=0.40 fold=242: raw_crossings=149 lockout_rejected=33 barrier_pct_rejected=0 passed=116
-t=0.45 fold=242: raw_crossings=142 lockout_rejected=32 barrier_pct_rejected=0 passed=110
-t=0.50 fold=242: raw_crossings=75 lockout_rejected=15 barrier_pct_rejected=0 passed=60
-t=0.55 fold=242: raw_crossings=10 lockout_rejected=1 barrier_pct_rejected=0 passed=9
+t=0.20 fold=242: raw_crossings=150 lockout_rejected=46 barrier_pct_rejected=0 passed=104
+t=0.25 fold=242: raw_crossings=150 lockout_rejected=46 barrier_pct_rejected=0 passed=104
+t=0.30 fold=242: raw_crossings=150 lockout_rejected=46 barrier_pct_rejected=0 passed=104
+t=0.35 fold=242: raw_crossings=149 lockout_rejected=46 barrier_pct_rejected=0 passed=103
+t=0.40 fold=242: raw_crossings=143 lockout_rejected=42 barrier_pct_rejected=0 passed=101
+t=0.45 fold=242: raw_crossings=141 lockout_rejected=41 barrier_pct_rejected=0 passed=100
+t=0.50 fold=242: raw_crossings=59 lockout_rejected=8 barrier_pct_rejected=0 passed=51
+t=0.55 fold=242: raw_crossings=5 lockout_rejected=0 barrier_pct_rejected=0 passed=5
 t=0.60 fold=242: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=242: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=242: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -4412,14 +4412,14 @@ t=0.85 fold=242: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=242: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=242: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 242 | Train Rows: 12412  | Tested on forward 150 rows. Purged: 17
-t=0.20 fold=243: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.25 fold=243: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.30 fold=243: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.35 fold=243: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.40 fold=243: raw_crossings=149 lockout_rejected=36 barrier_pct_rejected=0 passed=113
-t=0.45 fold=243: raw_crossings=147 lockout_rejected=35 barrier_pct_rejected=0 passed=112
-t=0.50 fold=243: raw_crossings=74 lockout_rejected=15 barrier_pct_rejected=0 passed=59
-t=0.55 fold=243: raw_crossings=9 lockout_rejected=0 barrier_pct_rejected=0 passed=9
+t=0.20 fold=243: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
+t=0.25 fold=243: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
+t=0.30 fold=243: raw_crossings=149 lockout_rejected=43 barrier_pct_rejected=0 passed=106
+t=0.35 fold=243: raw_crossings=148 lockout_rejected=42 barrier_pct_rejected=0 passed=106
+t=0.40 fold=243: raw_crossings=144 lockout_rejected=39 barrier_pct_rejected=0 passed=105
+t=0.45 fold=243: raw_crossings=142 lockout_rejected=38 barrier_pct_rejected=0 passed=104
+t=0.50 fold=243: raw_crossings=46 lockout_rejected=5 barrier_pct_rejected=0 passed=41
+t=0.55 fold=243: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
 t=0.60 fold=243: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=243: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=243: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -4429,15 +4429,15 @@ t=0.85 fold=243: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=243: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=243: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 243 | Train Rows: 12440  | Tested on forward 150 rows. Purged: 16
-t=0.20 fold=244: raw_crossings=150 lockout_rejected=48 barrier_pct_rejected=0 passed=102
-t=0.25 fold=244: raw_crossings=150 lockout_rejected=48 barrier_pct_rejected=0 passed=102
-t=0.30 fold=244: raw_crossings=150 lockout_rejected=48 barrier_pct_rejected=0 passed=102
-t=0.35 fold=244: raw_crossings=150 lockout_rejected=48 barrier_pct_rejected=0 passed=102
-t=0.40 fold=244: raw_crossings=150 lockout_rejected=48 barrier_pct_rejected=0 passed=102
-t=0.45 fold=244: raw_crossings=145 lockout_rejected=46 barrier_pct_rejected=0 passed=99
-t=0.50 fold=244: raw_crossings=61 lockout_rejected=14 barrier_pct_rejected=0 passed=47
+t=0.20 fold=244: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
+t=0.25 fold=244: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
+t=0.30 fold=244: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
+t=0.35 fold=244: raw_crossings=149 lockout_rejected=37 barrier_pct_rejected=0 passed=112
+t=0.40 fold=244: raw_crossings=148 lockout_rejected=36 barrier_pct_rejected=0 passed=112
+t=0.45 fold=244: raw_crossings=145 lockout_rejected=35 barrier_pct_rejected=0 passed=110
+t=0.50 fold=244: raw_crossings=52 lockout_rejected=3 barrier_pct_rejected=0 passed=49
 t=0.55 fold=244: raw_crossings=5 lockout_rejected=0 barrier_pct_rejected=0 passed=5
-t=0.60 fold=244: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.60 fold=244: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.65 fold=244: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=244: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=244: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -4446,15 +4446,15 @@ t=0.85 fold=244: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=244: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=244: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 244 | Train Rows: 12477  | Tested on forward 150 rows. Purged: 6
-t=0.20 fold=245: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
-t=0.25 fold=245: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
-t=0.30 fold=245: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
-t=0.35 fold=245: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
-t=0.40 fold=245: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
-t=0.45 fold=245: raw_crossings=145 lockout_rejected=43 barrier_pct_rejected=0 passed=102
-t=0.50 fold=245: raw_crossings=62 lockout_rejected=9 barrier_pct_rejected=0 passed=53
-t=0.55 fold=245: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
-t=0.60 fold=245: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.20 fold=245: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
+t=0.25 fold=245: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
+t=0.30 fold=245: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
+t=0.35 fold=245: raw_crossings=149 lockout_rejected=42 barrier_pct_rejected=0 passed=107
+t=0.40 fold=245: raw_crossings=148 lockout_rejected=41 barrier_pct_rejected=0 passed=107
+t=0.45 fold=245: raw_crossings=145 lockout_rejected=39 barrier_pct_rejected=0 passed=106
+t=0.50 fold=245: raw_crossings=50 lockout_rejected=5 barrier_pct_rejected=0 passed=45
+t=0.55 fold=245: raw_crossings=5 lockout_rejected=0 barrier_pct_rejected=0 passed=5
+t=0.60 fold=245: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.65 fold=245: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=245: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=245: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -4463,14 +4463,14 @@ t=0.85 fold=245: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=245: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=245: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 245 | Train Rows: 12502  | Tested on forward 150 rows. Purged: 8
-t=0.20 fold=246: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.25 fold=246: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.30 fold=246: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.35 fold=246: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.40 fold=246: raw_crossings=149 lockout_rejected=41 barrier_pct_rejected=0 passed=108
-t=0.45 fold=246: raw_crossings=146 lockout_rejected=39 barrier_pct_rejected=0 passed=107
-t=0.50 fold=246: raw_crossings=45 lockout_rejected=4 barrier_pct_rejected=0 passed=41
-t=0.55 fold=246: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=246: raw_crossings=150 lockout_rejected=40 barrier_pct_rejected=0 passed=110
+t=0.25 fold=246: raw_crossings=150 lockout_rejected=40 barrier_pct_rejected=0 passed=110
+t=0.30 fold=246: raw_crossings=150 lockout_rejected=40 barrier_pct_rejected=0 passed=110
+t=0.35 fold=246: raw_crossings=149 lockout_rejected=40 barrier_pct_rejected=0 passed=109
+t=0.40 fold=246: raw_crossings=149 lockout_rejected=40 barrier_pct_rejected=0 passed=109
+t=0.45 fold=246: raw_crossings=147 lockout_rejected=39 barrier_pct_rejected=0 passed=108
+t=0.50 fold=246: raw_crossings=55 lockout_rejected=6 barrier_pct_rejected=0 passed=49
+t=0.55 fold=246: raw_crossings=6 lockout_rejected=0 barrier_pct_rejected=0 passed=6
 t=0.60 fold=246: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=246: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=246: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -4480,15 +4480,15 @@ t=0.85 fold=246: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=246: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=246: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 246 | Train Rows: 12530  | Tested on forward 150 rows. Purged: 7
-t=0.20 fold=247: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
-t=0.25 fold=247: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
-t=0.30 fold=247: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
-t=0.35 fold=247: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
-t=0.40 fold=247: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
-t=0.45 fold=247: raw_crossings=147 lockout_rejected=32 barrier_pct_rejected=0 passed=115
-t=0.50 fold=247: raw_crossings=42 lockout_rejected=2 barrier_pct_rejected=0 passed=40
-t=0.55 fold=247: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
-t=0.60 fold=247: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.20 fold=247: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.25 fold=247: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.30 fold=247: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.35 fold=247: raw_crossings=149 lockout_rejected=29 barrier_pct_rejected=0 passed=120
+t=0.40 fold=247: raw_crossings=148 lockout_rejected=29 barrier_pct_rejected=0 passed=119
+t=0.45 fold=247: raw_crossings=144 lockout_rejected=27 barrier_pct_rejected=0 passed=117
+t=0.50 fold=247: raw_crossings=58 lockout_rejected=5 barrier_pct_rejected=0 passed=53
+t=0.55 fold=247: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
+t=0.60 fold=247: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.65 fold=247: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=247: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=247: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -4497,14 +4497,14 @@ t=0.85 fold=247: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=247: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=247: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 247 | Train Rows: 12541  | Tested on forward 150 rows. Purged: 23
-t=0.20 fold=248: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.25 fold=248: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.30 fold=248: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.35 fold=248: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.40 fold=248: raw_crossings=149 lockout_rejected=35 barrier_pct_rejected=0 passed=114
-t=0.45 fold=248: raw_crossings=146 lockout_rejected=33 barrier_pct_rejected=0 passed=113
-t=0.50 fold=248: raw_crossings=44 lockout_rejected=6 barrier_pct_rejected=0 passed=38
-t=0.55 fold=248: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
+t=0.20 fold=248: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
+t=0.25 fold=248: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
+t=0.30 fold=248: raw_crossings=149 lockout_rejected=31 barrier_pct_rejected=0 passed=118
+t=0.35 fold=248: raw_crossings=149 lockout_rejected=31 barrier_pct_rejected=0 passed=118
+t=0.40 fold=248: raw_crossings=149 lockout_rejected=31 barrier_pct_rejected=0 passed=118
+t=0.45 fold=248: raw_crossings=144 lockout_rejected=29 barrier_pct_rejected=0 passed=115
+t=0.50 fold=248: raw_crossings=59 lockout_rejected=3 barrier_pct_rejected=0 passed=56
+t=0.55 fold=248: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.60 fold=248: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=248: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=248: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -4514,14 +4514,14 @@ t=0.85 fold=248: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=248: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=248: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 248 | Train Rows: 12579  | Tested on forward 150 rows. Purged: 12
-t=0.20 fold=249: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
-t=0.25 fold=249: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
-t=0.30 fold=249: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
-t=0.35 fold=249: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
-t=0.40 fold=249: raw_crossings=149 lockout_rejected=30 barrier_pct_rejected=0 passed=119
-t=0.45 fold=249: raw_crossings=149 lockout_rejected=30 barrier_pct_rejected=0 passed=119
-t=0.50 fold=249: raw_crossings=41 lockout_rejected=9 barrier_pct_rejected=0 passed=32
-t=0.55 fold=249: raw_crossings=4 lockout_rejected=1 barrier_pct_rejected=0 passed=3
+t=0.20 fold=249: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
+t=0.25 fold=249: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
+t=0.30 fold=249: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
+t=0.35 fold=249: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
+t=0.40 fold=249: raw_crossings=148 lockout_rejected=29 barrier_pct_rejected=0 passed=119
+t=0.45 fold=249: raw_crossings=143 lockout_rejected=26 barrier_pct_rejected=0 passed=117
+t=0.50 fold=249: raw_crossings=52 lockout_rejected=2 barrier_pct_rejected=0 passed=50
+t=0.55 fold=249: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
 t=0.60 fold=249: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=249: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=249: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -4531,14 +4531,14 @@ t=0.85 fold=249: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=249: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=249: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 249 | Train Rows: 12601  | Tested on forward 150 rows. Purged: 17
-t=0.20 fold=250: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
-t=0.25 fold=250: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
-t=0.30 fold=250: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
-t=0.35 fold=250: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
-t=0.40 fold=250: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
-t=0.45 fold=250: raw_crossings=147 lockout_rejected=28 barrier_pct_rejected=0 passed=119
-t=0.50 fold=250: raw_crossings=50 lockout_rejected=11 barrier_pct_rejected=0 passed=39
-t=0.55 fold=250: raw_crossings=10 lockout_rejected=1 barrier_pct_rejected=0 passed=9
+t=0.20 fold=250: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.25 fold=250: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.30 fold=250: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.35 fold=250: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.40 fold=250: raw_crossings=147 lockout_rejected=24 barrier_pct_rejected=0 passed=123
+t=0.45 fold=250: raw_crossings=140 lockout_rejected=22 barrier_pct_rejected=0 passed=118
+t=0.50 fold=250: raw_crossings=54 lockout_rejected=3 barrier_pct_rejected=0 passed=51
+t=0.55 fold=250: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
 t=0.60 fold=250: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=250: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=250: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -4548,14 +4548,14 @@ t=0.85 fold=250: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=250: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=250: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 250 | Train Rows: 12633  | Tested on forward 150 rows. Purged: 12
-t=0.20 fold=251: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.25 fold=251: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.30 fold=251: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.35 fold=251: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.40 fold=251: raw_crossings=149 lockout_rejected=34 barrier_pct_rejected=0 passed=115
-t=0.45 fold=251: raw_crossings=147 lockout_rejected=34 barrier_pct_rejected=0 passed=113
-t=0.50 fold=251: raw_crossings=44 lockout_rejected=10 barrier_pct_rejected=0 passed=34
-t=0.55 fold=251: raw_crossings=7 lockout_rejected=1 barrier_pct_rejected=0 passed=6
+t=0.20 fold=251: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
+t=0.25 fold=251: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
+t=0.30 fold=251: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
+t=0.35 fold=251: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
+t=0.40 fold=251: raw_crossings=147 lockout_rejected=22 barrier_pct_rejected=0 passed=125
+t=0.45 fold=251: raw_crossings=138 lockout_rejected=20 barrier_pct_rejected=0 passed=118
+t=0.50 fold=251: raw_crossings=58 lockout_rejected=2 barrier_pct_rejected=0 passed=56
+t=0.55 fold=251: raw_crossings=6 lockout_rejected=0 barrier_pct_rejected=0 passed=6
 t=0.60 fold=251: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.65 fold=251: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=251: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -4565,15 +4565,15 @@ t=0.85 fold=251: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=251: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=251: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 251 | Train Rows: 12665  | Tested on forward 150 rows. Purged: 7
-t=0.20 fold=252: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.25 fold=252: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.30 fold=252: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.35 fold=252: raw_crossings=149 lockout_rejected=35 barrier_pct_rejected=0 passed=114
-t=0.40 fold=252: raw_crossings=148 lockout_rejected=34 barrier_pct_rejected=0 passed=114
-t=0.45 fold=252: raw_crossings=145 lockout_rejected=33 barrier_pct_rejected=0 passed=112
-t=0.50 fold=252: raw_crossings=52 lockout_rejected=11 barrier_pct_rejected=0 passed=41
-t=0.55 fold=252: raw_crossings=11 lockout_rejected=2 barrier_pct_rejected=0 passed=9
-t=0.60 fold=252: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.20 fold=252: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
+t=0.25 fold=252: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
+t=0.30 fold=252: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
+t=0.35 fold=252: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
+t=0.40 fold=252: raw_crossings=146 lockout_rejected=24 barrier_pct_rejected=0 passed=122
+t=0.45 fold=252: raw_crossings=139 lockout_rejected=23 barrier_pct_rejected=0 passed=116
+t=0.50 fold=252: raw_crossings=59 lockout_rejected=2 barrier_pct_rejected=0 passed=57
+t=0.55 fold=252: raw_crossings=7 lockout_rejected=1 barrier_pct_rejected=0 passed=6
+t=0.60 fold=252: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.65 fold=252: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=252: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=252: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -4582,15 +4582,15 @@ t=0.85 fold=252: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=252: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=252: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 252 | Train Rows: 12682  | Tested on forward 150 rows. Purged: 17
-t=0.20 fold=253: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.25 fold=253: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.30 fold=253: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.35 fold=253: raw_crossings=149 lockout_rejected=36 barrier_pct_rejected=0 passed=113
-t=0.40 fold=253: raw_crossings=148 lockout_rejected=35 barrier_pct_rejected=0 passed=113
-t=0.45 fold=253: raw_crossings=145 lockout_rejected=34 barrier_pct_rejected=0 passed=111
-t=0.50 fold=253: raw_crossings=52 lockout_rejected=8 barrier_pct_rejected=0 passed=44
-t=0.55 fold=253: raw_crossings=10 lockout_rejected=2 barrier_pct_rejected=0 passed=8
-t=0.60 fold=253: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.20 fold=253: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.25 fold=253: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.30 fold=253: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.35 fold=253: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.40 fold=253: raw_crossings=145 lockout_rejected=30 barrier_pct_rejected=0 passed=115
+t=0.45 fold=253: raw_crossings=143 lockout_rejected=29 barrier_pct_rejected=0 passed=114
+t=0.50 fold=253: raw_crossings=55 lockout_rejected=5 barrier_pct_rejected=0 passed=50
+t=0.55 fold=253: raw_crossings=6 lockout_rejected=0 barrier_pct_rejected=0 passed=6
+t=0.60 fold=253: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
 t=0.65 fold=253: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=253: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=253: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -4599,15 +4599,15 @@ t=0.85 fold=253: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=253: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=253: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 253 | Train Rows: 12714  | Tested on forward 150 rows. Purged: 12
-t=0.20 fold=254: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
-t=0.25 fold=254: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
-t=0.30 fold=254: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
-t=0.35 fold=254: raw_crossings=149 lockout_rejected=33 barrier_pct_rejected=0 passed=116
-t=0.40 fold=254: raw_crossings=149 lockout_rejected=33 barrier_pct_rejected=0 passed=116
-t=0.45 fold=254: raw_crossings=142 lockout_rejected=30 barrier_pct_rejected=0 passed=112
-t=0.50 fold=254: raw_crossings=46 lockout_rejected=4 barrier_pct_rejected=0 passed=42
-t=0.55 fold=254: raw_crossings=7 lockout_rejected=0 barrier_pct_rejected=0 passed=7
-t=0.60 fold=254: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.20 fold=254: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
+t=0.25 fold=254: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
+t=0.30 fold=254: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
+t=0.35 fold=254: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
+t=0.40 fold=254: raw_crossings=148 lockout_rejected=30 barrier_pct_rejected=0 passed=118
+t=0.45 fold=254: raw_crossings=142 lockout_rejected=27 barrier_pct_rejected=0 passed=115
+t=0.50 fold=254: raw_crossings=68 lockout_rejected=6 barrier_pct_rejected=0 passed=62
+t=0.55 fold=254: raw_crossings=6 lockout_rejected=0 barrier_pct_rejected=0 passed=6
+t=0.60 fold=254: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
 t=0.65 fold=254: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=254: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=254: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -4616,15 +4616,15 @@ t=0.85 fold=254: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=254: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=254: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 254 | Train Rows: 12742  | Tested on forward 150 rows. Purged: 11
-t=0.20 fold=255: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.25 fold=255: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.30 fold=255: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.35 fold=255: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.40 fold=255: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.45 fold=255: raw_crossings=149 lockout_rejected=41 barrier_pct_rejected=0 passed=108
-t=0.50 fold=255: raw_crossings=59 lockout_rejected=12 barrier_pct_rejected=0 passed=47
-t=0.55 fold=255: raw_crossings=7 lockout_rejected=0 barrier_pct_rejected=0 passed=7
-t=0.60 fold=255: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.20 fold=255: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
+t=0.25 fold=255: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
+t=0.30 fold=255: raw_crossings=149 lockout_rejected=35 barrier_pct_rejected=0 passed=114
+t=0.35 fold=255: raw_crossings=148 lockout_rejected=34 barrier_pct_rejected=0 passed=114
+t=0.40 fold=255: raw_crossings=148 lockout_rejected=34 barrier_pct_rejected=0 passed=114
+t=0.45 fold=255: raw_crossings=141 lockout_rejected=32 barrier_pct_rejected=0 passed=109
+t=0.50 fold=255: raw_crossings=66 lockout_rejected=6 barrier_pct_rejected=0 passed=60
+t=0.55 fold=255: raw_crossings=9 lockout_rejected=1 barrier_pct_rejected=0 passed=8
+t=0.60 fold=255: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
 t=0.65 fold=255: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=255: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=255: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -4633,14 +4633,14 @@ t=0.85 fold=255: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=255: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=255: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 255 | Train Rows: 12774  | Tested on forward 150 rows. Purged: 6
-t=0.20 fold=256: raw_crossings=150 lockout_rejected=52 barrier_pct_rejected=0 passed=98
-t=0.25 fold=256: raw_crossings=150 lockout_rejected=52 barrier_pct_rejected=0 passed=98
-t=0.30 fold=256: raw_crossings=150 lockout_rejected=52 barrier_pct_rejected=0 passed=98
-t=0.35 fold=256: raw_crossings=149 lockout_rejected=52 barrier_pct_rejected=0 passed=97
-t=0.40 fold=256: raw_crossings=149 lockout_rejected=52 barrier_pct_rejected=0 passed=97
-t=0.45 fold=256: raw_crossings=143 lockout_rejected=50 barrier_pct_rejected=0 passed=93
-t=0.50 fold=256: raw_crossings=65 lockout_rejected=16 barrier_pct_rejected=0 passed=49
-t=0.55 fold=256: raw_crossings=11 lockout_rejected=1 barrier_pct_rejected=0 passed=10
+t=0.20 fold=256: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
+t=0.25 fold=256: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
+t=0.30 fold=256: raw_crossings=149 lockout_rejected=39 barrier_pct_rejected=0 passed=110
+t=0.35 fold=256: raw_crossings=148 lockout_rejected=38 barrier_pct_rejected=0 passed=110
+t=0.40 fold=256: raw_crossings=147 lockout_rejected=37 barrier_pct_rejected=0 passed=110
+t=0.45 fold=256: raw_crossings=143 lockout_rejected=35 barrier_pct_rejected=0 passed=108
+t=0.50 fold=256: raw_crossings=58 lockout_rejected=7 barrier_pct_rejected=0 passed=51
+t=0.55 fold=256: raw_crossings=6 lockout_rejected=1 barrier_pct_rejected=0 passed=5
 t=0.60 fold=256: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.65 fold=256: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=256: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -4650,15 +4650,15 @@ t=0.85 fold=256: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=256: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=256: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 256 | Train Rows: 12797  | Tested on forward 150 rows. Purged: 10
-t=0.20 fold=257: raw_crossings=150 lockout_rejected=50 barrier_pct_rejected=0 passed=100
-t=0.25 fold=257: raw_crossings=150 lockout_rejected=50 barrier_pct_rejected=0 passed=100
-t=0.30 fold=257: raw_crossings=150 lockout_rejected=50 barrier_pct_rejected=0 passed=100
-t=0.35 fold=257: raw_crossings=149 lockout_rejected=50 barrier_pct_rejected=0 passed=99
-t=0.40 fold=257: raw_crossings=149 lockout_rejected=50 barrier_pct_rejected=0 passed=99
-t=0.45 fold=257: raw_crossings=142 lockout_rejected=49 barrier_pct_rejected=0 passed=93
-t=0.50 fold=257: raw_crossings=69 lockout_rejected=17 barrier_pct_rejected=0 passed=52
-t=0.55 fold=257: raw_crossings=11 lockout_rejected=1 barrier_pct_rejected=0 passed=10
-t=0.60 fold=257: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=257: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
+t=0.25 fold=257: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
+t=0.30 fold=257: raw_crossings=149 lockout_rejected=38 barrier_pct_rejected=0 passed=111
+t=0.35 fold=257: raw_crossings=148 lockout_rejected=37 barrier_pct_rejected=0 passed=111
+t=0.40 fold=257: raw_crossings=148 lockout_rejected=37 barrier_pct_rejected=0 passed=111
+t=0.45 fold=257: raw_crossings=138 lockout_rejected=31 barrier_pct_rejected=0 passed=107
+t=0.50 fold=257: raw_crossings=55 lockout_rejected=4 barrier_pct_rejected=0 passed=51
+t=0.55 fold=257: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.60 fold=257: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=257: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=257: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=257: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -4667,15 +4667,15 @@ t=0.85 fold=257: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=257: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=257: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 257 | Train Rows: 12825  | Tested on forward 150 rows. Purged: 9
-t=0.20 fold=258: raw_crossings=150 lockout_rejected=60 barrier_pct_rejected=0 passed=90
-t=0.25 fold=258: raw_crossings=150 lockout_rejected=60 barrier_pct_rejected=0 passed=90
-t=0.30 fold=258: raw_crossings=150 lockout_rejected=60 barrier_pct_rejected=0 passed=90
-t=0.35 fold=258: raw_crossings=148 lockout_rejected=59 barrier_pct_rejected=0 passed=89
-t=0.40 fold=258: raw_crossings=143 lockout_rejected=52 barrier_pct_rejected=0 passed=91
-t=0.45 fold=258: raw_crossings=137 lockout_rejected=50 barrier_pct_rejected=0 passed=87
-t=0.50 fold=258: raw_crossings=78 lockout_rejected=24 barrier_pct_rejected=0 passed=54
-t=0.55 fold=258: raw_crossings=14 lockout_rejected=2 barrier_pct_rejected=0 passed=12
-t=0.60 fold=258: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=258: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
+t=0.25 fold=258: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
+t=0.30 fold=258: raw_crossings=149 lockout_rejected=38 barrier_pct_rejected=0 passed=111
+t=0.35 fold=258: raw_crossings=148 lockout_rejected=37 barrier_pct_rejected=0 passed=111
+t=0.40 fold=258: raw_crossings=147 lockout_rejected=37 barrier_pct_rejected=0 passed=110
+t=0.45 fold=258: raw_crossings=139 lockout_rejected=35 barrier_pct_rejected=0 passed=104
+t=0.50 fold=258: raw_crossings=57 lockout_rejected=4 barrier_pct_rejected=0 passed=53
+t=0.55 fold=258: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.60 fold=258: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=258: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=258: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=258: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -4684,15 +4684,15 @@ t=0.85 fold=258: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=258: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=258: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 258 | Train Rows: 12844  | Tested on forward 150 rows. Purged: 17
-t=0.20 fold=259: raw_crossings=150 lockout_rejected=73 barrier_pct_rejected=0 passed=77
-t=0.25 fold=259: raw_crossings=150 lockout_rejected=73 barrier_pct_rejected=0 passed=77
-t=0.30 fold=259: raw_crossings=150 lockout_rejected=73 barrier_pct_rejected=0 passed=77
-t=0.35 fold=259: raw_crossings=149 lockout_rejected=73 barrier_pct_rejected=0 passed=76
-t=0.40 fold=259: raw_crossings=142 lockout_rejected=66 barrier_pct_rejected=0 passed=76
-t=0.45 fold=259: raw_crossings=139 lockout_rejected=64 barrier_pct_rejected=0 passed=75
-t=0.50 fold=259: raw_crossings=87 lockout_rejected=28 barrier_pct_rejected=0 passed=59
-t=0.55 fold=259: raw_crossings=13 lockout_rejected=1 barrier_pct_rejected=0 passed=12
-t=0.60 fold=259: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=259: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
+t=0.25 fold=259: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
+t=0.30 fold=259: raw_crossings=149 lockout_rejected=35 barrier_pct_rejected=0 passed=114
+t=0.35 fold=259: raw_crossings=148 lockout_rejected=34 barrier_pct_rejected=0 passed=114
+t=0.40 fold=259: raw_crossings=148 lockout_rejected=34 barrier_pct_rejected=0 passed=114
+t=0.45 fold=259: raw_crossings=140 lockout_rejected=33 barrier_pct_rejected=0 passed=107
+t=0.50 fold=259: raw_crossings=56 lockout_rejected=3 barrier_pct_rejected=0 passed=53
+t=0.55 fold=259: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.60 fold=259: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=259: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=259: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=259: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -4701,15 +4701,15 @@ t=0.85 fold=259: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=259: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=259: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 259 | Train Rows: 12874  | Tested on forward 150 rows. Purged: 14
-t=0.20 fold=260: raw_crossings=150 lockout_rejected=70 barrier_pct_rejected=0 passed=80
-t=0.25 fold=260: raw_crossings=150 lockout_rejected=70 barrier_pct_rejected=0 passed=80
-t=0.30 fold=260: raw_crossings=150 lockout_rejected=70 barrier_pct_rejected=0 passed=80
-t=0.35 fold=260: raw_crossings=148 lockout_rejected=69 barrier_pct_rejected=0 passed=79
-t=0.40 fold=260: raw_crossings=143 lockout_rejected=63 barrier_pct_rejected=0 passed=80
-t=0.45 fold=260: raw_crossings=138 lockout_rejected=61 barrier_pct_rejected=0 passed=77
-t=0.50 fold=260: raw_crossings=80 lockout_rejected=26 barrier_pct_rejected=0 passed=54
-t=0.55 fold=260: raw_crossings=10 lockout_rejected=1 barrier_pct_rejected=0 passed=9
-t=0.60 fold=260: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.20 fold=260: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
+t=0.25 fold=260: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
+t=0.30 fold=260: raw_crossings=149 lockout_rejected=31 barrier_pct_rejected=0 passed=118
+t=0.35 fold=260: raw_crossings=148 lockout_rejected=30 barrier_pct_rejected=0 passed=118
+t=0.40 fold=260: raw_crossings=147 lockout_rejected=30 barrier_pct_rejected=0 passed=117
+t=0.45 fold=260: raw_crossings=136 lockout_rejected=24 barrier_pct_rejected=0 passed=112
+t=0.50 fold=260: raw_crossings=50 lockout_rejected=2 barrier_pct_rejected=0 passed=48
+t=0.55 fold=260: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.60 fold=260: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=260: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=260: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=260: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -4718,14 +4718,14 @@ t=0.85 fold=260: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=260: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=260: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 260 | Train Rows: 12900  | Tested on forward 150 rows. Purged: 15
-t=0.20 fold=261: raw_crossings=150 lockout_rejected=62 barrier_pct_rejected=0 passed=88
-t=0.25 fold=261: raw_crossings=150 lockout_rejected=62 barrier_pct_rejected=0 passed=88
-t=0.30 fold=261: raw_crossings=149 lockout_rejected=62 barrier_pct_rejected=0 passed=87
-t=0.35 fold=261: raw_crossings=147 lockout_rejected=60 barrier_pct_rejected=0 passed=87
-t=0.40 fold=261: raw_crossings=143 lockout_rejected=55 barrier_pct_rejected=0 passed=88
-t=0.45 fold=261: raw_crossings=135 lockout_rejected=51 barrier_pct_rejected=0 passed=84
-t=0.50 fold=261: raw_crossings=91 lockout_rejected=28 barrier_pct_rejected=0 passed=63
-t=0.55 fold=261: raw_crossings=10 lockout_rejected=1 barrier_pct_rejected=0 passed=9
+t=0.20 fold=261: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.25 fold=261: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.30 fold=261: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.35 fold=261: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.40 fold=261: raw_crossings=149 lockout_rejected=33 barrier_pct_rejected=0 passed=116
+t=0.45 fold=261: raw_crossings=138 lockout_rejected=28 barrier_pct_rejected=0 passed=110
+t=0.50 fold=261: raw_crossings=54 lockout_rejected=1 barrier_pct_rejected=0 passed=53
+t=0.55 fold=261: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.60 fold=261: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=261: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=261: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -4735,14 +4735,14 @@ t=0.85 fold=261: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=261: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=261: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 261 | Train Rows: 12930  | Tested on forward 150 rows. Purged: 12
-t=0.20 fold=262: raw_crossings=150 lockout_rejected=59 barrier_pct_rejected=0 passed=91
-t=0.25 fold=262: raw_crossings=150 lockout_rejected=59 barrier_pct_rejected=0 passed=91
-t=0.30 fold=262: raw_crossings=150 lockout_rejected=59 barrier_pct_rejected=0 passed=91
-t=0.35 fold=262: raw_crossings=146 lockout_rejected=54 barrier_pct_rejected=0 passed=92
-t=0.40 fold=262: raw_crossings=144 lockout_rejected=52 barrier_pct_rejected=0 passed=92
-t=0.45 fold=262: raw_crossings=137 lockout_rejected=48 barrier_pct_rejected=0 passed=89
-t=0.50 fold=262: raw_crossings=78 lockout_rejected=27 barrier_pct_rejected=0 passed=51
-t=0.55 fold=262: raw_crossings=7 lockout_rejected=0 barrier_pct_rejected=0 passed=7
+t=0.20 fold=262: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.25 fold=262: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.30 fold=262: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.35 fold=262: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.40 fold=262: raw_crossings=149 lockout_rejected=28 barrier_pct_rejected=0 passed=121
+t=0.45 fold=262: raw_crossings=141 lockout_rejected=25 barrier_pct_rejected=0 passed=116
+t=0.50 fold=262: raw_crossings=52 lockout_rejected=1 barrier_pct_rejected=0 passed=51
+t=0.55 fold=262: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
 t=0.60 fold=262: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=262: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=262: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -4752,14 +4752,14 @@ t=0.85 fold=262: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=262: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=262: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 262 | Train Rows: 12959  | Tested on forward 150 rows. Purged: 10
-t=0.20 fold=263: raw_crossings=150 lockout_rejected=64 barrier_pct_rejected=0 passed=86
-t=0.25 fold=263: raw_crossings=150 lockout_rejected=64 barrier_pct_rejected=0 passed=86
-t=0.30 fold=263: raw_crossings=150 lockout_rejected=64 barrier_pct_rejected=0 passed=86
-t=0.35 fold=263: raw_crossings=147 lockout_rejected=61 barrier_pct_rejected=0 passed=86
-t=0.40 fold=263: raw_crossings=144 lockout_rejected=57 barrier_pct_rejected=0 passed=87
-t=0.45 fold=263: raw_crossings=137 lockout_rejected=54 barrier_pct_rejected=0 passed=83
-t=0.50 fold=263: raw_crossings=80 lockout_rejected=29 barrier_pct_rejected=0 passed=51
-t=0.55 fold=263: raw_crossings=10 lockout_rejected=0 barrier_pct_rejected=0 passed=10
+t=0.20 fold=263: raw_crossings=150 lockout_rejected=24 barrier_pct_rejected=0 passed=126
+t=0.25 fold=263: raw_crossings=150 lockout_rejected=24 barrier_pct_rejected=0 passed=126
+t=0.30 fold=263: raw_crossings=150 lockout_rejected=24 barrier_pct_rejected=0 passed=126
+t=0.35 fold=263: raw_crossings=150 lockout_rejected=24 barrier_pct_rejected=0 passed=126
+t=0.40 fold=263: raw_crossings=149 lockout_rejected=24 barrier_pct_rejected=0 passed=125
+t=0.45 fold=263: raw_crossings=144 lockout_rejected=22 barrier_pct_rejected=0 passed=122
+t=0.50 fold=263: raw_crossings=49 lockout_rejected=0 barrier_pct_rejected=0 passed=49
+t=0.55 fold=263: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.60 fold=263: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=263: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=263: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -4769,14 +4769,14 @@ t=0.85 fold=263: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=263: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=263: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 263 | Train Rows: 12984  | Tested on forward 150 rows. Purged: 12
-t=0.20 fold=264: raw_crossings=150 lockout_rejected=54 barrier_pct_rejected=0 passed=96
-t=0.25 fold=264: raw_crossings=150 lockout_rejected=54 barrier_pct_rejected=0 passed=96
-t=0.30 fold=264: raw_crossings=150 lockout_rejected=54 barrier_pct_rejected=0 passed=96
-t=0.35 fold=264: raw_crossings=150 lockout_rejected=54 barrier_pct_rejected=0 passed=96
-t=0.40 fold=264: raw_crossings=150 lockout_rejected=54 barrier_pct_rejected=0 passed=96
-t=0.45 fold=264: raw_crossings=143 lockout_rejected=51 barrier_pct_rejected=0 passed=92
-t=0.50 fold=264: raw_crossings=82 lockout_rejected=24 barrier_pct_rejected=0 passed=58
-t=0.55 fold=264: raw_crossings=8 lockout_rejected=0 barrier_pct_rejected=0 passed=8
+t=0.20 fold=264: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.25 fold=264: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.30 fold=264: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.35 fold=264: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.40 fold=264: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.45 fold=264: raw_crossings=145 lockout_rejected=24 barrier_pct_rejected=0 passed=121
+t=0.50 fold=264: raw_crossings=42 lockout_rejected=0 barrier_pct_rejected=0 passed=42
+t=0.55 fold=264: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.60 fold=264: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=264: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=264: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -4786,15 +4786,15 @@ t=0.85 fold=264: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=264: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=264: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 264 | Train Rows: 13002  | Tested on forward 150 rows. Purged: 21
-t=0.20 fold=265: raw_crossings=150 lockout_rejected=48 barrier_pct_rejected=0 passed=102
-t=0.25 fold=265: raw_crossings=150 lockout_rejected=48 barrier_pct_rejected=0 passed=102
-t=0.30 fold=265: raw_crossings=150 lockout_rejected=48 barrier_pct_rejected=0 passed=102
-t=0.35 fold=265: raw_crossings=150 lockout_rejected=48 barrier_pct_rejected=0 passed=102
-t=0.40 fold=265: raw_crossings=150 lockout_rejected=48 barrier_pct_rejected=0 passed=102
-t=0.45 fold=265: raw_crossings=145 lockout_rejected=45 barrier_pct_rejected=0 passed=100
-t=0.50 fold=265: raw_crossings=65 lockout_rejected=14 barrier_pct_rejected=0 passed=51
-t=0.55 fold=265: raw_crossings=7 lockout_rejected=0 barrier_pct_rejected=0 passed=7
-t=0.60 fold=265: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=265: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
+t=0.25 fold=265: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
+t=0.30 fold=265: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
+t=0.35 fold=265: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
+t=0.40 fold=265: raw_crossings=149 lockout_rejected=26 barrier_pct_rejected=0 passed=123
+t=0.45 fold=265: raw_crossings=144 lockout_rejected=25 barrier_pct_rejected=0 passed=119
+t=0.50 fold=265: raw_crossings=44 lockout_rejected=0 barrier_pct_rejected=0 passed=44
+t=0.55 fold=265: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
+t=0.60 fold=265: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=265: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=265: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=265: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -4803,15 +4803,15 @@ t=0.85 fold=265: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=265: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=265: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 265 | Train Rows: 13031  | Tested on forward 150 rows. Purged: 19
-t=0.20 fold=266: raw_crossings=150 lockout_rejected=46 barrier_pct_rejected=0 passed=104
-t=0.25 fold=266: raw_crossings=150 lockout_rejected=46 barrier_pct_rejected=0 passed=104
-t=0.30 fold=266: raw_crossings=150 lockout_rejected=46 barrier_pct_rejected=0 passed=104
-t=0.35 fold=266: raw_crossings=150 lockout_rejected=46 barrier_pct_rejected=0 passed=104
-t=0.40 fold=266: raw_crossings=148 lockout_rejected=46 barrier_pct_rejected=0 passed=102
-t=0.45 fold=266: raw_crossings=141 lockout_rejected=44 barrier_pct_rejected=0 passed=97
-t=0.50 fold=266: raw_crossings=62 lockout_rejected=12 barrier_pct_rejected=0 passed=50
-t=0.55 fold=266: raw_crossings=6 lockout_rejected=0 barrier_pct_rejected=0 passed=6
-t=0.60 fold=266: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=266: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.25 fold=266: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.30 fold=266: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.35 fold=266: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.40 fold=266: raw_crossings=149 lockout_rejected=32 barrier_pct_rejected=0 passed=117
+t=0.45 fold=266: raw_crossings=144 lockout_rejected=29 barrier_pct_rejected=0 passed=115
+t=0.50 fold=266: raw_crossings=47 lockout_rejected=3 barrier_pct_rejected=0 passed=44
+t=0.55 fold=266: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.60 fold=266: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=266: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=266: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=266: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -4820,14 +4820,14 @@ t=0.85 fold=266: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=266: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=266: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 266 | Train Rows: 13069  | Tested on forward 150 rows. Purged: 8
-t=0.20 fold=267: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.25 fold=267: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.30 fold=267: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.35 fold=267: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.40 fold=267: raw_crossings=148 lockout_rejected=47 barrier_pct_rejected=0 passed=101
-t=0.45 fold=267: raw_crossings=141 lockout_rejected=46 barrier_pct_rejected=0 passed=95
-t=0.50 fold=267: raw_crossings=55 lockout_rejected=13 barrier_pct_rejected=0 passed=42
-t=0.55 fold=267: raw_crossings=7 lockout_rejected=0 barrier_pct_rejected=0 passed=7
+t=0.20 fold=267: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
+t=0.25 fold=267: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
+t=0.30 fold=267: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
+t=0.35 fold=267: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
+t=0.40 fold=267: raw_crossings=149 lockout_rejected=29 barrier_pct_rejected=0 passed=120
+t=0.45 fold=267: raw_crossings=141 lockout_rejected=25 barrier_pct_rejected=0 passed=116
+t=0.50 fold=267: raw_crossings=49 lockout_rejected=3 barrier_pct_rejected=0 passed=46
+t=0.55 fold=267: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
 t=0.60 fold=267: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.65 fold=267: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=267: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -4837,14 +4837,14 @@ t=0.85 fold=267: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=267: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=267: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 267 | Train Rows: 13087  | Tested on forward 150 rows. Purged: 17
-t=0.20 fold=268: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.25 fold=268: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.30 fold=268: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.35 fold=268: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.40 fold=268: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.45 fold=268: raw_crossings=145 lockout_rejected=39 barrier_pct_rejected=0 passed=106
-t=0.50 fold=268: raw_crossings=52 lockout_rejected=6 barrier_pct_rejected=0 passed=46
-t=0.55 fold=268: raw_crossings=8 lockout_rejected=0 barrier_pct_rejected=0 passed=8
+t=0.20 fold=268: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.25 fold=268: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.30 fold=268: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.35 fold=268: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.40 fold=268: raw_crossings=149 lockout_rejected=32 barrier_pct_rejected=0 passed=117
+t=0.45 fold=268: raw_crossings=139 lockout_rejected=28 barrier_pct_rejected=0 passed=111
+t=0.50 fold=268: raw_crossings=51 lockout_rejected=2 barrier_pct_rejected=0 passed=49
+t=0.55 fold=268: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
 t=0.60 fold=268: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.65 fold=268: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=268: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -4854,14 +4854,14 @@ t=0.85 fold=268: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=268: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=268: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 268 | Train Rows: 13117  | Tested on forward 150 rows. Purged: 14
-t=0.20 fold=269: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.25 fold=269: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.30 fold=269: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.35 fold=269: raw_crossings=149 lockout_rejected=38 barrier_pct_rejected=0 passed=111
-t=0.40 fold=269: raw_crossings=149 lockout_rejected=38 barrier_pct_rejected=0 passed=111
-t=0.45 fold=269: raw_crossings=145 lockout_rejected=35 barrier_pct_rejected=0 passed=110
-t=0.50 fold=269: raw_crossings=41 lockout_rejected=4 barrier_pct_rejected=0 passed=37
-t=0.55 fold=269: raw_crossings=6 lockout_rejected=0 barrier_pct_rejected=0 passed=6
+t=0.20 fold=269: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
+t=0.25 fold=269: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
+t=0.30 fold=269: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
+t=0.35 fold=269: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
+t=0.40 fold=269: raw_crossings=149 lockout_rejected=30 barrier_pct_rejected=0 passed=119
+t=0.45 fold=269: raw_crossings=141 lockout_rejected=26 barrier_pct_rejected=0 passed=115
+t=0.50 fold=269: raw_crossings=57 lockout_rejected=3 barrier_pct_rejected=0 passed=54
+t=0.55 fold=269: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
 t=0.60 fold=269: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.65 fold=269: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=269: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -4871,15 +4871,15 @@ t=0.85 fold=269: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=269: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=269: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 269 | Train Rows: 13141  | Tested on forward 150 rows. Purged: 17
-t=0.20 fold=270: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.25 fold=270: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.30 fold=270: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.35 fold=270: raw_crossings=148 lockout_rejected=46 barrier_pct_rejected=0 passed=102
-t=0.40 fold=270: raw_crossings=148 lockout_rejected=46 barrier_pct_rejected=0 passed=102
-t=0.45 fold=270: raw_crossings=141 lockout_rejected=40 barrier_pct_rejected=0 passed=101
-t=0.50 fold=270: raw_crossings=47 lockout_rejected=5 barrier_pct_rejected=0 passed=42
-t=0.55 fold=270: raw_crossings=8 lockout_rejected=0 barrier_pct_rejected=0 passed=8
-t=0.60 fold=270: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.20 fold=270: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
+t=0.25 fold=270: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
+t=0.30 fold=270: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
+t=0.35 fold=270: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
+t=0.40 fold=270: raw_crossings=148 lockout_rejected=35 barrier_pct_rejected=0 passed=113
+t=0.45 fold=270: raw_crossings=140 lockout_rejected=31 barrier_pct_rejected=0 passed=109
+t=0.50 fold=270: raw_crossings=58 lockout_rejected=3 barrier_pct_rejected=0 passed=55
+t=0.55 fold=270: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
+t=0.60 fold=270: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.65 fold=270: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=270: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=270: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -4888,15 +4888,15 @@ t=0.85 fold=270: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=270: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=270: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 270 | Train Rows: 13166  | Tested on forward 150 rows. Purged: 19
-t=0.20 fold=271: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.25 fold=271: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.30 fold=271: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.35 fold=271: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.40 fold=271: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.45 fold=271: raw_crossings=141 lockout_rejected=41 barrier_pct_rejected=0 passed=100
-t=0.50 fold=271: raw_crossings=45 lockout_rejected=9 barrier_pct_rejected=0 passed=36
-t=0.55 fold=271: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
-t=0.60 fold=271: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.20 fold=271: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
+t=0.25 fold=271: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
+t=0.30 fold=271: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
+t=0.35 fold=271: raw_crossings=149 lockout_rejected=29 barrier_pct_rejected=0 passed=120
+t=0.40 fold=271: raw_crossings=147 lockout_rejected=29 barrier_pct_rejected=0 passed=118
+t=0.45 fold=271: raw_crossings=142 lockout_rejected=28 barrier_pct_rejected=0 passed=114
+t=0.50 fold=271: raw_crossings=58 lockout_rejected=2 barrier_pct_rejected=0 passed=56
+t=0.55 fold=271: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.60 fold=271: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.65 fold=271: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=271: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=271: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -4905,14 +4905,14 @@ t=0.85 fold=271: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=271: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=271: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 271 | Train Rows: 13199  | Tested on forward 150 rows. Purged: 13
-t=0.20 fold=272: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.25 fold=272: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.30 fold=272: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.35 fold=272: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.40 fold=272: raw_crossings=149 lockout_rejected=47 barrier_pct_rejected=0 passed=102
-t=0.45 fold=272: raw_crossings=143 lockout_rejected=45 barrier_pct_rejected=0 passed=98
-t=0.50 fold=272: raw_crossings=52 lockout_rejected=14 barrier_pct_rejected=0 passed=38
-t=0.55 fold=272: raw_crossings=4 lockout_rejected=1 barrier_pct_rejected=0 passed=3
+t=0.20 fold=272: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.25 fold=272: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.30 fold=272: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.35 fold=272: raw_crossings=149 lockout_rejected=25 barrier_pct_rejected=0 passed=124
+t=0.40 fold=272: raw_crossings=149 lockout_rejected=25 barrier_pct_rejected=0 passed=124
+t=0.45 fold=272: raw_crossings=143 lockout_rejected=22 barrier_pct_rejected=0 passed=121
+t=0.50 fold=272: raw_crossings=52 lockout_rejected=1 barrier_pct_rejected=0 passed=51
+t=0.55 fold=272: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
 t=0.60 fold=272: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.65 fold=272: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=272: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -4922,14 +4922,14 @@ t=0.85 fold=272: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=272: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=272: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 272 | Train Rows: 13224  | Tested on forward 150 rows. Purged: 15
-t=0.20 fold=273: raw_crossings=150 lockout_rejected=51 barrier_pct_rejected=0 passed=99
-t=0.25 fold=273: raw_crossings=150 lockout_rejected=51 barrier_pct_rejected=0 passed=99
-t=0.30 fold=273: raw_crossings=150 lockout_rejected=51 barrier_pct_rejected=0 passed=99
-t=0.35 fold=273: raw_crossings=150 lockout_rejected=51 barrier_pct_rejected=0 passed=99
-t=0.40 fold=273: raw_crossings=150 lockout_rejected=51 barrier_pct_rejected=0 passed=99
-t=0.45 fold=273: raw_crossings=145 lockout_rejected=48 barrier_pct_rejected=0 passed=97
-t=0.50 fold=273: raw_crossings=48 lockout_rejected=11 barrier_pct_rejected=0 passed=37
-t=0.55 fold=273: raw_crossings=5 lockout_rejected=1 barrier_pct_rejected=0 passed=4
+t=0.20 fold=273: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.25 fold=273: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.30 fold=273: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.35 fold=273: raw_crossings=149 lockout_rejected=24 barrier_pct_rejected=0 passed=125
+t=0.40 fold=273: raw_crossings=146 lockout_rejected=24 barrier_pct_rejected=0 passed=122
+t=0.45 fold=273: raw_crossings=146 lockout_rejected=24 barrier_pct_rejected=0 passed=122
+t=0.50 fold=273: raw_crossings=59 lockout_rejected=6 barrier_pct_rejected=0 passed=53
+t=0.55 fold=273: raw_crossings=4 lockout_rejected=1 barrier_pct_rejected=0 passed=3
 t=0.60 fold=273: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=273: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=273: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -4939,14 +4939,14 @@ t=0.85 fold=273: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=273: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=273: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 273 | Train Rows: 13258  | Tested on forward 150 rows. Purged: 8
-t=0.20 fold=274: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.25 fold=274: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.30 fold=274: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.35 fold=274: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.40 fold=274: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.45 fold=274: raw_crossings=144 lockout_rejected=44 barrier_pct_rejected=0 passed=100
-t=0.50 fold=274: raw_crossings=50 lockout_rejected=14 barrier_pct_rejected=0 passed=36
-t=0.55 fold=274: raw_crossings=5 lockout_rejected=1 barrier_pct_rejected=0 passed=4
+t=0.20 fold=274: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.25 fold=274: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.30 fold=274: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.35 fold=274: raw_crossings=149 lockout_rejected=24 barrier_pct_rejected=0 passed=125
+t=0.40 fold=274: raw_crossings=147 lockout_rejected=24 barrier_pct_rejected=0 passed=123
+t=0.45 fold=274: raw_crossings=145 lockout_rejected=24 barrier_pct_rejected=0 passed=121
+t=0.50 fold=274: raw_crossings=65 lockout_rejected=8 barrier_pct_rejected=0 passed=57
+t=0.55 fold=274: raw_crossings=5 lockout_rejected=0 barrier_pct_rejected=0 passed=5
 t=0.60 fold=274: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=274: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=274: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -4956,14 +4956,14 @@ t=0.85 fold=274: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=274: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=274: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 274 | Train Rows: 13276  | Tested on forward 150 rows. Purged: 17
-t=0.20 fold=275: raw_crossings=150 lockout_rejected=48 barrier_pct_rejected=0 passed=102
-t=0.25 fold=275: raw_crossings=150 lockout_rejected=48 barrier_pct_rejected=0 passed=102
-t=0.30 fold=275: raw_crossings=150 lockout_rejected=48 barrier_pct_rejected=0 passed=102
-t=0.35 fold=275: raw_crossings=150 lockout_rejected=48 barrier_pct_rejected=0 passed=102
-t=0.40 fold=275: raw_crossings=148 lockout_rejected=47 barrier_pct_rejected=0 passed=101
-t=0.45 fold=275: raw_crossings=141 lockout_rejected=44 barrier_pct_rejected=0 passed=97
-t=0.50 fold=275: raw_crossings=51 lockout_rejected=16 barrier_pct_rejected=0 passed=35
-t=0.55 fold=275: raw_crossings=7 lockout_rejected=1 barrier_pct_rejected=0 passed=6
+t=0.20 fold=275: raw_crossings=150 lockout_rejected=24 barrier_pct_rejected=0 passed=126
+t=0.25 fold=275: raw_crossings=150 lockout_rejected=24 barrier_pct_rejected=0 passed=126
+t=0.30 fold=275: raw_crossings=150 lockout_rejected=24 barrier_pct_rejected=0 passed=126
+t=0.35 fold=275: raw_crossings=150 lockout_rejected=24 barrier_pct_rejected=0 passed=126
+t=0.40 fold=275: raw_crossings=149 lockout_rejected=23 barrier_pct_rejected=0 passed=126
+t=0.45 fold=275: raw_crossings=145 lockout_rejected=23 barrier_pct_rejected=0 passed=122
+t=0.50 fold=275: raw_crossings=54 lockout_rejected=6 barrier_pct_rejected=0 passed=48
+t=0.55 fold=275: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
 t=0.60 fold=275: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=275: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=275: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -4973,15 +4973,15 @@ t=0.85 fold=275: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=275: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=275: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 275 | Train Rows: 13311  | Tested on forward 150 rows. Purged: 9
-t=0.20 fold=276: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.25 fold=276: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.30 fold=276: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.35 fold=276: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.40 fold=276: raw_crossings=148 lockout_rejected=38 barrier_pct_rejected=0 passed=110
-t=0.45 fold=276: raw_crossings=139 lockout_rejected=34 barrier_pct_rejected=0 passed=105
-t=0.50 fold=276: raw_crossings=49 lockout_rejected=9 barrier_pct_rejected=0 passed=40
-t=0.55 fold=276: raw_crossings=11 lockout_rejected=2 barrier_pct_rejected=0 passed=9
-t=0.60 fold=276: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.20 fold=276: raw_crossings=150 lockout_rejected=19 barrier_pct_rejected=0 passed=131
+t=0.25 fold=276: raw_crossings=150 lockout_rejected=19 barrier_pct_rejected=0 passed=131
+t=0.30 fold=276: raw_crossings=150 lockout_rejected=19 barrier_pct_rejected=0 passed=131
+t=0.35 fold=276: raw_crossings=150 lockout_rejected=19 barrier_pct_rejected=0 passed=131
+t=0.40 fold=276: raw_crossings=149 lockout_rejected=19 barrier_pct_rejected=0 passed=130
+t=0.45 fold=276: raw_crossings=147 lockout_rejected=19 barrier_pct_rejected=0 passed=128
+t=0.50 fold=276: raw_crossings=59 lockout_rejected=5 barrier_pct_rejected=0 passed=54
+t=0.55 fold=276: raw_crossings=14 lockout_rejected=1 barrier_pct_rejected=0 passed=13
+t=0.60 fold=276: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
 t=0.65 fold=276: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=276: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=276: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -4990,15 +4990,15 @@ t=0.85 fold=276: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=276: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=276: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 276 | Train Rows: 13336  | Tested on forward 150 rows. Purged: 11
-t=0.20 fold=277: raw_crossings=150 lockout_rejected=51 barrier_pct_rejected=0 passed=99
-t=0.25 fold=277: raw_crossings=150 lockout_rejected=51 barrier_pct_rejected=0 passed=99
-t=0.30 fold=277: raw_crossings=150 lockout_rejected=51 barrier_pct_rejected=0 passed=99
-t=0.35 fold=277: raw_crossings=149 lockout_rejected=51 barrier_pct_rejected=0 passed=98
-t=0.40 fold=277: raw_crossings=147 lockout_rejected=50 barrier_pct_rejected=0 passed=97
-t=0.45 fold=277: raw_crossings=139 lockout_rejected=46 barrier_pct_rejected=0 passed=93
-t=0.50 fold=277: raw_crossings=50 lockout_rejected=11 barrier_pct_rejected=0 passed=39
-t=0.55 fold=277: raw_crossings=10 lockout_rejected=2 barrier_pct_rejected=0 passed=8
-t=0.60 fold=277: raw_crossings=4 lockout_rejected=1 barrier_pct_rejected=0 passed=3
+t=0.20 fold=277: raw_crossings=150 lockout_rejected=22 barrier_pct_rejected=0 passed=128
+t=0.25 fold=277: raw_crossings=150 lockout_rejected=22 barrier_pct_rejected=0 passed=128
+t=0.30 fold=277: raw_crossings=150 lockout_rejected=22 barrier_pct_rejected=0 passed=128
+t=0.35 fold=277: raw_crossings=150 lockout_rejected=22 barrier_pct_rejected=0 passed=128
+t=0.40 fold=277: raw_crossings=150 lockout_rejected=22 barrier_pct_rejected=0 passed=128
+t=0.45 fold=277: raw_crossings=144 lockout_rejected=21 barrier_pct_rejected=0 passed=123
+t=0.50 fold=277: raw_crossings=64 lockout_rejected=7 barrier_pct_rejected=0 passed=57
+t=0.55 fold=277: raw_crossings=12 lockout_rejected=1 barrier_pct_rejected=0 passed=11
+t=0.60 fold=277: raw_crossings=5 lockout_rejected=0 barrier_pct_rejected=0 passed=5
 t=0.65 fold=277: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=277: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=277: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -5007,14 +5007,14 @@ t=0.85 fold=277: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=277: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=277: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 277 | Train Rows: 13356  | Tested on forward 150 rows. Purged: 18
-t=0.20 fold=278: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.25 fold=278: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.30 fold=278: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.35 fold=278: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.40 fold=278: raw_crossings=147 lockout_rejected=40 barrier_pct_rejected=0 passed=107
-t=0.45 fold=278: raw_crossings=138 lockout_rejected=35 barrier_pct_rejected=0 passed=103
-t=0.50 fold=278: raw_crossings=52 lockout_rejected=10 barrier_pct_rejected=0 passed=42
-t=0.55 fold=278: raw_crossings=7 lockout_rejected=1 barrier_pct_rejected=0 passed=6
+t=0.20 fold=278: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
+t=0.25 fold=278: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
+t=0.30 fold=278: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
+t=0.35 fold=278: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
+t=0.40 fold=278: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
+t=0.45 fold=278: raw_crossings=146 lockout_rejected=23 barrier_pct_rejected=0 passed=123
+t=0.50 fold=278: raw_crossings=69 lockout_rejected=6 barrier_pct_rejected=0 passed=63
+t=0.55 fold=278: raw_crossings=12 lockout_rejected=1 barrier_pct_rejected=0 passed=11
 t=0.60 fold=278: raw_crossings=6 lockout_rejected=1 barrier_pct_rejected=0 passed=5
 t=0.65 fold=278: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=278: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -5024,15 +5024,15 @@ t=0.85 fold=278: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=278: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=278: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 278 | Train Rows: 13384  | Tested on forward 150 rows. Purged: 17
-t=0.20 fold=279: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.25 fold=279: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.30 fold=279: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.35 fold=279: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.40 fold=279: raw_crossings=149 lockout_rejected=44 barrier_pct_rejected=0 passed=105
-t=0.45 fold=279: raw_crossings=139 lockout_rejected=41 barrier_pct_rejected=0 passed=98
-t=0.50 fold=279: raw_crossings=47 lockout_rejected=9 barrier_pct_rejected=0 passed=38
-t=0.55 fold=279: raw_crossings=10 lockout_rejected=2 barrier_pct_rejected=0 passed=8
-t=0.60 fold=279: raw_crossings=6 lockout_rejected=1 barrier_pct_rejected=0 passed=5
+t=0.20 fold=279: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
+t=0.25 fold=279: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
+t=0.30 fold=279: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
+t=0.35 fold=279: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
+t=0.40 fold=279: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
+t=0.45 fold=279: raw_crossings=144 lockout_rejected=27 barrier_pct_rejected=0 passed=117
+t=0.50 fold=279: raw_crossings=59 lockout_rejected=4 barrier_pct_rejected=0 passed=55
+t=0.55 fold=279: raw_crossings=9 lockout_rejected=1 barrier_pct_rejected=0 passed=8
+t=0.60 fold=279: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=279: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=279: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=279: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -5041,15 +5041,15 @@ t=0.85 fold=279: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=279: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=279: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 279 | Train Rows: 13420  | Tested on forward 150 rows. Purged: 8
-t=0.20 fold=280: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
-t=0.25 fold=280: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
-t=0.30 fold=280: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
-t=0.35 fold=280: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
-t=0.40 fold=280: raw_crossings=149 lockout_rejected=37 barrier_pct_rejected=0 passed=112
-t=0.45 fold=280: raw_crossings=144 lockout_rejected=36 barrier_pct_rejected=0 passed=108
-t=0.50 fold=280: raw_crossings=66 lockout_rejected=7 barrier_pct_rejected=0 passed=59
-t=0.55 fold=280: raw_crossings=8 lockout_rejected=1 barrier_pct_rejected=0 passed=7
-t=0.60 fold=280: raw_crossings=5 lockout_rejected=1 barrier_pct_rejected=0 passed=4
+t=0.20 fold=280: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.25 fold=280: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.30 fold=280: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.35 fold=280: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.40 fold=280: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.45 fold=280: raw_crossings=142 lockout_rejected=25 barrier_pct_rejected=0 passed=117
+t=0.50 fold=280: raw_crossings=59 lockout_rejected=4 barrier_pct_rejected=0 passed=55
+t=0.55 fold=280: raw_crossings=8 lockout_rejected=0 barrier_pct_rejected=0 passed=8
+t=0.60 fold=280: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=280: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=280: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=280: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -5058,14 +5058,14 @@ t=0.85 fold=280: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=280: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=280: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 280 | Train Rows: 13449  | Tested on forward 150 rows. Purged: 6
-t=0.20 fold=281: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.25 fold=281: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.30 fold=281: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.35 fold=281: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.40 fold=281: raw_crossings=148 lockout_rejected=41 barrier_pct_rejected=0 passed=107
-t=0.45 fold=281: raw_crossings=143 lockout_rejected=39 barrier_pct_rejected=0 passed=104
-t=0.50 fold=281: raw_crossings=51 lockout_rejected=5 barrier_pct_rejected=0 passed=46
-t=0.55 fold=281: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=281: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.25 fold=281: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.30 fold=281: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.35 fold=281: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.40 fold=281: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.45 fold=281: raw_crossings=145 lockout_rejected=28 barrier_pct_rejected=0 passed=117
+t=0.50 fold=281: raw_crossings=58 lockout_rejected=3 barrier_pct_rejected=0 passed=55
+t=0.55 fold=281: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
 t=0.60 fold=281: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=281: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=281: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -5075,13 +5075,13 @@ t=0.85 fold=281: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=281: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=281: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 281 | Train Rows: 13460  | Tested on forward 150 rows. Purged: 22
-t=0.20 fold=282: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
-t=0.25 fold=282: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
-t=0.30 fold=282: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
-t=0.35 fold=282: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
-t=0.40 fold=282: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
-t=0.45 fold=282: raw_crossings=144 lockout_rejected=36 barrier_pct_rejected=0 passed=108
-t=0.50 fold=282: raw_crossings=62 lockout_rejected=4 barrier_pct_rejected=0 passed=58
+t=0.20 fold=282: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
+t=0.25 fold=282: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
+t=0.30 fold=282: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
+t=0.35 fold=282: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
+t=0.40 fold=282: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
+t=0.45 fold=282: raw_crossings=146 lockout_rejected=34 barrier_pct_rejected=0 passed=112
+t=0.50 fold=282: raw_crossings=47 lockout_rejected=3 barrier_pct_rejected=0 passed=44
 t=0.55 fold=282: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
 t=0.60 fold=282: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=282: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -5092,15 +5092,15 @@ t=0.85 fold=282: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=282: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=282: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 282 | Train Rows: 13497  | Tested on forward 150 rows. Purged: 12
-t=0.20 fold=283: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
-t=0.25 fold=283: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
-t=0.30 fold=283: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
-t=0.35 fold=283: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
-t=0.40 fold=283: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
-t=0.45 fold=283: raw_crossings=143 lockout_rejected=32 barrier_pct_rejected=0 passed=111
-t=0.50 fold=283: raw_crossings=64 lockout_rejected=3 barrier_pct_rejected=0 passed=61
-t=0.55 fold=283: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
-t=0.60 fold=283: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.20 fold=283: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
+t=0.25 fold=283: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
+t=0.30 fold=283: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
+t=0.35 fold=283: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
+t=0.40 fold=283: raw_crossings=149 lockout_rejected=35 barrier_pct_rejected=0 passed=114
+t=0.45 fold=283: raw_crossings=145 lockout_rejected=34 barrier_pct_rejected=0 passed=111
+t=0.50 fold=283: raw_crossings=52 lockout_rejected=6 barrier_pct_rejected=0 passed=46
+t=0.55 fold=283: raw_crossings=6 lockout_rejected=1 barrier_pct_rejected=0 passed=5
+t=0.60 fold=283: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.65 fold=283: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=283: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=283: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -5109,15 +5109,15 @@ t=0.85 fold=283: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=283: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=283: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 283 | Train Rows: 13523  | Tested on forward 150 rows. Purged: 13
-t=0.20 fold=284: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
-t=0.25 fold=284: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
-t=0.30 fold=284: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
-t=0.35 fold=284: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
-t=0.40 fold=284: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
-t=0.45 fold=284: raw_crossings=149 lockout_rejected=37 barrier_pct_rejected=0 passed=112
-t=0.50 fold=284: raw_crossings=56 lockout_rejected=5 barrier_pct_rejected=0 passed=51
-t=0.55 fold=284: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
-t=0.60 fold=284: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.20 fold=284: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
+t=0.25 fold=284: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
+t=0.30 fold=284: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
+t=0.35 fold=284: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
+t=0.40 fold=284: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
+t=0.45 fold=284: raw_crossings=146 lockout_rejected=35 barrier_pct_rejected=0 passed=111
+t=0.50 fold=284: raw_crossings=52 lockout_rejected=3 barrier_pct_rejected=0 passed=49
+t=0.55 fold=284: raw_crossings=5 lockout_rejected=1 barrier_pct_rejected=0 passed=4
+t=0.60 fold=284: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.65 fold=284: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=284: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=284: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -5126,15 +5126,15 @@ t=0.85 fold=284: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=284: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=284: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 284 | Train Rows: 13552  | Tested on forward 150 rows. Purged: 11
-t=0.20 fold=285: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.25 fold=285: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.30 fold=285: raw_crossings=148 lockout_rejected=35 barrier_pct_rejected=0 passed=113
-t=0.35 fold=285: raw_crossings=148 lockout_rejected=35 barrier_pct_rejected=0 passed=113
-t=0.40 fold=285: raw_crossings=148 lockout_rejected=35 barrier_pct_rejected=0 passed=113
-t=0.45 fold=285: raw_crossings=147 lockout_rejected=35 barrier_pct_rejected=0 passed=112
-t=0.50 fold=285: raw_crossings=64 lockout_rejected=12 barrier_pct_rejected=0 passed=52
-t=0.55 fold=285: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
-t=0.60 fold=285: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.20 fold=285: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
+t=0.25 fold=285: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
+t=0.30 fold=285: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
+t=0.35 fold=285: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
+t=0.40 fold=285: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
+t=0.45 fold=285: raw_crossings=145 lockout_rejected=39 barrier_pct_rejected=0 passed=106
+t=0.50 fold=285: raw_crossings=52 lockout_rejected=7 barrier_pct_rejected=0 passed=45
+t=0.55 fold=285: raw_crossings=5 lockout_rejected=1 barrier_pct_rejected=0 passed=4
+t=0.60 fold=285: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.65 fold=285: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=285: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=285: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -5143,14 +5143,14 @@ t=0.85 fold=285: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=285: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=285: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 285 | Train Rows: 13582  | Tested on forward 150 rows. Purged: 8
-t=0.20 fold=286: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.25 fold=286: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.30 fold=286: raw_crossings=148 lockout_rejected=41 barrier_pct_rejected=0 passed=107
-t=0.35 fold=286: raw_crossings=148 lockout_rejected=41 barrier_pct_rejected=0 passed=107
-t=0.40 fold=286: raw_crossings=148 lockout_rejected=41 barrier_pct_rejected=0 passed=107
-t=0.45 fold=286: raw_crossings=146 lockout_rejected=41 barrier_pct_rejected=0 passed=105
-t=0.50 fold=286: raw_crossings=56 lockout_rejected=11 barrier_pct_rejected=0 passed=45
-t=0.55 fold=286: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.20 fold=286: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
+t=0.25 fold=286: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
+t=0.30 fold=286: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
+t=0.35 fold=286: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
+t=0.40 fold=286: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
+t=0.45 fold=286: raw_crossings=147 lockout_rejected=34 barrier_pct_rejected=0 passed=113
+t=0.50 fold=286: raw_crossings=42 lockout_rejected=5 barrier_pct_rejected=0 passed=37
+t=0.55 fold=286: raw_crossings=5 lockout_rejected=1 barrier_pct_rejected=0 passed=4
 t=0.60 fold=286: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=286: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=286: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -5160,14 +5160,14 @@ t=0.85 fold=286: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=286: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=286: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 286 | Train Rows: 13598  | Tested on forward 150 rows. Purged: 19
-t=0.20 fold=287: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.25 fold=287: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.30 fold=287: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.35 fold=287: raw_crossings=149 lockout_rejected=41 barrier_pct_rejected=0 passed=108
-t=0.40 fold=287: raw_crossings=149 lockout_rejected=41 barrier_pct_rejected=0 passed=108
-t=0.45 fold=287: raw_crossings=146 lockout_rejected=40 barrier_pct_rejected=0 passed=106
-t=0.50 fold=287: raw_crossings=44 lockout_rejected=8 barrier_pct_rejected=0 passed=36
-t=0.55 fold=287: raw_crossings=5 lockout_rejected=0 barrier_pct_rejected=0 passed=5
+t=0.20 fold=287: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
+t=0.25 fold=287: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
+t=0.30 fold=287: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
+t=0.35 fold=287: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
+t=0.40 fold=287: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
+t=0.45 fold=287: raw_crossings=146 lockout_rejected=37 barrier_pct_rejected=0 passed=109
+t=0.50 fold=287: raw_crossings=51 lockout_rejected=7 barrier_pct_rejected=0 passed=44
+t=0.55 fold=287: raw_crossings=4 lockout_rejected=1 barrier_pct_rejected=0 passed=3
 t=0.60 fold=287: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=287: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=287: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -5177,14 +5177,14 @@ t=0.85 fold=287: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=287: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=287: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 287 | Train Rows: 13633  | Tested on forward 150 rows. Purged: 11
-t=0.20 fold=288: raw_crossings=150 lockout_rejected=48 barrier_pct_rejected=0 passed=102
-t=0.25 fold=288: raw_crossings=150 lockout_rejected=48 barrier_pct_rejected=0 passed=102
-t=0.30 fold=288: raw_crossings=150 lockout_rejected=48 barrier_pct_rejected=0 passed=102
-t=0.35 fold=288: raw_crossings=150 lockout_rejected=48 barrier_pct_rejected=0 passed=102
-t=0.40 fold=288: raw_crossings=150 lockout_rejected=48 barrier_pct_rejected=0 passed=102
-t=0.45 fold=288: raw_crossings=145 lockout_rejected=45 barrier_pct_rejected=0 passed=100
-t=0.50 fold=288: raw_crossings=41 lockout_rejected=12 barrier_pct_rejected=0 passed=29
-t=0.55 fold=288: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
+t=0.20 fold=288: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
+t=0.25 fold=288: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
+t=0.30 fold=288: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
+t=0.35 fold=288: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
+t=0.40 fold=288: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
+t=0.45 fold=288: raw_crossings=147 lockout_rejected=37 barrier_pct_rejected=0 passed=110
+t=0.50 fold=288: raw_crossings=46 lockout_rejected=5 barrier_pct_rejected=0 passed=41
+t=0.55 fold=288: raw_crossings=4 lockout_rejected=1 barrier_pct_rejected=0 passed=3
 t=0.60 fold=288: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=288: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=288: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -5194,14 +5194,14 @@ t=0.85 fold=288: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=288: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=288: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 288 | Train Rows: 13660  | Tested on forward 150 rows. Purged: 11
-t=0.20 fold=289: raw_crossings=150 lockout_rejected=46 barrier_pct_rejected=0 passed=104
-t=0.25 fold=289: raw_crossings=150 lockout_rejected=46 barrier_pct_rejected=0 passed=104
-t=0.30 fold=289: raw_crossings=150 lockout_rejected=46 barrier_pct_rejected=0 passed=104
-t=0.35 fold=289: raw_crossings=150 lockout_rejected=46 barrier_pct_rejected=0 passed=104
-t=0.40 fold=289: raw_crossings=150 lockout_rejected=46 barrier_pct_rejected=0 passed=104
-t=0.45 fold=289: raw_crossings=148 lockout_rejected=46 barrier_pct_rejected=0 passed=102
-t=0.50 fold=289: raw_crossings=37 lockout_rejected=9 barrier_pct_rejected=0 passed=28
-t=0.55 fold=289: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=289: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
+t=0.25 fold=289: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
+t=0.30 fold=289: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
+t=0.35 fold=289: raw_crossings=149 lockout_rejected=38 barrier_pct_rejected=0 passed=111
+t=0.40 fold=289: raw_crossings=149 lockout_rejected=38 barrier_pct_rejected=0 passed=111
+t=0.45 fold=289: raw_crossings=144 lockout_rejected=37 barrier_pct_rejected=0 passed=107
+t=0.50 fold=289: raw_crossings=44 lockout_rejected=7 barrier_pct_rejected=0 passed=37
+t=0.55 fold=289: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.60 fold=289: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=289: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=289: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -5211,13 +5211,13 @@ t=0.85 fold=289: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=289: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=289: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 289 | Train Rows: 13686  | Tested on forward 150 rows. Purged: 12
-t=0.20 fold=290: raw_crossings=150 lockout_rejected=49 barrier_pct_rejected=0 passed=101
-t=0.25 fold=290: raw_crossings=150 lockout_rejected=49 barrier_pct_rejected=0 passed=101
-t=0.30 fold=290: raw_crossings=150 lockout_rejected=49 barrier_pct_rejected=0 passed=101
-t=0.35 fold=290: raw_crossings=150 lockout_rejected=49 barrier_pct_rejected=0 passed=101
-t=0.40 fold=290: raw_crossings=150 lockout_rejected=49 barrier_pct_rejected=0 passed=101
-t=0.45 fold=290: raw_crossings=142 lockout_rejected=47 barrier_pct_rejected=0 passed=95
-t=0.50 fold=290: raw_crossings=46 lockout_rejected=11 barrier_pct_rejected=0 passed=35
+t=0.20 fold=290: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
+t=0.25 fold=290: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
+t=0.30 fold=290: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
+t=0.35 fold=290: raw_crossings=149 lockout_rejected=38 barrier_pct_rejected=0 passed=111
+t=0.40 fold=290: raw_crossings=149 lockout_rejected=38 barrier_pct_rejected=0 passed=111
+t=0.45 fold=290: raw_crossings=142 lockout_rejected=33 barrier_pct_rejected=0 passed=109
+t=0.50 fold=290: raw_crossings=38 lockout_rejected=5 barrier_pct_rejected=0 passed=33
 t=0.55 fold=290: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.60 fold=290: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=290: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -5228,14 +5228,14 @@ t=0.85 fold=290: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=290: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=290: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 290 | Train Rows: 13721  | Tested on forward 150 rows. Purged: 4
-t=0.20 fold=291: raw_crossings=150 lockout_rejected=50 barrier_pct_rejected=0 passed=100
-t=0.25 fold=291: raw_crossings=150 lockout_rejected=50 barrier_pct_rejected=0 passed=100
-t=0.30 fold=291: raw_crossings=150 lockout_rejected=50 barrier_pct_rejected=0 passed=100
-t=0.35 fold=291: raw_crossings=150 lockout_rejected=50 barrier_pct_rejected=0 passed=100
-t=0.40 fold=291: raw_crossings=150 lockout_rejected=50 barrier_pct_rejected=0 passed=100
-t=0.45 fold=291: raw_crossings=143 lockout_rejected=49 barrier_pct_rejected=0 passed=94
-t=0.50 fold=291: raw_crossings=44 lockout_rejected=11 barrier_pct_rejected=0 passed=33
-t=0.55 fold=291: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.20 fold=291: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
+t=0.25 fold=291: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
+t=0.30 fold=291: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
+t=0.35 fold=291: raw_crossings=149 lockout_rejected=38 barrier_pct_rejected=0 passed=111
+t=0.40 fold=291: raw_crossings=149 lockout_rejected=38 barrier_pct_rejected=0 passed=111
+t=0.45 fold=291: raw_crossings=143 lockout_rejected=34 barrier_pct_rejected=0 passed=109
+t=0.50 fold=291: raw_crossings=45 lockout_rejected=7 barrier_pct_rejected=0 passed=38
+t=0.55 fold=291: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.60 fold=291: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=291: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=291: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -5245,14 +5245,14 @@ t=0.85 fold=291: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=291: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=291: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 291 | Train Rows: 13738  | Tested on forward 150 rows. Purged: 14
-t=0.20 fold=292: raw_crossings=150 lockout_rejected=49 barrier_pct_rejected=0 passed=101
-t=0.25 fold=292: raw_crossings=150 lockout_rejected=49 barrier_pct_rejected=0 passed=101
-t=0.30 fold=292: raw_crossings=150 lockout_rejected=49 barrier_pct_rejected=0 passed=101
-t=0.35 fold=292: raw_crossings=150 lockout_rejected=49 barrier_pct_rejected=0 passed=101
-t=0.40 fold=292: raw_crossings=150 lockout_rejected=49 barrier_pct_rejected=0 passed=101
-t=0.45 fold=292: raw_crossings=145 lockout_rejected=48 barrier_pct_rejected=0 passed=97
-t=0.50 fold=292: raw_crossings=52 lockout_rejected=10 barrier_pct_rejected=0 passed=42
-t=0.55 fold=292: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
+t=0.20 fold=292: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
+t=0.25 fold=292: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
+t=0.30 fold=292: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
+t=0.35 fold=292: raw_crossings=149 lockout_rejected=39 barrier_pct_rejected=0 passed=110
+t=0.40 fold=292: raw_crossings=149 lockout_rejected=39 barrier_pct_rejected=0 passed=110
+t=0.45 fold=292: raw_crossings=145 lockout_rejected=35 barrier_pct_rejected=0 passed=110
+t=0.50 fold=292: raw_crossings=38 lockout_rejected=7 barrier_pct_rejected=0 passed=31
+t=0.55 fold=292: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.60 fold=292: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=292: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=292: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -5262,14 +5262,14 @@ t=0.85 fold=292: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=292: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=292: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 292 | Train Rows: 13765  | Tested on forward 150 rows. Purged: 14
-t=0.20 fold=293: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.25 fold=293: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.30 fold=293: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.35 fold=293: raw_crossings=149 lockout_rejected=39 barrier_pct_rejected=0 passed=110
-t=0.40 fold=293: raw_crossings=149 lockout_rejected=39 barrier_pct_rejected=0 passed=110
-t=0.45 fold=293: raw_crossings=140 lockout_rejected=37 barrier_pct_rejected=0 passed=103
-t=0.50 fold=293: raw_crossings=47 lockout_rejected=8 barrier_pct_rejected=0 passed=39
-t=0.55 fold=293: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
+t=0.20 fold=293: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
+t=0.25 fold=293: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
+t=0.30 fold=293: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
+t=0.35 fold=293: raw_crossings=149 lockout_rejected=36 barrier_pct_rejected=0 passed=113
+t=0.40 fold=293: raw_crossings=149 lockout_rejected=36 barrier_pct_rejected=0 passed=113
+t=0.45 fold=293: raw_crossings=145 lockout_rejected=32 barrier_pct_rejected=0 passed=113
+t=0.50 fold=293: raw_crossings=43 lockout_rejected=4 barrier_pct_rejected=0 passed=39
+t=0.55 fold=293: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.60 fold=293: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=293: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=293: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -5279,14 +5279,14 @@ t=0.85 fold=293: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=293: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=293: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 293 | Train Rows: 13787  | Tested on forward 150 rows. Purged: 19
-t=0.20 fold=294: raw_crossings=150 lockout_rejected=40 barrier_pct_rejected=0 passed=110
-t=0.25 fold=294: raw_crossings=150 lockout_rejected=40 barrier_pct_rejected=0 passed=110
-t=0.30 fold=294: raw_crossings=150 lockout_rejected=40 barrier_pct_rejected=0 passed=110
-t=0.35 fold=294: raw_crossings=149 lockout_rejected=40 barrier_pct_rejected=0 passed=109
-t=0.40 fold=294: raw_crossings=149 lockout_rejected=40 barrier_pct_rejected=0 passed=109
-t=0.45 fold=294: raw_crossings=145 lockout_rejected=40 barrier_pct_rejected=0 passed=105
-t=0.50 fold=294: raw_crossings=58 lockout_rejected=8 barrier_pct_rejected=0 passed=50
-t=0.55 fold=294: raw_crossings=7 lockout_rejected=0 barrier_pct_rejected=0 passed=7
+t=0.20 fold=294: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
+t=0.25 fold=294: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
+t=0.30 fold=294: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
+t=0.35 fold=294: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
+t=0.40 fold=294: raw_crossings=149 lockout_rejected=34 barrier_pct_rejected=0 passed=115
+t=0.45 fold=294: raw_crossings=146 lockout_rejected=34 barrier_pct_rejected=0 passed=112
+t=0.50 fold=294: raw_crossings=46 lockout_rejected=3 barrier_pct_rejected=0 passed=43
+t=0.55 fold=294: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.60 fold=294: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=294: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=294: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -5296,14 +5296,14 @@ t=0.85 fold=294: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=294: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=294: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 294 | Train Rows: 13817  | Tested on forward 150 rows. Purged: 16
-t=0.20 fold=295: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.25 fold=295: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.30 fold=295: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.35 fold=295: raw_crossings=148 lockout_rejected=40 barrier_pct_rejected=0 passed=108
-t=0.40 fold=295: raw_crossings=148 lockout_rejected=40 barrier_pct_rejected=0 passed=108
-t=0.45 fold=295: raw_crossings=145 lockout_rejected=38 barrier_pct_rejected=0 passed=107
-t=0.50 fold=295: raw_crossings=56 lockout_rejected=13 barrier_pct_rejected=0 passed=43
-t=0.55 fold=295: raw_crossings=7 lockout_rejected=0 barrier_pct_rejected=0 passed=7
+t=0.20 fold=295: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
+t=0.25 fold=295: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
+t=0.30 fold=295: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
+t=0.35 fold=295: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
+t=0.40 fold=295: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
+t=0.45 fold=295: raw_crossings=146 lockout_rejected=30 barrier_pct_rejected=0 passed=116
+t=0.50 fold=295: raw_crossings=48 lockout_rejected=3 barrier_pct_rejected=0 passed=45
+t=0.55 fold=295: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
 t=0.60 fold=295: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=295: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=295: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -5313,14 +5313,14 @@ t=0.85 fold=295: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=295: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=295: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 295 | Train Rows: 13849  | Tested on forward 150 rows. Purged: 11
-t=0.20 fold=296: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.25 fold=296: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.30 fold=296: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.35 fold=296: raw_crossings=148 lockout_rejected=34 barrier_pct_rejected=0 passed=114
-t=0.40 fold=296: raw_crossings=148 lockout_rejected=34 barrier_pct_rejected=0 passed=114
-t=0.45 fold=296: raw_crossings=145 lockout_rejected=32 barrier_pct_rejected=0 passed=113
-t=0.50 fold=296: raw_crossings=62 lockout_rejected=13 barrier_pct_rejected=0 passed=49
-t=0.55 fold=296: raw_crossings=5 lockout_rejected=0 barrier_pct_rejected=0 passed=5
+t=0.20 fold=296: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
+t=0.25 fold=296: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
+t=0.30 fold=296: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
+t=0.35 fold=296: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
+t=0.40 fold=296: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
+t=0.45 fold=296: raw_crossings=148 lockout_rejected=32 barrier_pct_rejected=0 passed=116
+t=0.50 fold=296: raw_crossings=52 lockout_rejected=4 barrier_pct_rejected=0 passed=48
+t=0.55 fold=296: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.60 fold=296: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=296: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=296: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -5330,14 +5330,14 @@ t=0.85 fold=296: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=296: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=296: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 296 | Train Rows: 13869  | Tested on forward 150 rows. Purged: 18
-t=0.20 fold=297: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.25 fold=297: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.30 fold=297: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.35 fold=297: raw_crossings=149 lockout_rejected=39 barrier_pct_rejected=0 passed=110
-t=0.40 fold=297: raw_crossings=149 lockout_rejected=39 barrier_pct_rejected=0 passed=110
-t=0.45 fold=297: raw_crossings=147 lockout_rejected=37 barrier_pct_rejected=0 passed=110
-t=0.50 fold=297: raw_crossings=69 lockout_rejected=14 barrier_pct_rejected=0 passed=55
-t=0.55 fold=297: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
+t=0.20 fold=297: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.25 fold=297: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.30 fold=297: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.35 fold=297: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.40 fold=297: raw_crossings=149 lockout_rejected=28 barrier_pct_rejected=0 passed=121
+t=0.45 fold=297: raw_crossings=147 lockout_rejected=27 barrier_pct_rejected=0 passed=120
+t=0.50 fold=297: raw_crossings=52 lockout_rejected=1 barrier_pct_rejected=0 passed=51
+t=0.55 fold=297: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.60 fold=297: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=297: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=297: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -5347,14 +5347,14 @@ t=0.85 fold=297: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=297: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=297: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 297 | Train Rows: 13901  | Tested on forward 150 rows. Purged: 13
-t=0.20 fold=298: raw_crossings=150 lockout_rejected=40 barrier_pct_rejected=0 passed=110
-t=0.25 fold=298: raw_crossings=150 lockout_rejected=40 barrier_pct_rejected=0 passed=110
-t=0.30 fold=298: raw_crossings=150 lockout_rejected=40 barrier_pct_rejected=0 passed=110
-t=0.35 fold=298: raw_crossings=150 lockout_rejected=40 barrier_pct_rejected=0 passed=110
-t=0.40 fold=298: raw_crossings=150 lockout_rejected=40 barrier_pct_rejected=0 passed=110
-t=0.45 fold=298: raw_crossings=149 lockout_rejected=38 barrier_pct_rejected=0 passed=111
-t=0.50 fold=298: raw_crossings=71 lockout_rejected=14 barrier_pct_rejected=0 passed=57
-t=0.55 fold=298: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
+t=0.20 fold=298: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.25 fold=298: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.30 fold=298: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.35 fold=298: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.40 fold=298: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.45 fold=298: raw_crossings=146 lockout_rejected=24 barrier_pct_rejected=0 passed=122
+t=0.50 fold=298: raw_crossings=51 lockout_rejected=3 barrier_pct_rejected=0 passed=48
+t=0.55 fold=298: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.60 fold=298: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=298: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=298: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -5364,14 +5364,14 @@ t=0.85 fold=298: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=298: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=298: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 298 | Train Rows: 13918  | Tested on forward 150 rows. Purged: 23
-t=0.20 fold=299: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.25 fold=299: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.30 fold=299: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.35 fold=299: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.40 fold=299: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.45 fold=299: raw_crossings=146 lockout_rejected=42 barrier_pct_rejected=0 passed=104
-t=0.50 fold=299: raw_crossings=64 lockout_rejected=19 barrier_pct_rejected=0 passed=45
-t=0.55 fold=299: raw_crossings=5 lockout_rejected=0 barrier_pct_rejected=0 passed=5
+t=0.20 fold=299: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
+t=0.25 fold=299: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
+t=0.30 fold=299: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
+t=0.35 fold=299: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
+t=0.40 fold=299: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
+t=0.45 fold=299: raw_crossings=146 lockout_rejected=25 barrier_pct_rejected=0 passed=121
+t=0.50 fold=299: raw_crossings=54 lockout_rejected=3 barrier_pct_rejected=0 passed=51
+t=0.55 fold=299: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.60 fold=299: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=299: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=299: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -5381,14 +5381,14 @@ t=0.85 fold=299: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=299: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=299: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 299 | Train Rows: 13957  | Tested on forward 150 rows. Purged: 11
-t=0.20 fold=300: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.25 fold=300: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.30 fold=300: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.35 fold=300: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.40 fold=300: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.45 fold=300: raw_crossings=145 lockout_rejected=37 barrier_pct_rejected=0 passed=108
-t=0.50 fold=300: raw_crossings=56 lockout_rejected=14 barrier_pct_rejected=0 passed=42
-t=0.55 fold=300: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
+t=0.20 fold=300: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
+t=0.25 fold=300: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
+t=0.30 fold=300: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
+t=0.35 fold=300: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
+t=0.40 fold=300: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
+t=0.45 fold=300: raw_crossings=146 lockout_rejected=21 barrier_pct_rejected=0 passed=125
+t=0.50 fold=300: raw_crossings=54 lockout_rejected=5 barrier_pct_rejected=0 passed=49
+t=0.55 fold=300: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.60 fold=300: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=300: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=300: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -5398,14 +5398,14 @@ t=0.85 fold=300: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=300: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=300: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 300 | Train Rows: 13982  | Tested on forward 150 rows. Purged: 13
-t=0.20 fold=301: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.25 fold=301: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.30 fold=301: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.35 fold=301: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.40 fold=301: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.45 fold=301: raw_crossings=144 lockout_rejected=44 barrier_pct_rejected=0 passed=100
-t=0.50 fold=301: raw_crossings=62 lockout_rejected=16 barrier_pct_rejected=0 passed=46
-t=0.55 fold=301: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.20 fold=301: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.25 fold=301: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.30 fold=301: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.35 fold=301: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.40 fold=301: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.45 fold=301: raw_crossings=145 lockout_rejected=22 barrier_pct_rejected=0 passed=123
+t=0.50 fold=301: raw_crossings=47 lockout_rejected=4 barrier_pct_rejected=0 passed=43
+t=0.55 fold=301: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.60 fold=301: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=301: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=301: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -5415,14 +5415,14 @@ t=0.85 fold=301: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=301: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=301: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 301 | Train Rows: 14004  | Tested on forward 150 rows. Purged: 18
-t=0.20 fold=302: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.25 fold=302: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.30 fold=302: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.35 fold=302: raw_crossings=149 lockout_rejected=43 barrier_pct_rejected=0 passed=106
-t=0.40 fold=302: raw_crossings=149 lockout_rejected=43 barrier_pct_rejected=0 passed=106
-t=0.45 fold=302: raw_crossings=146 lockout_rejected=41 barrier_pct_rejected=0 passed=105
-t=0.50 fold=302: raw_crossings=56 lockout_rejected=14 barrier_pct_rejected=0 passed=42
-t=0.55 fold=302: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.20 fold=302: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.25 fold=302: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.30 fold=302: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.35 fold=302: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.40 fold=302: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.45 fold=302: raw_crossings=145 lockout_rejected=21 barrier_pct_rejected=0 passed=124
+t=0.50 fold=302: raw_crossings=49 lockout_rejected=3 barrier_pct_rejected=0 passed=46
+t=0.55 fold=302: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.60 fold=302: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=302: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=302: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -5432,14 +5432,14 @@ t=0.85 fold=302: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=302: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=302: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 302 | Train Rows: 14037  | Tested on forward 150 rows. Purged: 12
-t=0.20 fold=303: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.25 fold=303: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.30 fold=303: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.35 fold=303: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.40 fold=303: raw_crossings=149 lockout_rejected=39 barrier_pct_rejected=0 passed=110
-t=0.45 fold=303: raw_crossings=148 lockout_rejected=39 barrier_pct_rejected=0 passed=109
-t=0.50 fold=303: raw_crossings=62 lockout_rejected=9 barrier_pct_rejected=0 passed=53
-t=0.55 fold=303: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
+t=0.20 fold=303: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
+t=0.25 fold=303: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
+t=0.30 fold=303: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
+t=0.35 fold=303: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
+t=0.40 fold=303: raw_crossings=149 lockout_rejected=33 barrier_pct_rejected=0 passed=116
+t=0.45 fold=303: raw_crossings=141 lockout_rejected=25 barrier_pct_rejected=0 passed=116
+t=0.50 fold=303: raw_crossings=43 lockout_rejected=4 barrier_pct_rejected=0 passed=39
+t=0.55 fold=303: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.60 fold=303: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=303: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=303: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -5449,14 +5449,14 @@ t=0.85 fold=303: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=303: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=303: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 303 | Train Rows: 14063  | Tested on forward 150 rows. Purged: 13
-t=0.20 fold=304: raw_crossings=150 lockout_rejected=49 barrier_pct_rejected=0 passed=101
-t=0.25 fold=304: raw_crossings=150 lockout_rejected=49 barrier_pct_rejected=0 passed=101
-t=0.30 fold=304: raw_crossings=150 lockout_rejected=49 barrier_pct_rejected=0 passed=101
-t=0.35 fold=304: raw_crossings=149 lockout_rejected=49 barrier_pct_rejected=0 passed=100
-t=0.40 fold=304: raw_crossings=149 lockout_rejected=49 barrier_pct_rejected=0 passed=100
-t=0.45 fold=304: raw_crossings=149 lockout_rejected=49 barrier_pct_rejected=0 passed=100
-t=0.50 fold=304: raw_crossings=63 lockout_rejected=14 barrier_pct_rejected=0 passed=49
-t=0.55 fold=304: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
+t=0.20 fold=304: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
+t=0.25 fold=304: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
+t=0.30 fold=304: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
+t=0.35 fold=304: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
+t=0.40 fold=304: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
+t=0.45 fold=304: raw_crossings=142 lockout_rejected=27 barrier_pct_rejected=0 passed=115
+t=0.50 fold=304: raw_crossings=50 lockout_rejected=5 barrier_pct_rejected=0 passed=45
+t=0.55 fold=304: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.60 fold=304: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=304: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=304: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -5466,14 +5466,14 @@ t=0.85 fold=304: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=304: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=304: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 304 | Train Rows: 14086  | Tested on forward 150 rows. Purged: 17
-t=0.20 fold=305: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
-t=0.25 fold=305: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
-t=0.30 fold=305: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
-t=0.35 fold=305: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
-t=0.40 fold=305: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
-t=0.45 fold=305: raw_crossings=149 lockout_rejected=44 barrier_pct_rejected=0 passed=105
-t=0.50 fold=305: raw_crossings=62 lockout_rejected=12 barrier_pct_rejected=0 passed=50
-t=0.55 fold=305: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
+t=0.20 fold=305: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
+t=0.25 fold=305: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
+t=0.30 fold=305: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
+t=0.35 fold=305: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
+t=0.40 fold=305: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
+t=0.45 fold=305: raw_crossings=144 lockout_rejected=28 barrier_pct_rejected=0 passed=116
+t=0.50 fold=305: raw_crossings=55 lockout_rejected=6 barrier_pct_rejected=0 passed=49
+t=0.55 fold=305: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.60 fold=305: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=305: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=305: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -5483,14 +5483,14 @@ t=0.85 fold=305: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=305: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=305: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 305 | Train Rows: 14114  | Tested on forward 150 rows. Purged: 16
-t=0.20 fold=306: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.25 fold=306: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.30 fold=306: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.35 fold=306: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.40 fold=306: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.45 fold=306: raw_crossings=149 lockout_rejected=38 barrier_pct_rejected=0 passed=111
-t=0.50 fold=306: raw_crossings=59 lockout_rejected=9 barrier_pct_rejected=0 passed=50
-t=0.55 fold=306: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.20 fold=306: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
+t=0.25 fold=306: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
+t=0.30 fold=306: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
+t=0.35 fold=306: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
+t=0.40 fold=306: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
+t=0.45 fold=306: raw_crossings=143 lockout_rejected=33 barrier_pct_rejected=0 passed=110
+t=0.50 fold=306: raw_crossings=54 lockout_rejected=6 barrier_pct_rejected=0 passed=48
+t=0.55 fold=306: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.60 fold=306: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=306: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=306: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -5500,14 +5500,14 @@ t=0.85 fold=306: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=306: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=306: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 306 | Train Rows: 14151  | Tested on forward 150 rows. Purged: 6
-t=0.20 fold=307: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.25 fold=307: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.30 fold=307: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.35 fold=307: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.40 fold=307: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.45 fold=307: raw_crossings=149 lockout_rejected=36 barrier_pct_rejected=0 passed=113
-t=0.50 fold=307: raw_crossings=53 lockout_rejected=11 barrier_pct_rejected=0 passed=42
-t=0.55 fold=307: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
+t=0.20 fold=307: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
+t=0.25 fold=307: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
+t=0.30 fold=307: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
+t=0.35 fold=307: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
+t=0.40 fold=307: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
+t=0.45 fold=307: raw_crossings=145 lockout_rejected=35 barrier_pct_rejected=0 passed=110
+t=0.50 fold=307: raw_crossings=54 lockout_rejected=8 barrier_pct_rejected=0 passed=46
+t=0.55 fold=307: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.60 fold=307: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=307: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=307: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -5517,15 +5517,15 @@ t=0.85 fold=307: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=307: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=307: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 307 | Train Rows: 14173  | Tested on forward 150 rows. Purged: 11
-t=0.20 fold=308: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
-t=0.25 fold=308: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
-t=0.30 fold=308: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
-t=0.35 fold=308: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
-t=0.40 fold=308: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
-t=0.45 fold=308: raw_crossings=149 lockout_rejected=32 barrier_pct_rejected=0 passed=117
-t=0.50 fold=308: raw_crossings=56 lockout_rejected=10 barrier_pct_rejected=0 passed=46
-t=0.55 fold=308: raw_crossings=6 lockout_rejected=0 barrier_pct_rejected=0 passed=6
-t=0.60 fold=308: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=308: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
+t=0.25 fold=308: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
+t=0.30 fold=308: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
+t=0.35 fold=308: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
+t=0.40 fold=308: raw_crossings=149 lockout_rejected=36 barrier_pct_rejected=0 passed=113
+t=0.45 fold=308: raw_crossings=146 lockout_rejected=35 barrier_pct_rejected=0 passed=111
+t=0.50 fold=308: raw_crossings=53 lockout_rejected=6 barrier_pct_rejected=0 passed=47
+t=0.55 fold=308: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.60 fold=308: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=308: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=308: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=308: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -5534,15 +5534,15 @@ t=0.85 fold=308: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=308: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=308: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 308 | Train Rows: 14194  | Tested on forward 150 rows. Purged: 17
-t=0.20 fold=309: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
-t=0.25 fold=309: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
-t=0.30 fold=309: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
-t=0.35 fold=309: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
-t=0.40 fold=309: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
-t=0.45 fold=309: raw_crossings=149 lockout_rejected=33 barrier_pct_rejected=0 passed=116
-t=0.50 fold=309: raw_crossings=54 lockout_rejected=11 barrier_pct_rejected=0 passed=43
-t=0.55 fold=309: raw_crossings=5 lockout_rejected=0 barrier_pct_rejected=0 passed=5
-t=0.60 fold=309: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=309: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
+t=0.25 fold=309: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
+t=0.30 fold=309: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
+t=0.35 fold=309: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
+t=0.40 fold=309: raw_crossings=149 lockout_rejected=32 barrier_pct_rejected=0 passed=117
+t=0.45 fold=309: raw_crossings=148 lockout_rejected=30 barrier_pct_rejected=0 passed=118
+t=0.50 fold=309: raw_crossings=46 lockout_rejected=3 barrier_pct_rejected=0 passed=43
+t=0.55 fold=309: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.60 fold=309: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=309: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=309: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=309: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -5551,15 +5551,15 @@ t=0.85 fold=309: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=309: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=309: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 309 | Train Rows: 14225  | Tested on forward 150 rows. Purged: 13
-t=0.20 fold=310: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.25 fold=310: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.30 fold=310: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.35 fold=310: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.40 fold=310: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.45 fold=310: raw_crossings=147 lockout_rejected=34 barrier_pct_rejected=0 passed=113
-t=0.50 fold=310: raw_crossings=61 lockout_rejected=12 barrier_pct_rejected=0 passed=49
-t=0.55 fold=310: raw_crossings=5 lockout_rejected=0 barrier_pct_rejected=0 passed=5
-t=0.60 fold=310: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=310: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
+t=0.25 fold=310: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
+t=0.30 fold=310: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
+t=0.35 fold=310: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
+t=0.40 fold=310: raw_crossings=149 lockout_rejected=31 barrier_pct_rejected=0 passed=118
+t=0.45 fold=310: raw_crossings=148 lockout_rejected=31 barrier_pct_rejected=0 passed=117
+t=0.50 fold=310: raw_crossings=49 lockout_rejected=3 barrier_pct_rejected=0 passed=46
+t=0.55 fold=310: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.60 fold=310: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=310: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=310: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=310: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -5568,15 +5568,15 @@ t=0.85 fold=310: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=310: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=310: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 310 | Train Rows: 14250  | Tested on forward 150 rows. Purged: 15
-t=0.20 fold=311: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.25 fold=311: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.30 fold=311: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.35 fold=311: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
-t=0.40 fold=311: raw_crossings=149 lockout_rejected=34 barrier_pct_rejected=0 passed=115
-t=0.45 fold=311: raw_crossings=146 lockout_rejected=33 barrier_pct_rejected=0 passed=113
-t=0.50 fold=311: raw_crossings=56 lockout_rejected=9 barrier_pct_rejected=0 passed=47
-t=0.55 fold=311: raw_crossings=5 lockout_rejected=0 barrier_pct_rejected=0 passed=5
-t=0.60 fold=311: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=311: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.25 fold=311: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.30 fold=311: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.35 fold=311: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.40 fold=311: raw_crossings=149 lockout_rejected=33 barrier_pct_rejected=0 passed=116
+t=0.45 fold=311: raw_crossings=148 lockout_rejected=33 barrier_pct_rejected=0 passed=115
+t=0.50 fold=311: raw_crossings=50 lockout_rejected=7 barrier_pct_rejected=0 passed=43
+t=0.55 fold=311: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.60 fold=311: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=311: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=311: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=311: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -5585,15 +5585,15 @@ t=0.85 fold=311: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=311: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=311: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 311 | Train Rows: 14279  | Tested on forward 150 rows. Purged: 13
-t=0.20 fold=312: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.25 fold=312: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.30 fold=312: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.35 fold=312: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.40 fold=312: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.45 fold=312: raw_crossings=146 lockout_rejected=40 barrier_pct_rejected=0 passed=106
-t=0.50 fold=312: raw_crossings=69 lockout_rejected=15 barrier_pct_rejected=0 passed=54
-t=0.55 fold=312: raw_crossings=7 lockout_rejected=0 barrier_pct_rejected=0 passed=7
-t=0.60 fold=312: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=312: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
+t=0.25 fold=312: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
+t=0.30 fold=312: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
+t=0.35 fold=312: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
+t=0.40 fold=312: raw_crossings=149 lockout_rejected=34 barrier_pct_rejected=0 passed=115
+t=0.45 fold=312: raw_crossings=144 lockout_rejected=31 barrier_pct_rejected=0 passed=113
+t=0.50 fold=312: raw_crossings=49 lockout_rejected=5 barrier_pct_rejected=0 passed=44
+t=0.55 fold=312: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.60 fold=312: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=312: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=312: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=312: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -5602,15 +5602,15 @@ t=0.85 fold=312: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=312: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=312: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 312 | Train Rows: 14309  | Tested on forward 150 rows. Purged: 10
-t=0.20 fold=313: raw_crossings=150 lockout_rejected=51 barrier_pct_rejected=0 passed=99
-t=0.25 fold=313: raw_crossings=150 lockout_rejected=51 barrier_pct_rejected=0 passed=99
-t=0.30 fold=313: raw_crossings=150 lockout_rejected=51 barrier_pct_rejected=0 passed=99
-t=0.35 fold=313: raw_crossings=150 lockout_rejected=51 barrier_pct_rejected=0 passed=99
-t=0.40 fold=313: raw_crossings=149 lockout_rejected=51 barrier_pct_rejected=0 passed=98
-t=0.45 fold=313: raw_crossings=147 lockout_rejected=51 barrier_pct_rejected=0 passed=96
-t=0.50 fold=313: raw_crossings=70 lockout_rejected=17 barrier_pct_rejected=0 passed=53
-t=0.55 fold=313: raw_crossings=8 lockout_rejected=0 barrier_pct_rejected=0 passed=8
-t=0.60 fold=313: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=313: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
+t=0.25 fold=313: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
+t=0.30 fold=313: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
+t=0.35 fold=313: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
+t=0.40 fold=313: raw_crossings=149 lockout_rejected=35 barrier_pct_rejected=0 passed=114
+t=0.45 fold=313: raw_crossings=144 lockout_rejected=32 barrier_pct_rejected=0 passed=112
+t=0.50 fold=313: raw_crossings=50 lockout_rejected=8 barrier_pct_rejected=0 passed=42
+t=0.55 fold=313: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.60 fold=313: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=313: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=313: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=313: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -5619,15 +5619,15 @@ t=0.85 fold=313: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=313: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=313: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 313 | Train Rows: 14332  | Tested on forward 150 rows. Purged: 14
-t=0.20 fold=314: raw_crossings=150 lockout_rejected=49 barrier_pct_rejected=0 passed=101
-t=0.25 fold=314: raw_crossings=150 lockout_rejected=49 barrier_pct_rejected=0 passed=101
-t=0.30 fold=314: raw_crossings=150 lockout_rejected=49 barrier_pct_rejected=0 passed=101
-t=0.35 fold=314: raw_crossings=150 lockout_rejected=49 barrier_pct_rejected=0 passed=101
-t=0.40 fold=314: raw_crossings=150 lockout_rejected=49 barrier_pct_rejected=0 passed=101
-t=0.45 fold=314: raw_crossings=145 lockout_rejected=47 barrier_pct_rejected=0 passed=98
-t=0.50 fold=314: raw_crossings=56 lockout_rejected=16 barrier_pct_rejected=0 passed=40
-t=0.55 fold=314: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
-t=0.60 fold=314: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=314: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
+t=0.25 fold=314: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
+t=0.30 fold=314: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
+t=0.35 fold=314: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
+t=0.40 fold=314: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
+t=0.45 fold=314: raw_crossings=148 lockout_rejected=35 barrier_pct_rejected=0 passed=113
+t=0.50 fold=314: raw_crossings=54 lockout_rejected=10 barrier_pct_rejected=0 passed=44
+t=0.55 fold=314: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.60 fold=314: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=314: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=314: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=314: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -5636,14 +5636,14 @@ t=0.85 fold=314: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=314: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=314: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 314 | Train Rows: 14358  | Tested on forward 150 rows. Purged: 15
-t=0.20 fold=315: raw_crossings=150 lockout_rejected=49 barrier_pct_rejected=0 passed=101
-t=0.25 fold=315: raw_crossings=150 lockout_rejected=49 barrier_pct_rejected=0 passed=101
-t=0.30 fold=315: raw_crossings=150 lockout_rejected=49 barrier_pct_rejected=0 passed=101
-t=0.35 fold=315: raw_crossings=150 lockout_rejected=49 barrier_pct_rejected=0 passed=101
-t=0.40 fold=315: raw_crossings=150 lockout_rejected=49 barrier_pct_rejected=0 passed=101
-t=0.45 fold=315: raw_crossings=144 lockout_rejected=47 barrier_pct_rejected=0 passed=97
-t=0.50 fold=315: raw_crossings=56 lockout_rejected=13 barrier_pct_rejected=0 passed=43
-t=0.55 fold=315: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
+t=0.20 fold=315: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
+t=0.25 fold=315: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
+t=0.30 fold=315: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
+t=0.35 fold=315: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
+t=0.40 fold=315: raw_crossings=149 lockout_rejected=37 barrier_pct_rejected=0 passed=112
+t=0.45 fold=315: raw_crossings=148 lockout_rejected=36 barrier_pct_rejected=0 passed=112
+t=0.50 fold=315: raw_crossings=55 lockout_rejected=9 barrier_pct_rejected=0 passed=46
+t=0.55 fold=315: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.60 fold=315: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=315: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=315: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -5653,14 +5653,14 @@ t=0.85 fold=315: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=315: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=315: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 315 | Train Rows: 14382  | Tested on forward 150 rows. Purged: 18
-t=0.20 fold=316: raw_crossings=150 lockout_rejected=53 barrier_pct_rejected=0 passed=97
-t=0.25 fold=316: raw_crossings=150 lockout_rejected=53 barrier_pct_rejected=0 passed=97
-t=0.30 fold=316: raw_crossings=150 lockout_rejected=53 barrier_pct_rejected=0 passed=97
-t=0.35 fold=316: raw_crossings=150 lockout_rejected=53 barrier_pct_rejected=0 passed=97
-t=0.40 fold=316: raw_crossings=149 lockout_rejected=52 barrier_pct_rejected=0 passed=97
-t=0.45 fold=316: raw_crossings=147 lockout_rejected=52 barrier_pct_rejected=0 passed=95
-t=0.50 fold=316: raw_crossings=61 lockout_rejected=20 barrier_pct_rejected=0 passed=41
-t=0.55 fold=316: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
+t=0.20 fold=316: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.25 fold=316: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.30 fold=316: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.35 fold=316: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.40 fold=316: raw_crossings=149 lockout_rejected=33 barrier_pct_rejected=0 passed=116
+t=0.45 fold=316: raw_crossings=146 lockout_rejected=30 barrier_pct_rejected=0 passed=116
+t=0.50 fold=316: raw_crossings=50 lockout_rejected=4 barrier_pct_rejected=0 passed=46
+t=0.55 fold=316: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.60 fold=316: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=316: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=316: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -5670,14 +5670,14 @@ t=0.85 fold=316: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=316: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=316: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 316 | Train Rows: 14416  | Tested on forward 150 rows. Purged: 11
-t=0.20 fold=317: raw_crossings=150 lockout_rejected=55 barrier_pct_rejected=0 passed=95
-t=0.25 fold=317: raw_crossings=150 lockout_rejected=55 barrier_pct_rejected=0 passed=95
-t=0.30 fold=317: raw_crossings=150 lockout_rejected=55 barrier_pct_rejected=0 passed=95
-t=0.35 fold=317: raw_crossings=150 lockout_rejected=55 barrier_pct_rejected=0 passed=95
-t=0.40 fold=317: raw_crossings=149 lockout_rejected=55 barrier_pct_rejected=0 passed=94
-t=0.45 fold=317: raw_crossings=144 lockout_rejected=55 barrier_pct_rejected=0 passed=89
-t=0.50 fold=317: raw_crossings=60 lockout_rejected=17 barrier_pct_rejected=0 passed=43
-t=0.55 fold=317: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
+t=0.20 fold=317: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
+t=0.25 fold=317: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
+t=0.30 fold=317: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
+t=0.35 fold=317: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
+t=0.40 fold=317: raw_crossings=149 lockout_rejected=32 barrier_pct_rejected=0 passed=117
+t=0.45 fold=317: raw_crossings=148 lockout_rejected=32 barrier_pct_rejected=0 passed=116
+t=0.50 fold=317: raw_crossings=52 lockout_rejected=5 barrier_pct_rejected=0 passed=47
+t=0.55 fold=317: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.60 fold=317: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=317: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=317: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -5687,14 +5687,14 @@ t=0.85 fold=317: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=317: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=317: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 317 | Train Rows: 14448  | Tested on forward 150 rows. Purged: 6
-t=0.20 fold=318: raw_crossings=150 lockout_rejected=58 barrier_pct_rejected=0 passed=92
-t=0.25 fold=318: raw_crossings=150 lockout_rejected=58 barrier_pct_rejected=0 passed=92
-t=0.30 fold=318: raw_crossings=150 lockout_rejected=58 barrier_pct_rejected=0 passed=92
-t=0.35 fold=318: raw_crossings=150 lockout_rejected=58 barrier_pct_rejected=0 passed=92
-t=0.40 fold=318: raw_crossings=148 lockout_rejected=58 barrier_pct_rejected=0 passed=90
-t=0.45 fold=318: raw_crossings=140 lockout_rejected=56 barrier_pct_rejected=0 passed=84
-t=0.50 fold=318: raw_crossings=39 lockout_rejected=6 barrier_pct_rejected=0 passed=33
-t=0.55 fold=318: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.20 fold=318: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
+t=0.25 fold=318: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
+t=0.30 fold=318: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
+t=0.35 fold=318: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
+t=0.40 fold=318: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
+t=0.45 fold=318: raw_crossings=146 lockout_rejected=34 barrier_pct_rejected=0 passed=112
+t=0.50 fold=318: raw_crossings=44 lockout_rejected=2 barrier_pct_rejected=0 passed=42
+t=0.55 fold=318: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.60 fold=318: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=318: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=318: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -5704,14 +5704,14 @@ t=0.85 fold=318: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=318: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=318: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 318 | Train Rows: 14465  | Tested on forward 150 rows. Purged: 16
-t=0.20 fold=319: raw_crossings=150 lockout_rejected=60 barrier_pct_rejected=0 passed=90
-t=0.25 fold=319: raw_crossings=150 lockout_rejected=60 barrier_pct_rejected=0 passed=90
-t=0.30 fold=319: raw_crossings=150 lockout_rejected=60 barrier_pct_rejected=0 passed=90
-t=0.35 fold=319: raw_crossings=150 lockout_rejected=60 barrier_pct_rejected=0 passed=90
-t=0.40 fold=319: raw_crossings=150 lockout_rejected=60 barrier_pct_rejected=0 passed=90
-t=0.45 fold=319: raw_crossings=142 lockout_rejected=57 barrier_pct_rejected=0 passed=85
-t=0.50 fold=319: raw_crossings=36 lockout_rejected=7 barrier_pct_rejected=0 passed=29
-t=0.55 fold=319: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.20 fold=319: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
+t=0.25 fold=319: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
+t=0.30 fold=319: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
+t=0.35 fold=319: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
+t=0.40 fold=319: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
+t=0.45 fold=319: raw_crossings=145 lockout_rejected=33 barrier_pct_rejected=0 passed=112
+t=0.50 fold=319: raw_crossings=40 lockout_rejected=2 barrier_pct_rejected=0 passed=38
+t=0.55 fold=319: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.60 fold=319: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=319: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=319: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -5721,14 +5721,14 @@ t=0.85 fold=319: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=319: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=319: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 319 | Train Rows: 14484  | Tested on forward 150 rows. Purged: 24
-t=0.20 fold=320: raw_crossings=150 lockout_rejected=65 barrier_pct_rejected=0 passed=85
-t=0.25 fold=320: raw_crossings=150 lockout_rejected=65 barrier_pct_rejected=0 passed=85
-t=0.30 fold=320: raw_crossings=150 lockout_rejected=65 barrier_pct_rejected=0 passed=85
-t=0.35 fold=320: raw_crossings=150 lockout_rejected=65 barrier_pct_rejected=0 passed=85
-t=0.40 fold=320: raw_crossings=150 lockout_rejected=65 barrier_pct_rejected=0 passed=85
-t=0.45 fold=320: raw_crossings=143 lockout_rejected=61 barrier_pct_rejected=0 passed=82
-t=0.50 fold=320: raw_crossings=38 lockout_rejected=8 barrier_pct_rejected=0 passed=30
-t=0.55 fold=320: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=320: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
+t=0.25 fold=320: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
+t=0.30 fold=320: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
+t=0.35 fold=320: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
+t=0.40 fold=320: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
+t=0.45 fold=320: raw_crossings=149 lockout_rejected=29 barrier_pct_rejected=0 passed=120
+t=0.50 fold=320: raw_crossings=49 lockout_rejected=3 barrier_pct_rejected=0 passed=46
+t=0.55 fold=320: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.60 fold=320: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=320: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=320: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -5738,14 +5738,14 @@ t=0.85 fold=320: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=320: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=320: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 320 | Train Rows: 14520  | Tested on forward 150 rows. Purged: 15
-t=0.20 fold=321: raw_crossings=150 lockout_rejected=63 barrier_pct_rejected=0 passed=87
-t=0.25 fold=321: raw_crossings=150 lockout_rejected=63 barrier_pct_rejected=0 passed=87
-t=0.30 fold=321: raw_crossings=150 lockout_rejected=63 barrier_pct_rejected=0 passed=87
-t=0.35 fold=321: raw_crossings=150 lockout_rejected=63 barrier_pct_rejected=0 passed=87
-t=0.40 fold=321: raw_crossings=150 lockout_rejected=63 barrier_pct_rejected=0 passed=87
-t=0.45 fold=321: raw_crossings=142 lockout_rejected=59 barrier_pct_rejected=0 passed=83
-t=0.50 fold=321: raw_crossings=37 lockout_rejected=8 barrier_pct_rejected=0 passed=29
-t=0.55 fold=321: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
+t=0.20 fold=321: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.25 fold=321: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.30 fold=321: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.35 fold=321: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.40 fold=321: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.45 fold=321: raw_crossings=149 lockout_rejected=28 barrier_pct_rejected=0 passed=121
+t=0.50 fold=321: raw_crossings=44 lockout_rejected=1 barrier_pct_rejected=0 passed=43
+t=0.55 fold=321: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.60 fold=321: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=321: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=321: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -5755,15 +5755,15 @@ t=0.85 fold=321: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=321: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=321: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 321 | Train Rows: 14555  | Tested on forward 150 rows. Purged: 7
-t=0.20 fold=322: raw_crossings=150 lockout_rejected=54 barrier_pct_rejected=0 passed=96
-t=0.25 fold=322: raw_crossings=150 lockout_rejected=54 barrier_pct_rejected=0 passed=96
-t=0.30 fold=322: raw_crossings=150 lockout_rejected=54 barrier_pct_rejected=0 passed=96
-t=0.35 fold=322: raw_crossings=150 lockout_rejected=54 barrier_pct_rejected=0 passed=96
-t=0.40 fold=322: raw_crossings=150 lockout_rejected=54 barrier_pct_rejected=0 passed=96
-t=0.45 fold=322: raw_crossings=146 lockout_rejected=53 barrier_pct_rejected=0 passed=93
-t=0.50 fold=322: raw_crossings=38 lockout_rejected=5 barrier_pct_rejected=0 passed=33
-t=0.55 fold=322: raw_crossings=6 lockout_rejected=0 barrier_pct_rejected=0 passed=6
-t=0.60 fold=322: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=322: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
+t=0.25 fold=322: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
+t=0.30 fold=322: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
+t=0.35 fold=322: raw_crossings=149 lockout_rejected=23 barrier_pct_rejected=0 passed=126
+t=0.40 fold=322: raw_crossings=149 lockout_rejected=23 barrier_pct_rejected=0 passed=126
+t=0.45 fold=322: raw_crossings=146 lockout_rejected=21 barrier_pct_rejected=0 passed=125
+t=0.50 fold=322: raw_crossings=51 lockout_rejected=7 barrier_pct_rejected=0 passed=44
+t=0.55 fold=322: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.60 fold=322: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=322: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=322: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=322: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -5772,14 +5772,14 @@ t=0.85 fold=322: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=322: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=322: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 322 | Train Rows: 14577  | Tested on forward 150 rows. Purged: 12
-t=0.20 fold=323: raw_crossings=150 lockout_rejected=52 barrier_pct_rejected=0 passed=98
-t=0.25 fold=323: raw_crossings=150 lockout_rejected=52 barrier_pct_rejected=0 passed=98
-t=0.30 fold=323: raw_crossings=150 lockout_rejected=52 barrier_pct_rejected=0 passed=98
-t=0.35 fold=323: raw_crossings=148 lockout_rejected=51 barrier_pct_rejected=0 passed=97
-t=0.40 fold=323: raw_crossings=147 lockout_rejected=52 barrier_pct_rejected=0 passed=95
-t=0.45 fold=323: raw_crossings=145 lockout_rejected=52 barrier_pct_rejected=0 passed=93
-t=0.50 fold=323: raw_crossings=44 lockout_rejected=4 barrier_pct_rejected=0 passed=40
-t=0.55 fold=323: raw_crossings=6 lockout_rejected=0 barrier_pct_rejected=0 passed=6
+t=0.20 fold=323: raw_crossings=150 lockout_rejected=17 barrier_pct_rejected=0 passed=133
+t=0.25 fold=323: raw_crossings=150 lockout_rejected=17 barrier_pct_rejected=0 passed=133
+t=0.30 fold=323: raw_crossings=150 lockout_rejected=17 barrier_pct_rejected=0 passed=133
+t=0.35 fold=323: raw_crossings=150 lockout_rejected=17 barrier_pct_rejected=0 passed=133
+t=0.40 fold=323: raw_crossings=149 lockout_rejected=17 barrier_pct_rejected=0 passed=132
+t=0.45 fold=323: raw_crossings=148 lockout_rejected=16 barrier_pct_rejected=0 passed=132
+t=0.50 fold=323: raw_crossings=43 lockout_rejected=6 barrier_pct_rejected=0 passed=37
+t=0.55 fold=323: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.60 fold=323: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=323: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=323: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -5789,14 +5789,14 @@ t=0.85 fold=323: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=323: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=323: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 323 | Train Rows: 14599  | Tested on forward 150 rows. Purged: 17
-t=0.20 fold=324: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.25 fold=324: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.30 fold=324: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.35 fold=324: raw_crossings=148 lockout_rejected=42 barrier_pct_rejected=0 passed=106
-t=0.40 fold=324: raw_crossings=146 lockout_rejected=43 barrier_pct_rejected=0 passed=103
-t=0.45 fold=324: raw_crossings=144 lockout_rejected=43 barrier_pct_rejected=0 passed=101
-t=0.50 fold=324: raw_crossings=65 lockout_rejected=8 barrier_pct_rejected=0 passed=57
-t=0.55 fold=324: raw_crossings=7 lockout_rejected=0 barrier_pct_rejected=0 passed=7
+t=0.20 fold=324: raw_crossings=150 lockout_rejected=21 barrier_pct_rejected=0 passed=129
+t=0.25 fold=324: raw_crossings=150 lockout_rejected=21 barrier_pct_rejected=0 passed=129
+t=0.30 fold=324: raw_crossings=150 lockout_rejected=21 barrier_pct_rejected=0 passed=129
+t=0.35 fold=324: raw_crossings=150 lockout_rejected=21 barrier_pct_rejected=0 passed=129
+t=0.40 fold=324: raw_crossings=149 lockout_rejected=21 barrier_pct_rejected=0 passed=128
+t=0.45 fold=324: raw_crossings=143 lockout_rejected=19 barrier_pct_rejected=0 passed=124
+t=0.50 fold=324: raw_crossings=32 lockout_rejected=4 barrier_pct_rejected=0 passed=28
+t=0.55 fold=324: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.60 fold=324: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=324: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=324: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -5806,14 +5806,14 @@ t=0.85 fold=324: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=324: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=324: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 324 | Train Rows: 14626  | Tested on forward 150 rows. Purged: 17
-t=0.20 fold=325: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.25 fold=325: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.30 fold=325: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.35 fold=325: raw_crossings=148 lockout_rejected=40 barrier_pct_rejected=0 passed=108
-t=0.40 fold=325: raw_crossings=144 lockout_rejected=41 barrier_pct_rejected=0 passed=103
-t=0.45 fold=325: raw_crossings=142 lockout_rejected=41 barrier_pct_rejected=0 passed=101
-t=0.50 fold=325: raw_crossings=71 lockout_rejected=8 barrier_pct_rejected=0 passed=63
-t=0.55 fold=325: raw_crossings=9 lockout_rejected=0 barrier_pct_rejected=0 passed=9
+t=0.20 fold=325: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.25 fold=325: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.30 fold=325: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.35 fold=325: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.40 fold=325: raw_crossings=149 lockout_rejected=25 barrier_pct_rejected=0 passed=124
+t=0.45 fold=325: raw_crossings=146 lockout_rejected=24 barrier_pct_rejected=0 passed=122
+t=0.50 fold=325: raw_crossings=38 lockout_rejected=3 barrier_pct_rejected=0 passed=35
+t=0.55 fold=325: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.60 fold=325: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=325: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=325: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -5823,14 +5823,14 @@ t=0.85 fold=325: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=325: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=325: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 325 | Train Rows: 14653  | Tested on forward 150 rows. Purged: 17
-t=0.20 fold=326: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.25 fold=326: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.30 fold=326: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.35 fold=326: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.40 fold=326: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.45 fold=326: raw_crossings=145 lockout_rejected=38 barrier_pct_rejected=0 passed=107
-t=0.50 fold=326: raw_crossings=63 lockout_rejected=7 barrier_pct_rejected=0 passed=56
-t=0.55 fold=326: raw_crossings=11 lockout_rejected=0 barrier_pct_rejected=0 passed=11
+t=0.20 fold=326: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.25 fold=326: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.30 fold=326: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.35 fold=326: raw_crossings=149 lockout_rejected=26 barrier_pct_rejected=0 passed=123
+t=0.40 fold=326: raw_crossings=148 lockout_rejected=25 barrier_pct_rejected=0 passed=123
+t=0.45 fold=326: raw_crossings=143 lockout_rejected=24 barrier_pct_rejected=0 passed=119
+t=0.50 fold=326: raw_crossings=40 lockout_rejected=5 barrier_pct_rejected=0 passed=35
+t=0.55 fold=326: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
 t=0.60 fold=326: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=326: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=326: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -5840,15 +5840,15 @@ t=0.85 fold=326: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=326: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=326: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 326 | Train Rows: 14690  | Tested on forward 150 rows. Purged: 7
-t=0.20 fold=327: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.25 fold=327: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.30 fold=327: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.35 fold=327: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.40 fold=327: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.45 fold=327: raw_crossings=147 lockout_rejected=38 barrier_pct_rejected=0 passed=109
-t=0.50 fold=327: raw_crossings=61 lockout_rejected=5 barrier_pct_rejected=0 passed=56
-t=0.55 fold=327: raw_crossings=12 lockout_rejected=0 barrier_pct_rejected=0 passed=12
-t=0.60 fold=327: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=327: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
+t=0.25 fold=327: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
+t=0.30 fold=327: raw_crossings=149 lockout_rejected=32 barrier_pct_rejected=0 passed=117
+t=0.35 fold=327: raw_crossings=146 lockout_rejected=31 barrier_pct_rejected=0 passed=115
+t=0.40 fold=327: raw_crossings=146 lockout_rejected=31 barrier_pct_rejected=0 passed=115
+t=0.45 fold=327: raw_crossings=138 lockout_rejected=29 barrier_pct_rejected=0 passed=109
+t=0.50 fold=327: raw_crossings=47 lockout_rejected=6 barrier_pct_rejected=0 passed=41
+t=0.55 fold=327: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.60 fold=327: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=327: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=327: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=327: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -5857,14 +5857,14 @@ t=0.85 fold=327: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=327: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=327: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 327 | Train Rows: 14715  | Tested on forward 150 rows. Purged: 9
-t=0.20 fold=328: raw_crossings=150 lockout_rejected=40 barrier_pct_rejected=0 passed=110
-t=0.25 fold=328: raw_crossings=150 lockout_rejected=40 barrier_pct_rejected=0 passed=110
-t=0.30 fold=328: raw_crossings=150 lockout_rejected=40 barrier_pct_rejected=0 passed=110
-t=0.35 fold=328: raw_crossings=150 lockout_rejected=40 barrier_pct_rejected=0 passed=110
-t=0.40 fold=328: raw_crossings=147 lockout_rejected=39 barrier_pct_rejected=0 passed=108
-t=0.45 fold=328: raw_crossings=144 lockout_rejected=38 barrier_pct_rejected=0 passed=106
-t=0.50 fold=328: raw_crossings=77 lockout_rejected=8 barrier_pct_rejected=0 passed=69
-t=0.55 fold=328: raw_crossings=10 lockout_rejected=0 barrier_pct_rejected=0 passed=10
+t=0.20 fold=328: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
+t=0.25 fold=328: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
+t=0.30 fold=328: raw_crossings=149 lockout_rejected=34 barrier_pct_rejected=0 passed=115
+t=0.35 fold=328: raw_crossings=149 lockout_rejected=34 barrier_pct_rejected=0 passed=115
+t=0.40 fold=328: raw_crossings=147 lockout_rejected=34 barrier_pct_rejected=0 passed=113
+t=0.45 fold=328: raw_crossings=141 lockout_rejected=31 barrier_pct_rejected=0 passed=110
+t=0.50 fold=328: raw_crossings=37 lockout_rejected=3 barrier_pct_rejected=0 passed=34
+t=0.55 fold=328: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
 t=0.60 fold=328: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=328: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=328: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -5874,15 +5874,15 @@ t=0.85 fold=328: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=328: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=328: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 328 | Train Rows: 14740  | Tested on forward 150 rows. Purged: 11
-t=0.20 fold=329: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
-t=0.25 fold=329: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
-t=0.30 fold=329: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
-t=0.35 fold=329: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
-t=0.40 fold=329: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
-t=0.45 fold=329: raw_crossings=147 lockout_rejected=27 barrier_pct_rejected=0 passed=120
-t=0.50 fold=329: raw_crossings=73 lockout_rejected=5 barrier_pct_rejected=0 passed=68
-t=0.55 fold=329: raw_crossings=13 lockout_rejected=0 barrier_pct_rejected=0 passed=13
-t=0.60 fold=329: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.20 fold=329: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
+t=0.25 fold=329: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
+t=0.30 fold=329: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
+t=0.35 fold=329: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
+t=0.40 fold=329: raw_crossings=145 lockout_rejected=29 barrier_pct_rejected=0 passed=116
+t=0.45 fold=329: raw_crossings=141 lockout_rejected=28 barrier_pct_rejected=0 passed=113
+t=0.50 fold=329: raw_crossings=46 lockout_rejected=5 barrier_pct_rejected=0 passed=41
+t=0.55 fold=329: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.60 fold=329: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.65 fold=329: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=329: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=329: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -5891,15 +5891,15 @@ t=0.85 fold=329: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=329: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=329: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 329 | Train Rows: 14766  | Tested on forward 150 rows. Purged: 12
-t=0.20 fold=330: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
-t=0.25 fold=330: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
-t=0.30 fold=330: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
-t=0.35 fold=330: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
-t=0.40 fold=330: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
-t=0.45 fold=330: raw_crossings=148 lockout_rejected=33 barrier_pct_rejected=0 passed=115
-t=0.50 fold=330: raw_crossings=70 lockout_rejected=5 barrier_pct_rejected=0 passed=65
-t=0.55 fold=330: raw_crossings=13 lockout_rejected=0 barrier_pct_rejected=0 passed=13
-t=0.60 fold=330: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.20 fold=330: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
+t=0.25 fold=330: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
+t=0.30 fold=330: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
+t=0.35 fold=330: raw_crossings=149 lockout_rejected=37 barrier_pct_rejected=0 passed=112
+t=0.40 fold=330: raw_crossings=142 lockout_rejected=34 barrier_pct_rejected=0 passed=108
+t=0.45 fold=330: raw_crossings=136 lockout_rejected=32 barrier_pct_rejected=0 passed=104
+t=0.50 fold=330: raw_crossings=44 lockout_rejected=3 barrier_pct_rejected=0 passed=41
+t=0.55 fold=330: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
+t=0.60 fold=330: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.65 fold=330: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=330: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=330: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -5908,15 +5908,15 @@ t=0.85 fold=330: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=330: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=330: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 330 | Train Rows: 14794  | Tested on forward 150 rows. Purged: 11
-t=0.20 fold=331: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
-t=0.25 fold=331: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
-t=0.30 fold=331: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
-t=0.35 fold=331: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
-t=0.40 fold=331: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
-t=0.45 fold=331: raw_crossings=147 lockout_rejected=32 barrier_pct_rejected=0 passed=115
-t=0.50 fold=331: raw_crossings=66 lockout_rejected=7 barrier_pct_rejected=0 passed=59
-t=0.55 fold=331: raw_crossings=12 lockout_rejected=0 barrier_pct_rejected=0 passed=12
-t=0.60 fold=331: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.20 fold=331: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
+t=0.25 fold=331: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
+t=0.30 fold=331: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
+t=0.35 fold=331: raw_crossings=147 lockout_rejected=35 barrier_pct_rejected=0 passed=112
+t=0.40 fold=331: raw_crossings=144 lockout_rejected=34 barrier_pct_rejected=0 passed=110
+t=0.45 fold=331: raw_crossings=137 lockout_rejected=32 barrier_pct_rejected=0 passed=105
+t=0.50 fold=331: raw_crossings=56 lockout_rejected=4 barrier_pct_rejected=0 passed=52
+t=0.55 fold=331: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
+t=0.60 fold=331: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.65 fold=331: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=331: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=331: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -5925,15 +5925,15 @@ t=0.85 fold=331: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=331: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=331: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 331 | Train Rows: 14819  | Tested on forward 150 rows. Purged: 13
-t=0.20 fold=332: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
-t=0.25 fold=332: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
-t=0.30 fold=332: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
-t=0.35 fold=332: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
-t=0.40 fold=332: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
-t=0.45 fold=332: raw_crossings=145 lockout_rejected=36 barrier_pct_rejected=0 passed=109
-t=0.50 fold=332: raw_crossings=79 lockout_rejected=11 barrier_pct_rejected=0 passed=68
-t=0.55 fold=332: raw_crossings=13 lockout_rejected=0 barrier_pct_rejected=0 passed=13
-t=0.60 fold=332: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=332: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
+t=0.25 fold=332: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
+t=0.30 fold=332: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
+t=0.35 fold=332: raw_crossings=149 lockout_rejected=35 barrier_pct_rejected=0 passed=114
+t=0.40 fold=332: raw_crossings=145 lockout_rejected=33 barrier_pct_rejected=0 passed=112
+t=0.45 fold=332: raw_crossings=138 lockout_rejected=32 barrier_pct_rejected=0 passed=106
+t=0.50 fold=332: raw_crossings=44 lockout_rejected=3 barrier_pct_rejected=0 passed=41
+t=0.55 fold=332: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.60 fold=332: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=332: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=332: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=332: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -5942,14 +5942,14 @@ t=0.85 fold=332: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=332: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=332: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 332 | Train Rows: 14845  | Tested on forward 150 rows. Purged: 14
-t=0.20 fold=333: raw_crossings=150 lockout_rejected=40 barrier_pct_rejected=0 passed=110
-t=0.25 fold=333: raw_crossings=150 lockout_rejected=40 barrier_pct_rejected=0 passed=110
-t=0.30 fold=333: raw_crossings=150 lockout_rejected=40 barrier_pct_rejected=0 passed=110
-t=0.35 fold=333: raw_crossings=150 lockout_rejected=40 barrier_pct_rejected=0 passed=110
-t=0.40 fold=333: raw_crossings=150 lockout_rejected=40 barrier_pct_rejected=0 passed=110
-t=0.45 fold=333: raw_crossings=149 lockout_rejected=40 barrier_pct_rejected=0 passed=109
-t=0.50 fold=333: raw_crossings=88 lockout_rejected=20 barrier_pct_rejected=0 passed=68
-t=0.55 fold=333: raw_crossings=15 lockout_rejected=0 barrier_pct_rejected=0 passed=15
+t=0.20 fold=333: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
+t=0.25 fold=333: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
+t=0.30 fold=333: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
+t=0.35 fold=333: raw_crossings=148 lockout_rejected=34 barrier_pct_rejected=0 passed=114
+t=0.40 fold=333: raw_crossings=145 lockout_rejected=32 barrier_pct_rejected=0 passed=113
+t=0.45 fold=333: raw_crossings=137 lockout_rejected=31 barrier_pct_rejected=0 passed=106
+t=0.50 fold=333: raw_crossings=38 lockout_rejected=1 barrier_pct_rejected=0 passed=37
+t=0.55 fold=333: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
 t=0.60 fold=333: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=333: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=333: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -5959,15 +5959,15 @@ t=0.85 fold=333: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=333: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=333: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 333 | Train Rows: 14875  | Tested on forward 150 rows. Purged: 11
-t=0.20 fold=334: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.25 fold=334: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.30 fold=334: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.35 fold=334: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.40 fold=334: raw_crossings=149 lockout_rejected=42 barrier_pct_rejected=0 passed=107
-t=0.45 fold=334: raw_crossings=145 lockout_rejected=41 barrier_pct_rejected=0 passed=104
-t=0.50 fold=334: raw_crossings=78 lockout_rejected=23 barrier_pct_rejected=0 passed=55
-t=0.55 fold=334: raw_crossings=14 lockout_rejected=0 barrier_pct_rejected=0 passed=14
-t=0.60 fold=334: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.20 fold=334: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
+t=0.25 fold=334: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
+t=0.30 fold=334: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
+t=0.35 fold=334: raw_crossings=148 lockout_rejected=31 barrier_pct_rejected=0 passed=117
+t=0.40 fold=334: raw_crossings=146 lockout_rejected=30 barrier_pct_rejected=0 passed=116
+t=0.45 fold=334: raw_crossings=139 lockout_rejected=29 barrier_pct_rejected=0 passed=110
+t=0.50 fold=334: raw_crossings=41 lockout_rejected=2 barrier_pct_rejected=0 passed=39
+t=0.55 fold=334: raw_crossings=5 lockout_rejected=0 barrier_pct_rejected=0 passed=5
+t=0.60 fold=334: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.65 fold=334: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=334: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=334: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -5976,14 +5976,14 @@ t=0.85 fold=334: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=334: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=334: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 334 | Train Rows: 14900  | Tested on forward 150 rows. Purged: 13
-t=0.20 fold=335: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.25 fold=335: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.30 fold=335: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.35 fold=335: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.40 fold=335: raw_crossings=149 lockout_rejected=36 barrier_pct_rejected=0 passed=113
-t=0.45 fold=335: raw_crossings=146 lockout_rejected=36 barrier_pct_rejected=0 passed=110
-t=0.50 fold=335: raw_crossings=72 lockout_rejected=15 barrier_pct_rejected=0 passed=57
-t=0.55 fold=335: raw_crossings=11 lockout_rejected=0 barrier_pct_rejected=0 passed=11
+t=0.20 fold=335: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.25 fold=335: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.30 fold=335: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.35 fold=335: raw_crossings=149 lockout_rejected=28 barrier_pct_rejected=0 passed=121
+t=0.40 fold=335: raw_crossings=146 lockout_rejected=26 barrier_pct_rejected=0 passed=120
+t=0.45 fold=335: raw_crossings=140 lockout_rejected=24 barrier_pct_rejected=0 passed=116
+t=0.50 fold=335: raw_crossings=37 lockout_rejected=2 barrier_pct_rejected=0 passed=35
+t=0.55 fold=335: raw_crossings=5 lockout_rejected=0 barrier_pct_rejected=0 passed=5
 t=0.60 fold=335: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.65 fold=335: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=335: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -5993,15 +5993,15 @@ t=0.85 fold=335: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=335: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=335: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 335 | Train Rows: 14930  | Tested on forward 150 rows. Purged: 10
-t=0.20 fold=336: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.25 fold=336: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.30 fold=336: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.35 fold=336: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.40 fold=336: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.45 fold=336: raw_crossings=147 lockout_rejected=38 barrier_pct_rejected=0 passed=109
-t=0.50 fold=336: raw_crossings=76 lockout_rejected=16 barrier_pct_rejected=0 passed=60
-t=0.55 fold=336: raw_crossings=9 lockout_rejected=0 barrier_pct_rejected=0 passed=9
-t=0.60 fold=336: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.20 fold=336: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.25 fold=336: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.30 fold=336: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.35 fold=336: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.40 fold=336: raw_crossings=148 lockout_rejected=24 barrier_pct_rejected=0 passed=124
+t=0.45 fold=336: raw_crossings=147 lockout_rejected=22 barrier_pct_rejected=0 passed=125
+t=0.50 fold=336: raw_crossings=42 lockout_rejected=3 barrier_pct_rejected=0 passed=39
+t=0.55 fold=336: raw_crossings=5 lockout_rejected=0 barrier_pct_rejected=0 passed=5
+t=0.60 fold=336: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.65 fold=336: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=336: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=336: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -6010,14 +6010,14 @@ t=0.85 fold=336: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=336: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=336: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 336 | Train Rows: 14949  | Tested on forward 150 rows. Purged: 18
-t=0.20 fold=337: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.25 fold=337: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.30 fold=337: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.35 fold=337: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.40 fold=337: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.45 fold=337: raw_crossings=148 lockout_rejected=39 barrier_pct_rejected=0 passed=109
-t=0.50 fold=337: raw_crossings=73 lockout_rejected=16 barrier_pct_rejected=0 passed=57
-t=0.55 fold=337: raw_crossings=9 lockout_rejected=0 barrier_pct_rejected=0 passed=9
+t=0.20 fold=337: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
+t=0.25 fold=337: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
+t=0.30 fold=337: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
+t=0.35 fold=337: raw_crossings=149 lockout_rejected=22 barrier_pct_rejected=0 passed=127
+t=0.40 fold=337: raw_crossings=147 lockout_rejected=19 barrier_pct_rejected=0 passed=128
+t=0.45 fold=337: raw_crossings=147 lockout_rejected=19 barrier_pct_rejected=0 passed=128
+t=0.50 fold=337: raw_crossings=41 lockout_rejected=3 barrier_pct_rejected=0 passed=38
+t=0.55 fold=337: raw_crossings=5 lockout_rejected=0 barrier_pct_rejected=0 passed=5
 t=0.60 fold=337: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=337: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=337: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -6027,15 +6027,15 @@ t=0.85 fold=337: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=337: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=337: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 337 | Train Rows: 14986  | Tested on forward 150 rows. Purged: 8
-t=0.20 fold=338: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.25 fold=338: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.30 fold=338: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.35 fold=338: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.40 fold=338: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.45 fold=338: raw_crossings=145 lockout_rejected=35 barrier_pct_rejected=0 passed=110
-t=0.50 fold=338: raw_crossings=66 lockout_rejected=10 barrier_pct_rejected=0 passed=56
+t=0.20 fold=338: raw_crossings=150 lockout_rejected=20 barrier_pct_rejected=0 passed=130
+t=0.25 fold=338: raw_crossings=150 lockout_rejected=20 barrier_pct_rejected=0 passed=130
+t=0.30 fold=338: raw_crossings=150 lockout_rejected=20 barrier_pct_rejected=0 passed=130
+t=0.35 fold=338: raw_crossings=150 lockout_rejected=20 barrier_pct_rejected=0 passed=130
+t=0.40 fold=338: raw_crossings=148 lockout_rejected=17 barrier_pct_rejected=0 passed=131
+t=0.45 fold=338: raw_crossings=147 lockout_rejected=17 barrier_pct_rejected=0 passed=130
+t=0.50 fold=338: raw_crossings=44 lockout_rejected=4 barrier_pct_rejected=0 passed=40
 t=0.55 fold=338: raw_crossings=6 lockout_rejected=0 barrier_pct_rejected=0 passed=6
-t=0.60 fold=338: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.60 fold=338: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.65 fold=338: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=338: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=338: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -6044,15 +6044,15 @@ t=0.85 fold=338: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=338: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=338: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 338 | Train Rows: 15008  | Tested on forward 150 rows. Purged: 13
-t=0.20 fold=339: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.25 fold=339: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.30 fold=339: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.35 fold=339: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.40 fold=339: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.45 fold=339: raw_crossings=148 lockout_rejected=40 barrier_pct_rejected=0 passed=108
-t=0.50 fold=339: raw_crossings=61 lockout_rejected=10 barrier_pct_rejected=0 passed=51
-t=0.55 fold=339: raw_crossings=8 lockout_rejected=0 barrier_pct_rejected=0 passed=8
-t=0.60 fold=339: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.20 fold=339: raw_crossings=150 lockout_rejected=20 barrier_pct_rejected=0 passed=130
+t=0.25 fold=339: raw_crossings=150 lockout_rejected=20 barrier_pct_rejected=0 passed=130
+t=0.30 fold=339: raw_crossings=150 lockout_rejected=20 barrier_pct_rejected=0 passed=130
+t=0.35 fold=339: raw_crossings=150 lockout_rejected=20 barrier_pct_rejected=0 passed=130
+t=0.40 fold=339: raw_crossings=149 lockout_rejected=19 barrier_pct_rejected=0 passed=130
+t=0.45 fold=339: raw_crossings=147 lockout_rejected=17 barrier_pct_rejected=0 passed=130
+t=0.50 fold=339: raw_crossings=52 lockout_rejected=4 barrier_pct_rejected=0 passed=48
+t=0.55 fold=339: raw_crossings=6 lockout_rejected=0 barrier_pct_rejected=0 passed=6
+t=0.60 fold=339: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.65 fold=339: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=339: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=339: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -6061,15 +6061,15 @@ t=0.85 fold=339: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=339: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=339: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 339 | Train Rows: 15037  | Tested on forward 150 rows. Purged: 11
-t=0.20 fold=340: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.25 fold=340: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.30 fold=340: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.35 fold=340: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.40 fold=340: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.45 fold=340: raw_crossings=147 lockout_rejected=38 barrier_pct_rejected=0 passed=109
-t=0.50 fold=340: raw_crossings=66 lockout_rejected=10 barrier_pct_rejected=0 passed=56
-t=0.55 fold=340: raw_crossings=8 lockout_rejected=0 barrier_pct_rejected=0 passed=8
-t=0.60 fold=340: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.20 fold=340: raw_crossings=150 lockout_rejected=17 barrier_pct_rejected=0 passed=133
+t=0.25 fold=340: raw_crossings=150 lockout_rejected=17 barrier_pct_rejected=0 passed=133
+t=0.30 fold=340: raw_crossings=150 lockout_rejected=17 barrier_pct_rejected=0 passed=133
+t=0.35 fold=340: raw_crossings=150 lockout_rejected=17 barrier_pct_rejected=0 passed=133
+t=0.40 fold=340: raw_crossings=148 lockout_rejected=16 barrier_pct_rejected=0 passed=132
+t=0.45 fold=340: raw_crossings=142 lockout_rejected=15 barrier_pct_rejected=0 passed=127
+t=0.50 fold=340: raw_crossings=54 lockout_rejected=4 barrier_pct_rejected=0 passed=50
+t=0.55 fold=340: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.60 fold=340: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.65 fold=340: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=340: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=340: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -6078,14 +6078,14 @@ t=0.85 fold=340: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=340: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=340: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 340 | Train Rows: 15064  | Tested on forward 150 rows. Purged: 11
-t=0.20 fold=341: raw_crossings=150 lockout_rejected=46 barrier_pct_rejected=0 passed=104
-t=0.25 fold=341: raw_crossings=150 lockout_rejected=46 barrier_pct_rejected=0 passed=104
-t=0.30 fold=341: raw_crossings=150 lockout_rejected=46 barrier_pct_rejected=0 passed=104
-t=0.35 fold=341: raw_crossings=150 lockout_rejected=46 barrier_pct_rejected=0 passed=104
-t=0.40 fold=341: raw_crossings=149 lockout_rejected=45 barrier_pct_rejected=0 passed=104
-t=0.45 fold=341: raw_crossings=145 lockout_rejected=42 barrier_pct_rejected=0 passed=103
-t=0.50 fold=341: raw_crossings=65 lockout_rejected=11 barrier_pct_rejected=0 passed=54
-t=0.55 fold=341: raw_crossings=9 lockout_rejected=0 barrier_pct_rejected=0 passed=9
+t=0.20 fold=341: raw_crossings=150 lockout_rejected=24 barrier_pct_rejected=0 passed=126
+t=0.25 fold=341: raw_crossings=150 lockout_rejected=24 barrier_pct_rejected=0 passed=126
+t=0.30 fold=341: raw_crossings=150 lockout_rejected=24 barrier_pct_rejected=0 passed=126
+t=0.35 fold=341: raw_crossings=150 lockout_rejected=24 barrier_pct_rejected=0 passed=126
+t=0.40 fold=341: raw_crossings=148 lockout_rejected=23 barrier_pct_rejected=0 passed=125
+t=0.45 fold=341: raw_crossings=145 lockout_rejected=23 barrier_pct_rejected=0 passed=122
+t=0.50 fold=341: raw_crossings=52 lockout_rejected=4 barrier_pct_rejected=0 passed=48
+t=0.55 fold=341: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.60 fold=341: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=341: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=341: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -6095,14 +6095,14 @@ t=0.85 fold=341: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=341: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=341: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 341 | Train Rows: 15088  | Tested on forward 150 rows. Purged: 14
-t=0.20 fold=342: raw_crossings=150 lockout_rejected=54 barrier_pct_rejected=0 passed=96
-t=0.25 fold=342: raw_crossings=150 lockout_rejected=54 barrier_pct_rejected=0 passed=96
-t=0.30 fold=342: raw_crossings=150 lockout_rejected=54 barrier_pct_rejected=0 passed=96
-t=0.35 fold=342: raw_crossings=150 lockout_rejected=54 barrier_pct_rejected=0 passed=96
-t=0.40 fold=342: raw_crossings=150 lockout_rejected=54 barrier_pct_rejected=0 passed=96
-t=0.45 fold=342: raw_crossings=147 lockout_rejected=51 barrier_pct_rejected=0 passed=96
-t=0.50 fold=342: raw_crossings=75 lockout_rejected=15 barrier_pct_rejected=0 passed=60
-t=0.55 fold=342: raw_crossings=11 lockout_rejected=0 barrier_pct_rejected=0 passed=11
+t=0.20 fold=342: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.25 fold=342: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.30 fold=342: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.35 fold=342: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.40 fold=342: raw_crossings=147 lockout_rejected=27 barrier_pct_rejected=0 passed=120
+t=0.45 fold=342: raw_crossings=144 lockout_rejected=27 barrier_pct_rejected=0 passed=117
+t=0.50 fold=342: raw_crossings=53 lockout_rejected=4 barrier_pct_rejected=0 passed=49
+t=0.55 fold=342: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.60 fold=342: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=342: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=342: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -6112,14 +6112,14 @@ t=0.85 fold=342: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=342: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=342: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 342 | Train Rows: 15115  | Tested on forward 150 rows. Purged: 14
-t=0.20 fold=343: raw_crossings=150 lockout_rejected=55 barrier_pct_rejected=0 passed=95
-t=0.25 fold=343: raw_crossings=150 lockout_rejected=55 barrier_pct_rejected=0 passed=95
-t=0.30 fold=343: raw_crossings=150 lockout_rejected=55 barrier_pct_rejected=0 passed=95
-t=0.35 fold=343: raw_crossings=150 lockout_rejected=55 barrier_pct_rejected=0 passed=95
-t=0.40 fold=343: raw_crossings=150 lockout_rejected=55 barrier_pct_rejected=0 passed=95
-t=0.45 fold=343: raw_crossings=145 lockout_rejected=52 barrier_pct_rejected=0 passed=93
-t=0.50 fold=343: raw_crossings=66 lockout_rejected=13 barrier_pct_rejected=0 passed=53
-t=0.55 fold=343: raw_crossings=6 lockout_rejected=0 barrier_pct_rejected=0 passed=6
+t=0.20 fold=343: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.25 fold=343: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.30 fold=343: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.35 fold=343: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.40 fold=343: raw_crossings=146 lockout_rejected=28 barrier_pct_rejected=0 passed=118
+t=0.45 fold=343: raw_crossings=143 lockout_rejected=28 barrier_pct_rejected=0 passed=115
+t=0.50 fold=343: raw_crossings=53 lockout_rejected=3 barrier_pct_rejected=0 passed=50
+t=0.55 fold=343: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
 t=0.60 fold=343: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=343: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=343: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -6129,14 +6129,14 @@ t=0.85 fold=343: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=343: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=343: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 343 | Train Rows: 15144  | Tested on forward 150 rows. Purged: 12
-t=0.20 fold=344: raw_crossings=150 lockout_rejected=52 barrier_pct_rejected=0 passed=98
-t=0.25 fold=344: raw_crossings=150 lockout_rejected=52 barrier_pct_rejected=0 passed=98
-t=0.30 fold=344: raw_crossings=150 lockout_rejected=52 barrier_pct_rejected=0 passed=98
-t=0.35 fold=344: raw_crossings=150 lockout_rejected=52 barrier_pct_rejected=0 passed=98
-t=0.40 fold=344: raw_crossings=150 lockout_rejected=52 barrier_pct_rejected=0 passed=98
-t=0.45 fold=344: raw_crossings=148 lockout_rejected=51 barrier_pct_rejected=0 passed=97
-t=0.50 fold=344: raw_crossings=67 lockout_rejected=13 barrier_pct_rejected=0 passed=54
-t=0.55 fold=344: raw_crossings=6 lockout_rejected=0 barrier_pct_rejected=0 passed=6
+t=0.20 fold=344: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.25 fold=344: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.30 fold=344: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.35 fold=344: raw_crossings=149 lockout_rejected=33 barrier_pct_rejected=0 passed=116
+t=0.40 fold=344: raw_crossings=147 lockout_rejected=33 barrier_pct_rejected=0 passed=114
+t=0.45 fold=344: raw_crossings=143 lockout_rejected=33 barrier_pct_rejected=0 passed=110
+t=0.50 fold=344: raw_crossings=54 lockout_rejected=8 barrier_pct_rejected=0 passed=46
+t=0.55 fold=344: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.60 fold=344: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=344: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=344: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -6146,14 +6146,14 @@ t=0.85 fold=344: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=344: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=344: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 344 | Train Rows: 15168  | Tested on forward 150 rows. Purged: 15
-t=0.20 fold=345: raw_crossings=150 lockout_rejected=55 barrier_pct_rejected=0 passed=95
-t=0.25 fold=345: raw_crossings=150 lockout_rejected=55 barrier_pct_rejected=0 passed=95
-t=0.30 fold=345: raw_crossings=150 lockout_rejected=55 barrier_pct_rejected=0 passed=95
-t=0.35 fold=345: raw_crossings=150 lockout_rejected=55 barrier_pct_rejected=0 passed=95
-t=0.40 fold=345: raw_crossings=150 lockout_rejected=55 barrier_pct_rejected=0 passed=95
-t=0.45 fold=345: raw_crossings=146 lockout_rejected=54 barrier_pct_rejected=0 passed=92
-t=0.50 fold=345: raw_crossings=58 lockout_rejected=11 barrier_pct_rejected=0 passed=47
-t=0.55 fold=345: raw_crossings=6 lockout_rejected=0 barrier_pct_rejected=0 passed=6
+t=0.20 fold=345: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.25 fold=345: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.30 fold=345: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.35 fold=345: raw_crossings=149 lockout_rejected=33 barrier_pct_rejected=0 passed=116
+t=0.40 fold=345: raw_crossings=146 lockout_rejected=33 barrier_pct_rejected=0 passed=113
+t=0.45 fold=345: raw_crossings=140 lockout_rejected=32 barrier_pct_rejected=0 passed=108
+t=0.50 fold=345: raw_crossings=51 lockout_rejected=8 barrier_pct_rejected=0 passed=43
+t=0.55 fold=345: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.60 fold=345: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=345: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=345: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -6163,14 +6163,14 @@ t=0.85 fold=345: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=345: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=345: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 345 | Train Rows: 15200  | Tested on forward 150 rows. Purged: 10
-t=0.20 fold=346: raw_crossings=150 lockout_rejected=53 barrier_pct_rejected=0 passed=97
-t=0.25 fold=346: raw_crossings=150 lockout_rejected=53 barrier_pct_rejected=0 passed=97
-t=0.30 fold=346: raw_crossings=150 lockout_rejected=53 barrier_pct_rejected=0 passed=97
-t=0.35 fold=346: raw_crossings=150 lockout_rejected=53 barrier_pct_rejected=0 passed=97
-t=0.40 fold=346: raw_crossings=150 lockout_rejected=53 barrier_pct_rejected=0 passed=97
-t=0.45 fold=346: raw_crossings=145 lockout_rejected=47 barrier_pct_rejected=0 passed=98
-t=0.50 fold=346: raw_crossings=53 lockout_rejected=10 barrier_pct_rejected=0 passed=43
-t=0.55 fold=346: raw_crossings=9 lockout_rejected=0 barrier_pct_rejected=0 passed=9
+t=0.20 fold=346: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
+t=0.25 fold=346: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
+t=0.30 fold=346: raw_crossings=150 lockout_rejected=30 barrier_pct_rejected=0 passed=120
+t=0.35 fold=346: raw_crossings=149 lockout_rejected=30 barrier_pct_rejected=0 passed=119
+t=0.40 fold=346: raw_crossings=145 lockout_rejected=30 barrier_pct_rejected=0 passed=115
+t=0.45 fold=346: raw_crossings=138 lockout_rejected=29 barrier_pct_rejected=0 passed=109
+t=0.50 fold=346: raw_crossings=50 lockout_rejected=3 barrier_pct_rejected=0 passed=47
+t=0.55 fold=346: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
 t=0.60 fold=346: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=346: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=346: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -6180,14 +6180,14 @@ t=0.85 fold=346: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=346: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=346: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 346 | Train Rows: 15223  | Tested on forward 150 rows. Purged: 14
-t=0.20 fold=347: raw_crossings=150 lockout_rejected=48 barrier_pct_rejected=0 passed=102
-t=0.25 fold=347: raw_crossings=150 lockout_rejected=48 barrier_pct_rejected=0 passed=102
-t=0.30 fold=347: raw_crossings=150 lockout_rejected=48 barrier_pct_rejected=0 passed=102
-t=0.35 fold=347: raw_crossings=150 lockout_rejected=48 barrier_pct_rejected=0 passed=102
-t=0.40 fold=347: raw_crossings=149 lockout_rejected=48 barrier_pct_rejected=0 passed=101
-t=0.45 fold=347: raw_crossings=143 lockout_rejected=41 barrier_pct_rejected=0 passed=102
-t=0.50 fold=347: raw_crossings=44 lockout_rejected=4 barrier_pct_rejected=0 passed=40
-t=0.55 fold=347: raw_crossings=7 lockout_rejected=0 barrier_pct_rejected=0 passed=7
+t=0.20 fold=347: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.25 fold=347: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.30 fold=347: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.35 fold=347: raw_crossings=149 lockout_rejected=29 barrier_pct_rejected=0 passed=120
+t=0.40 fold=347: raw_crossings=145 lockout_rejected=29 barrier_pct_rejected=0 passed=116
+t=0.45 fold=347: raw_crossings=137 lockout_rejected=28 barrier_pct_rejected=0 passed=109
+t=0.50 fold=347: raw_crossings=56 lockout_rejected=7 barrier_pct_rejected=0 passed=49
+t=0.55 fold=347: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
 t=0.60 fold=347: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=347: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=347: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -6197,15 +6197,15 @@ t=0.85 fold=347: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=347: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=347: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 347 | Train Rows: 15254  | Tested on forward 150 rows. Purged: 10
-t=0.20 fold=348: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.25 fold=348: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.30 fold=348: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.35 fold=348: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.40 fold=348: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.45 fold=348: raw_crossings=139 lockout_rejected=32 barrier_pct_rejected=0 passed=107
-t=0.50 fold=348: raw_crossings=42 lockout_rejected=7 barrier_pct_rejected=0 passed=35
-t=0.55 fold=348: raw_crossings=9 lockout_rejected=0 barrier_pct_rejected=0 passed=9
-t=0.60 fold=348: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.20 fold=348: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
+t=0.25 fold=348: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
+t=0.30 fold=348: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
+t=0.35 fold=348: raw_crossings=148 lockout_rejected=27 barrier_pct_rejected=0 passed=121
+t=0.40 fold=348: raw_crossings=144 lockout_rejected=27 barrier_pct_rejected=0 passed=117
+t=0.45 fold=348: raw_crossings=134 lockout_rejected=25 barrier_pct_rejected=0 passed=109
+t=0.50 fold=348: raw_crossings=48 lockout_rejected=5 barrier_pct_rejected=0 passed=43
+t=0.55 fold=348: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
+t=0.60 fold=348: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.65 fold=348: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=348: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=348: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -6214,15 +6214,15 @@ t=0.85 fold=348: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=348: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=348: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 348 | Train Rows: 15276  | Tested on forward 150 rows. Purged: 15
-t=0.20 fold=349: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
-t=0.25 fold=349: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
-t=0.30 fold=349: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
-t=0.35 fold=349: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
-t=0.40 fold=349: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
-t=0.45 fold=349: raw_crossings=145 lockout_rejected=36 barrier_pct_rejected=0 passed=109
-t=0.50 fold=349: raw_crossings=44 lockout_rejected=5 barrier_pct_rejected=0 passed=39
-t=0.55 fold=349: raw_crossings=10 lockout_rejected=0 barrier_pct_rejected=0 passed=10
-t=0.60 fold=349: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=349: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.25 fold=349: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.30 fold=349: raw_crossings=149 lockout_rejected=26 barrier_pct_rejected=0 passed=123
+t=0.35 fold=349: raw_crossings=149 lockout_rejected=26 barrier_pct_rejected=0 passed=123
+t=0.40 fold=349: raw_crossings=145 lockout_rejected=26 barrier_pct_rejected=0 passed=119
+t=0.45 fold=349: raw_crossings=139 lockout_rejected=25 barrier_pct_rejected=0 passed=114
+t=0.50 fold=349: raw_crossings=51 lockout_rejected=3 barrier_pct_rejected=0 passed=48
+t=0.55 fold=349: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
+t=0.60 fold=349: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=349: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=349: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=349: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -6231,14 +6231,14 @@ t=0.85 fold=349: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=349: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=349: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 349 | Train Rows: 15302  | Tested on forward 150 rows. Purged: 16
-t=0.20 fold=350: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.25 fold=350: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.30 fold=350: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.35 fold=350: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.40 fold=350: raw_crossings=149 lockout_rejected=38 barrier_pct_rejected=0 passed=111
-t=0.45 fold=350: raw_crossings=139 lockout_rejected=35 barrier_pct_rejected=0 passed=104
-t=0.50 fold=350: raw_crossings=40 lockout_rejected=6 barrier_pct_rejected=0 passed=34
-t=0.55 fold=350: raw_crossings=7 lockout_rejected=0 barrier_pct_rejected=0 passed=7
+t=0.20 fold=350: raw_crossings=150 lockout_rejected=24 barrier_pct_rejected=0 passed=126
+t=0.25 fold=350: raw_crossings=150 lockout_rejected=24 barrier_pct_rejected=0 passed=126
+t=0.30 fold=350: raw_crossings=149 lockout_rejected=24 barrier_pct_rejected=0 passed=125
+t=0.35 fold=350: raw_crossings=148 lockout_rejected=23 barrier_pct_rejected=0 passed=125
+t=0.40 fold=350: raw_crossings=144 lockout_rejected=23 barrier_pct_rejected=0 passed=121
+t=0.45 fold=350: raw_crossings=139 lockout_rejected=23 barrier_pct_rejected=0 passed=116
+t=0.50 fold=350: raw_crossings=53 lockout_rejected=3 barrier_pct_rejected=0 passed=50
+t=0.55 fold=350: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
 t=0.60 fold=350: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=350: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=350: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -6248,14 +6248,14 @@ t=0.85 fold=350: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=350: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=350: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 350 | Train Rows: 15329  | Tested on forward 150 rows. Purged: 16
-t=0.20 fold=351: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.25 fold=351: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.30 fold=351: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.35 fold=351: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.40 fold=351: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.45 fold=351: raw_crossings=145 lockout_rejected=39 barrier_pct_rejected=0 passed=106
-t=0.50 fold=351: raw_crossings=43 lockout_rejected=11 barrier_pct_rejected=0 passed=32
-t=0.55 fold=351: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
+t=0.20 fold=351: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.25 fold=351: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.30 fold=351: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.35 fold=351: raw_crossings=148 lockout_rejected=25 barrier_pct_rejected=0 passed=123
+t=0.40 fold=351: raw_crossings=145 lockout_rejected=25 barrier_pct_rejected=0 passed=120
+t=0.45 fold=351: raw_crossings=141 lockout_rejected=25 barrier_pct_rejected=0 passed=116
+t=0.50 fold=351: raw_crossings=49 lockout_rejected=5 barrier_pct_rejected=0 passed=44
+t=0.55 fold=351: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
 t=0.60 fold=351: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=351: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=351: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -6265,14 +6265,14 @@ t=0.85 fold=351: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=351: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=351: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 351 | Train Rows: 15357  | Tested on forward 150 rows. Purged: 15
-t=0.20 fold=352: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.25 fold=352: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.30 fold=352: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.35 fold=352: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.40 fold=352: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.45 fold=352: raw_crossings=145 lockout_rejected=37 barrier_pct_rejected=0 passed=108
-t=0.50 fold=352: raw_crossings=53 lockout_rejected=12 barrier_pct_rejected=0 passed=41
-t=0.55 fold=352: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
+t=0.20 fold=352: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
+t=0.25 fold=352: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
+t=0.30 fold=352: raw_crossings=148 lockout_rejected=22 barrier_pct_rejected=0 passed=126
+t=0.35 fold=352: raw_crossings=147 lockout_rejected=22 barrier_pct_rejected=0 passed=125
+t=0.40 fold=352: raw_crossings=146 lockout_rejected=22 barrier_pct_rejected=0 passed=124
+t=0.45 fold=352: raw_crossings=141 lockout_rejected=22 barrier_pct_rejected=0 passed=119
+t=0.50 fold=352: raw_crossings=55 lockout_rejected=6 barrier_pct_rejected=0 passed=49
+t=0.55 fold=352: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.60 fold=352: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=352: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=352: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -6282,14 +6282,14 @@ t=0.85 fold=352: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=352: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=352: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 352 | Train Rows: 15390  | Tested on forward 150 rows. Purged: 9
-t=0.20 fold=353: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.25 fold=353: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.30 fold=353: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.35 fold=353: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.40 fold=353: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.45 fold=353: raw_crossings=145 lockout_rejected=37 barrier_pct_rejected=0 passed=108
-t=0.50 fold=353: raw_crossings=59 lockout_rejected=11 barrier_pct_rejected=0 passed=48
-t=0.55 fold=353: raw_crossings=5 lockout_rejected=0 barrier_pct_rejected=0 passed=5
+t=0.20 fold=353: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.25 fold=353: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.30 fold=353: raw_crossings=148 lockout_rejected=24 barrier_pct_rejected=0 passed=124
+t=0.35 fold=353: raw_crossings=148 lockout_rejected=24 barrier_pct_rejected=0 passed=124
+t=0.40 fold=353: raw_crossings=146 lockout_rejected=24 barrier_pct_rejected=0 passed=122
+t=0.45 fold=353: raw_crossings=139 lockout_rejected=24 barrier_pct_rejected=0 passed=115
+t=0.50 fold=353: raw_crossings=52 lockout_rejected=6 barrier_pct_rejected=0 passed=46
+t=0.55 fold=353: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.60 fold=353: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=353: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=353: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -6299,14 +6299,14 @@ t=0.85 fold=353: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=353: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=353: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 353 | Train Rows: 15409  | Tested on forward 150 rows. Purged: 17
-t=0.20 fold=354: raw_crossings=150 lockout_rejected=48 barrier_pct_rejected=0 passed=102
-t=0.25 fold=354: raw_crossings=150 lockout_rejected=48 barrier_pct_rejected=0 passed=102
-t=0.30 fold=354: raw_crossings=150 lockout_rejected=48 barrier_pct_rejected=0 passed=102
-t=0.35 fold=354: raw_crossings=150 lockout_rejected=48 barrier_pct_rejected=0 passed=102
-t=0.40 fold=354: raw_crossings=150 lockout_rejected=48 barrier_pct_rejected=0 passed=102
-t=0.45 fold=354: raw_crossings=147 lockout_rejected=46 barrier_pct_rejected=0 passed=101
-t=0.50 fold=354: raw_crossings=62 lockout_rejected=15 barrier_pct_rejected=0 passed=47
-t=0.55 fold=354: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
+t=0.20 fold=354: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.25 fold=354: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.30 fold=354: raw_crossings=149 lockout_rejected=24 barrier_pct_rejected=0 passed=125
+t=0.35 fold=354: raw_crossings=144 lockout_rejected=23 barrier_pct_rejected=0 passed=121
+t=0.40 fold=354: raw_crossings=144 lockout_rejected=23 barrier_pct_rejected=0 passed=121
+t=0.45 fold=354: raw_crossings=137 lockout_rejected=22 barrier_pct_rejected=0 passed=115
+t=0.50 fold=354: raw_crossings=52 lockout_rejected=8 barrier_pct_rejected=0 passed=44
+t=0.55 fold=354: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
 t=0.60 fold=354: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=354: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=354: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -6316,14 +6316,14 @@ t=0.85 fold=354: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=354: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=354: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 354 | Train Rows: 15436  | Tested on forward 150 rows. Purged: 17
-t=0.20 fold=355: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.25 fold=355: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.30 fold=355: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.35 fold=355: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.40 fold=355: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.45 fold=355: raw_crossings=148 lockout_rejected=42 barrier_pct_rejected=0 passed=106
-t=0.50 fold=355: raw_crossings=73 lockout_rejected=15 barrier_pct_rejected=0 passed=58
-t=0.55 fold=355: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
+t=0.20 fold=355: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.25 fold=355: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.30 fold=355: raw_crossings=149 lockout_rejected=32 barrier_pct_rejected=0 passed=117
+t=0.35 fold=355: raw_crossings=145 lockout_rejected=31 barrier_pct_rejected=0 passed=114
+t=0.40 fold=355: raw_crossings=144 lockout_rejected=31 barrier_pct_rejected=0 passed=113
+t=0.45 fold=355: raw_crossings=137 lockout_rejected=30 barrier_pct_rejected=0 passed=107
+t=0.50 fold=355: raw_crossings=46 lockout_rejected=7 barrier_pct_rejected=0 passed=39
+t=0.55 fold=355: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
 t=0.60 fold=355: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=355: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=355: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -6333,14 +6333,14 @@ t=0.85 fold=355: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=355: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=355: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 355 | Train Rows: 15457  | Tested on forward 150 rows. Purged: 23
-t=0.20 fold=356: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.25 fold=356: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.30 fold=356: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.35 fold=356: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.40 fold=356: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.45 fold=356: raw_crossings=148 lockout_rejected=46 barrier_pct_rejected=0 passed=102
-t=0.50 fold=356: raw_crossings=78 lockout_rejected=18 barrier_pct_rejected=0 passed=60
-t=0.55 fold=356: raw_crossings=6 lockout_rejected=1 barrier_pct_rejected=0 passed=5
+t=0.20 fold=356: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
+t=0.25 fold=356: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
+t=0.30 fold=356: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
+t=0.35 fold=356: raw_crossings=146 lockout_rejected=34 barrier_pct_rejected=0 passed=112
+t=0.40 fold=356: raw_crossings=146 lockout_rejected=34 barrier_pct_rejected=0 passed=112
+t=0.45 fold=356: raw_crossings=140 lockout_rejected=33 barrier_pct_rejected=0 passed=107
+t=0.50 fold=356: raw_crossings=40 lockout_rejected=7 barrier_pct_rejected=0 passed=33
+t=0.55 fold=356: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
 t=0.60 fold=356: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=356: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=356: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -6350,14 +6350,14 @@ t=0.85 fold=356: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=356: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=356: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 356 | Train Rows: 15493  | Tested on forward 150 rows. Purged: 14
-t=0.20 fold=357: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.25 fold=357: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.30 fold=357: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.35 fold=357: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.40 fold=357: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.45 fold=357: raw_crossings=147 lockout_rejected=44 barrier_pct_rejected=0 passed=103
-t=0.50 fold=357: raw_crossings=86 lockout_rejected=22 barrier_pct_rejected=0 passed=64
-t=0.55 fold=357: raw_crossings=6 lockout_rejected=1 barrier_pct_rejected=0 passed=5
+t=0.20 fold=357: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
+t=0.25 fold=357: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
+t=0.30 fold=357: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
+t=0.35 fold=357: raw_crossings=146 lockout_rejected=34 barrier_pct_rejected=0 passed=112
+t=0.40 fold=357: raw_crossings=146 lockout_rejected=34 barrier_pct_rejected=0 passed=112
+t=0.45 fold=357: raw_crossings=141 lockout_rejected=33 barrier_pct_rejected=0 passed=108
+t=0.50 fold=357: raw_crossings=38 lockout_rejected=3 barrier_pct_rejected=0 passed=35
+t=0.55 fold=357: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.60 fold=357: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=357: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=357: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -6367,14 +6367,14 @@ t=0.85 fold=357: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=357: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=357: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 357 | Train Rows: 15523  | Tested on forward 150 rows. Purged: 11
-t=0.20 fold=358: raw_crossings=150 lockout_rejected=40 barrier_pct_rejected=0 passed=110
-t=0.25 fold=358: raw_crossings=150 lockout_rejected=40 barrier_pct_rejected=0 passed=110
-t=0.30 fold=358: raw_crossings=150 lockout_rejected=40 barrier_pct_rejected=0 passed=110
-t=0.35 fold=358: raw_crossings=150 lockout_rejected=40 barrier_pct_rejected=0 passed=110
-t=0.40 fold=358: raw_crossings=150 lockout_rejected=40 barrier_pct_rejected=0 passed=110
-t=0.45 fold=358: raw_crossings=145 lockout_rejected=37 barrier_pct_rejected=0 passed=108
-t=0.50 fold=358: raw_crossings=86 lockout_rejected=15 barrier_pct_rejected=0 passed=71
-t=0.55 fold=358: raw_crossings=5 lockout_rejected=1 barrier_pct_rejected=0 passed=4
+t=0.20 fold=358: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
+t=0.25 fold=358: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
+t=0.30 fold=358: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
+t=0.35 fold=358: raw_crossings=148 lockout_rejected=36 barrier_pct_rejected=0 passed=112
+t=0.40 fold=358: raw_crossings=145 lockout_rejected=34 barrier_pct_rejected=0 passed=111
+t=0.45 fold=358: raw_crossings=136 lockout_rejected=33 barrier_pct_rejected=0 passed=103
+t=0.50 fold=358: raw_crossings=35 lockout_rejected=5 barrier_pct_rejected=0 passed=30
+t=0.55 fold=358: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.60 fold=358: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=358: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=358: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -6384,14 +6384,14 @@ t=0.85 fold=358: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=358: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=358: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 358 | Train Rows: 15551  | Tested on forward 150 rows. Purged: 10
-t=0.20 fold=359: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.25 fold=359: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.30 fold=359: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.35 fold=359: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.40 fold=359: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.45 fold=359: raw_crossings=146 lockout_rejected=37 barrier_pct_rejected=0 passed=109
-t=0.50 fold=359: raw_crossings=87 lockout_rejected=16 barrier_pct_rejected=0 passed=71
-t=0.55 fold=359: raw_crossings=6 lockout_rejected=1 barrier_pct_rejected=0 passed=5
+t=0.20 fold=359: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
+t=0.25 fold=359: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
+t=0.30 fold=359: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
+t=0.35 fold=359: raw_crossings=149 lockout_rejected=34 barrier_pct_rejected=0 passed=115
+t=0.40 fold=359: raw_crossings=148 lockout_rejected=32 barrier_pct_rejected=0 passed=116
+t=0.45 fold=359: raw_crossings=138 lockout_rejected=31 barrier_pct_rejected=0 passed=107
+t=0.50 fold=359: raw_crossings=40 lockout_rejected=4 barrier_pct_rejected=0 passed=36
+t=0.55 fold=359: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.60 fold=359: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=359: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=359: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -6401,14 +6401,14 @@ t=0.85 fold=359: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=359: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=359: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 359 | Train Rows: 15575  | Tested on forward 150 rows. Purged: 13
-t=0.20 fold=360: raw_crossings=150 lockout_rejected=46 barrier_pct_rejected=0 passed=104
-t=0.25 fold=360: raw_crossings=150 lockout_rejected=46 barrier_pct_rejected=0 passed=104
-t=0.30 fold=360: raw_crossings=150 lockout_rejected=46 barrier_pct_rejected=0 passed=104
-t=0.35 fold=360: raw_crossings=150 lockout_rejected=46 barrier_pct_rejected=0 passed=104
-t=0.40 fold=360: raw_crossings=150 lockout_rejected=46 barrier_pct_rejected=0 passed=104
-t=0.45 fold=360: raw_crossings=146 lockout_rejected=44 barrier_pct_rejected=0 passed=102
-t=0.50 fold=360: raw_crossings=85 lockout_rejected=18 barrier_pct_rejected=0 passed=67
-t=0.55 fold=360: raw_crossings=5 lockout_rejected=0 barrier_pct_rejected=0 passed=5
+t=0.20 fold=360: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
+t=0.25 fold=360: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
+t=0.30 fold=360: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
+t=0.35 fold=360: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
+t=0.40 fold=360: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
+t=0.45 fold=360: raw_crossings=138 lockout_rejected=31 barrier_pct_rejected=0 passed=107
+t=0.50 fold=360: raw_crossings=41 lockout_rejected=1 barrier_pct_rejected=0 passed=40
+t=0.55 fold=360: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.60 fold=360: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=360: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=360: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -6418,14 +6418,14 @@ t=0.85 fold=360: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=360: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=360: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 360 | Train Rows: 15605  | Tested on forward 150 rows. Purged: 10
-t=0.20 fold=361: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.25 fold=361: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.30 fold=361: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.35 fold=361: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.40 fold=361: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.45 fold=361: raw_crossings=148 lockout_rejected=46 barrier_pct_rejected=0 passed=102
-t=0.50 fold=361: raw_crossings=80 lockout_rejected=18 barrier_pct_rejected=0 passed=62
-t=0.55 fold=361: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
+t=0.20 fold=361: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
+t=0.25 fold=361: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
+t=0.30 fold=361: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
+t=0.35 fold=361: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
+t=0.40 fold=361: raw_crossings=149 lockout_rejected=27 barrier_pct_rejected=0 passed=122
+t=0.45 fold=361: raw_crossings=138 lockout_rejected=26 barrier_pct_rejected=0 passed=112
+t=0.50 fold=361: raw_crossings=56 lockout_rejected=5 barrier_pct_rejected=0 passed=51
+t=0.55 fold=361: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
 t=0.60 fold=361: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=361: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=361: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -6435,14 +6435,14 @@ t=0.85 fold=361: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=361: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=361: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 361 | Train Rows: 15630  | Tested on forward 150 rows. Purged: 12
-t=0.20 fold=362: raw_crossings=150 lockout_rejected=49 barrier_pct_rejected=0 passed=101
-t=0.25 fold=362: raw_crossings=150 lockout_rejected=49 barrier_pct_rejected=0 passed=101
-t=0.30 fold=362: raw_crossings=150 lockout_rejected=49 barrier_pct_rejected=0 passed=101
-t=0.35 fold=362: raw_crossings=150 lockout_rejected=49 barrier_pct_rejected=0 passed=101
-t=0.40 fold=362: raw_crossings=150 lockout_rejected=49 barrier_pct_rejected=0 passed=101
-t=0.45 fold=362: raw_crossings=147 lockout_rejected=48 barrier_pct_rejected=0 passed=99
-t=0.50 fold=362: raw_crossings=76 lockout_rejected=16 barrier_pct_rejected=0 passed=60
-t=0.55 fold=362: raw_crossings=5 lockout_rejected=0 barrier_pct_rejected=0 passed=5
+t=0.20 fold=362: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.25 fold=362: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.30 fold=362: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.35 fold=362: raw_crossings=150 lockout_rejected=26 barrier_pct_rejected=0 passed=124
+t=0.40 fold=362: raw_crossings=149 lockout_rejected=26 barrier_pct_rejected=0 passed=123
+t=0.45 fold=362: raw_crossings=138 lockout_rejected=24 barrier_pct_rejected=0 passed=114
+t=0.50 fold=362: raw_crossings=58 lockout_rejected=5 barrier_pct_rejected=0 passed=53
+t=0.55 fold=362: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
 t=0.60 fold=362: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=362: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=362: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -6452,14 +6452,14 @@ t=0.85 fold=362: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=362: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=362: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 362 | Train Rows: 15657  | Tested on forward 150 rows. Purged: 12
-t=0.20 fold=363: raw_crossings=150 lockout_rejected=48 barrier_pct_rejected=0 passed=102
-t=0.25 fold=363: raw_crossings=150 lockout_rejected=48 barrier_pct_rejected=0 passed=102
-t=0.30 fold=363: raw_crossings=150 lockout_rejected=48 barrier_pct_rejected=0 passed=102
-t=0.35 fold=363: raw_crossings=150 lockout_rejected=48 barrier_pct_rejected=0 passed=102
-t=0.40 fold=363: raw_crossings=150 lockout_rejected=48 barrier_pct_rejected=0 passed=102
-t=0.45 fold=363: raw_crossings=149 lockout_rejected=51 barrier_pct_rejected=0 passed=98
-t=0.50 fold=363: raw_crossings=83 lockout_rejected=19 barrier_pct_rejected=0 passed=64
-t=0.55 fold=363: raw_crossings=7 lockout_rejected=1 barrier_pct_rejected=0 passed=6
+t=0.20 fold=363: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
+t=0.25 fold=363: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
+t=0.30 fold=363: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
+t=0.35 fold=363: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
+t=0.40 fold=363: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
+t=0.45 fold=363: raw_crossings=138 lockout_rejected=20 barrier_pct_rejected=0 passed=118
+t=0.50 fold=363: raw_crossings=53 lockout_rejected=3 barrier_pct_rejected=0 passed=50
+t=0.55 fold=363: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.60 fold=363: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=363: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=363: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -6469,14 +6469,14 @@ t=0.85 fold=363: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=363: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=363: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 363 | Train Rows: 15681  | Tested on forward 150 rows. Purged: 15
-t=0.20 fold=364: raw_crossings=150 lockout_rejected=46 barrier_pct_rejected=0 passed=104
-t=0.25 fold=364: raw_crossings=150 lockout_rejected=46 barrier_pct_rejected=0 passed=104
-t=0.30 fold=364: raw_crossings=150 lockout_rejected=46 barrier_pct_rejected=0 passed=104
-t=0.35 fold=364: raw_crossings=150 lockout_rejected=46 barrier_pct_rejected=0 passed=104
-t=0.40 fold=364: raw_crossings=150 lockout_rejected=46 barrier_pct_rejected=0 passed=104
-t=0.45 fold=364: raw_crossings=149 lockout_rejected=45 barrier_pct_rejected=0 passed=104
-t=0.50 fold=364: raw_crossings=82 lockout_rejected=22 barrier_pct_rejected=0 passed=60
-t=0.55 fold=364: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
+t=0.20 fold=364: raw_crossings=150 lockout_rejected=21 barrier_pct_rejected=0 passed=129
+t=0.25 fold=364: raw_crossings=150 lockout_rejected=21 barrier_pct_rejected=0 passed=129
+t=0.30 fold=364: raw_crossings=150 lockout_rejected=21 barrier_pct_rejected=0 passed=129
+t=0.35 fold=364: raw_crossings=150 lockout_rejected=21 barrier_pct_rejected=0 passed=129
+t=0.40 fold=364: raw_crossings=150 lockout_rejected=21 barrier_pct_rejected=0 passed=129
+t=0.45 fold=364: raw_crossings=142 lockout_rejected=19 barrier_pct_rejected=0 passed=123
+t=0.50 fold=364: raw_crossings=71 lockout_rejected=4 barrier_pct_rejected=0 passed=67
+t=0.55 fold=364: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.60 fold=364: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=364: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=364: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -6486,14 +6486,14 @@ t=0.85 fold=364: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=364: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=364: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 364 | Train Rows: 15711  | Tested on forward 150 rows. Purged: 12
-t=0.20 fold=365: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.25 fold=365: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.30 fold=365: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.35 fold=365: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.40 fold=365: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.45 fold=365: raw_crossings=148 lockout_rejected=47 barrier_pct_rejected=0 passed=101
-t=0.50 fold=365: raw_crossings=85 lockout_rejected=20 barrier_pct_rejected=0 passed=65
-t=0.55 fold=365: raw_crossings=6 lockout_rejected=0 barrier_pct_rejected=0 passed=6
+t=0.20 fold=365: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.25 fold=365: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.30 fold=365: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.35 fold=365: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.40 fold=365: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.45 fold=365: raw_crossings=140 lockout_rejected=24 barrier_pct_rejected=0 passed=116
+t=0.50 fold=365: raw_crossings=57 lockout_rejected=3 barrier_pct_rejected=0 passed=54
+t=0.55 fold=365: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.60 fold=365: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=365: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=365: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -6503,14 +6503,14 @@ t=0.85 fold=365: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=365: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=365: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 365 | Train Rows: 15741  | Tested on forward 150 rows. Purged: 9
-t=0.20 fold=366: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.25 fold=366: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.30 fold=366: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.35 fold=366: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.40 fold=366: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.45 fold=366: raw_crossings=146 lockout_rejected=45 barrier_pct_rejected=0 passed=101
-t=0.50 fold=366: raw_crossings=77 lockout_rejected=18 barrier_pct_rejected=0 passed=59
-t=0.55 fold=366: raw_crossings=5 lockout_rejected=0 barrier_pct_rejected=0 passed=5
+t=0.20 fold=366: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
+t=0.25 fold=366: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
+t=0.30 fold=366: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
+t=0.35 fold=366: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
+t=0.40 fold=366: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
+t=0.45 fold=366: raw_crossings=143 lockout_rejected=29 barrier_pct_rejected=0 passed=114
+t=0.50 fold=366: raw_crossings=57 lockout_rejected=5 barrier_pct_rejected=0 passed=52
+t=0.55 fold=366: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
 t=0.60 fold=366: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=366: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=366: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -6520,14 +6520,14 @@ t=0.85 fold=366: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=366: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=366: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 366 | Train Rows: 15768  | Tested on forward 150 rows. Purged: 9
-t=0.20 fold=367: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.25 fold=367: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.30 fold=367: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.35 fold=367: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.40 fold=367: raw_crossings=149 lockout_rejected=38 barrier_pct_rejected=0 passed=111
-t=0.45 fold=367: raw_crossings=146 lockout_rejected=37 barrier_pct_rejected=0 passed=109
-t=0.50 fold=367: raw_crossings=77 lockout_rejected=10 barrier_pct_rejected=0 passed=67
-t=0.55 fold=367: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
+t=0.20 fold=367: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
+t=0.25 fold=367: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
+t=0.30 fold=367: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
+t=0.35 fold=367: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
+t=0.40 fold=367: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
+t=0.45 fold=367: raw_crossings=141 lockout_rejected=28 barrier_pct_rejected=0 passed=113
+t=0.50 fold=367: raw_crossings=48 lockout_rejected=3 barrier_pct_rejected=0 passed=45
+t=0.55 fold=367: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.60 fold=367: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=367: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=367: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -6537,15 +6537,15 @@ t=0.85 fold=367: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=367: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=367: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 367 | Train Rows: 15793  | Tested on forward 150 rows. Purged: 11
-t=0.20 fold=368: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.25 fold=368: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.30 fold=368: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.35 fold=368: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.40 fold=368: raw_crossings=149 lockout_rejected=43 barrier_pct_rejected=0 passed=106
-t=0.45 fold=368: raw_crossings=145 lockout_rejected=41 barrier_pct_rejected=0 passed=104
-t=0.50 fold=368: raw_crossings=70 lockout_rejected=12 barrier_pct_rejected=0 passed=58
+t=0.20 fold=368: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
+t=0.25 fold=368: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
+t=0.30 fold=368: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
+t=0.35 fold=368: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
+t=0.40 fold=368: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
+t=0.45 fold=368: raw_crossings=143 lockout_rejected=33 barrier_pct_rejected=0 passed=110
+t=0.50 fold=368: raw_crossings=48 lockout_rejected=5 barrier_pct_rejected=0 passed=43
 t=0.55 fold=368: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
-t=0.60 fold=368: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.60 fold=368: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.65 fold=368: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=368: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=368: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -6554,15 +6554,15 @@ t=0.85 fold=368: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=368: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=368: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 368 | Train Rows: 15822  | Tested on forward 150 rows. Purged: 9
-t=0.20 fold=369: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
-t=0.25 fold=369: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
-t=0.30 fold=369: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
-t=0.35 fold=369: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
-t=0.40 fold=369: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
-t=0.45 fold=369: raw_crossings=145 lockout_rejected=44 barrier_pct_rejected=0 passed=101
-t=0.50 fold=369: raw_crossings=65 lockout_rejected=12 barrier_pct_rejected=0 passed=53
-t=0.55 fold=369: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
-t=0.60 fold=369: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.20 fold=369: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
+t=0.25 fold=369: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
+t=0.30 fold=369: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
+t=0.35 fold=369: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
+t=0.40 fold=369: raw_crossings=150 lockout_rejected=34 barrier_pct_rejected=0 passed=116
+t=0.45 fold=369: raw_crossings=141 lockout_rejected=29 barrier_pct_rejected=0 passed=112
+t=0.50 fold=369: raw_crossings=42 lockout_rejected=2 barrier_pct_rejected=0 passed=40
+t=0.55 fold=369: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.60 fold=369: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.65 fold=369: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=369: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=369: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -6571,15 +6571,15 @@ t=0.85 fold=369: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=369: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=369: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 369 | Train Rows: 15846  | Tested on forward 150 rows. Purged: 12
-t=0.20 fold=370: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.25 fold=370: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.30 fold=370: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.35 fold=370: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.40 fold=370: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.45 fold=370: raw_crossings=146 lockout_rejected=41 barrier_pct_rejected=0 passed=105
-t=0.50 fold=370: raw_crossings=67 lockout_rejected=8 barrier_pct_rejected=0 passed=59
-t=0.55 fold=370: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
-t=0.60 fold=370: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.20 fold=370: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.25 fold=370: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.30 fold=370: raw_crossings=150 lockout_rejected=33 barrier_pct_rejected=0 passed=117
+t=0.35 fold=370: raw_crossings=149 lockout_rejected=33 barrier_pct_rejected=0 passed=116
+t=0.40 fold=370: raw_crossings=149 lockout_rejected=33 barrier_pct_rejected=0 passed=116
+t=0.45 fold=370: raw_crossings=140 lockout_rejected=28 barrier_pct_rejected=0 passed=112
+t=0.50 fold=370: raw_crossings=44 lockout_rejected=3 barrier_pct_rejected=0 passed=41
+t=0.55 fold=370: raw_crossings=5 lockout_rejected=1 barrier_pct_rejected=0 passed=4
+t=0.60 fold=370: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.65 fold=370: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=370: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=370: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -6588,15 +6588,15 @@ t=0.85 fold=370: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=370: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=370: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 370 | Train Rows: 15872  | Tested on forward 150 rows. Purged: 13
-t=0.20 fold=371: raw_crossings=150 lockout_rejected=50 barrier_pct_rejected=0 passed=100
-t=0.25 fold=371: raw_crossings=150 lockout_rejected=50 barrier_pct_rejected=0 passed=100
-t=0.30 fold=371: raw_crossings=150 lockout_rejected=50 barrier_pct_rejected=0 passed=100
-t=0.35 fold=371: raw_crossings=150 lockout_rejected=50 barrier_pct_rejected=0 passed=100
-t=0.40 fold=371: raw_crossings=150 lockout_rejected=50 barrier_pct_rejected=0 passed=100
-t=0.45 fold=371: raw_crossings=141 lockout_rejected=46 barrier_pct_rejected=0 passed=95
-t=0.50 fold=371: raw_crossings=50 lockout_rejected=8 barrier_pct_rejected=0 passed=42
-t=0.55 fold=371: raw_crossings=3 lockout_rejected=1 barrier_pct_rejected=0 passed=2
-t=0.60 fold=371: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.20 fold=371: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.25 fold=371: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.30 fold=371: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.35 fold=371: raw_crossings=149 lockout_rejected=25 barrier_pct_rejected=0 passed=124
+t=0.40 fold=371: raw_crossings=149 lockout_rejected=25 barrier_pct_rejected=0 passed=124
+t=0.45 fold=371: raw_crossings=139 lockout_rejected=20 barrier_pct_rejected=0 passed=119
+t=0.50 fold=371: raw_crossings=57 lockout_rejected=2 barrier_pct_rejected=0 passed=55
+t=0.55 fold=371: raw_crossings=5 lockout_rejected=0 barrier_pct_rejected=0 passed=5
+t=0.60 fold=371: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.65 fold=371: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=371: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=371: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -6605,15 +6605,15 @@ t=0.85 fold=371: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=371: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=371: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 371 | Train Rows: 15894  | Tested on forward 150 rows. Purged: 18
-t=0.20 fold=372: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.25 fold=372: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.30 fold=372: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.35 fold=372: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.40 fold=372: raw_crossings=147 lockout_rejected=40 barrier_pct_rejected=0 passed=107
-t=0.45 fold=372: raw_crossings=143 lockout_rejected=37 barrier_pct_rejected=0 passed=106
-t=0.50 fold=372: raw_crossings=57 lockout_rejected=11 barrier_pct_rejected=0 passed=46
-t=0.55 fold=372: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
-t=0.60 fold=372: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.20 fold=372: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.25 fold=372: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.30 fold=372: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.35 fold=372: raw_crossings=149 lockout_rejected=29 barrier_pct_rejected=0 passed=120
+t=0.40 fold=372: raw_crossings=148 lockout_rejected=28 barrier_pct_rejected=0 passed=120
+t=0.45 fold=372: raw_crossings=136 lockout_rejected=23 barrier_pct_rejected=0 passed=113
+t=0.50 fold=372: raw_crossings=61 lockout_rejected=5 barrier_pct_rejected=0 passed=56
+t=0.55 fold=372: raw_crossings=6 lockout_rejected=1 barrier_pct_rejected=0 passed=5
+t=0.60 fold=372: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
 t=0.65 fold=372: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=372: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=372: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -6622,15 +6622,15 @@ t=0.85 fold=372: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=372: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=372: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 372 | Train Rows: 15931  | Tested on forward 150 rows. Purged: 8
-t=0.20 fold=373: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.25 fold=373: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.30 fold=373: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.35 fold=373: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.40 fold=373: raw_crossings=148 lockout_rejected=37 barrier_pct_rejected=0 passed=111
-t=0.45 fold=373: raw_crossings=146 lockout_rejected=36 barrier_pct_rejected=0 passed=110
-t=0.50 fold=373: raw_crossings=61 lockout_rejected=8 barrier_pct_rejected=0 passed=53
+t=0.20 fold=373: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.25 fold=373: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.30 fold=373: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.35 fold=373: raw_crossings=149 lockout_rejected=25 barrier_pct_rejected=0 passed=124
+t=0.40 fold=373: raw_crossings=149 lockout_rejected=25 barrier_pct_rejected=0 passed=124
+t=0.45 fold=373: raw_crossings=136 lockout_rejected=20 barrier_pct_rejected=0 passed=116
+t=0.50 fold=373: raw_crossings=68 lockout_rejected=4 barrier_pct_rejected=0 passed=64
 t=0.55 fold=373: raw_crossings=5 lockout_rejected=0 barrier_pct_rejected=0 passed=5
-t=0.60 fold=373: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.60 fold=373: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.65 fold=373: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=373: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=373: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -6639,14 +6639,14 @@ t=0.85 fold=373: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=373: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=373: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 373 | Train Rows: 15950  | Tested on forward 150 rows. Purged: 16
-t=0.20 fold=374: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.25 fold=374: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.30 fold=374: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.35 fold=374: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.40 fold=374: raw_crossings=149 lockout_rejected=42 barrier_pct_rejected=0 passed=107
-t=0.45 fold=374: raw_crossings=145 lockout_rejected=39 barrier_pct_rejected=0 passed=106
-t=0.50 fold=374: raw_crossings=57 lockout_rejected=11 barrier_pct_rejected=0 passed=46
-t=0.55 fold=374: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
+t=0.20 fold=374: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
+t=0.25 fold=374: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
+t=0.30 fold=374: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
+t=0.35 fold=374: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
+t=0.40 fold=374: raw_crossings=149 lockout_rejected=23 barrier_pct_rejected=0 passed=126
+t=0.45 fold=374: raw_crossings=139 lockout_rejected=20 barrier_pct_rejected=0 passed=119
+t=0.50 fold=374: raw_crossings=68 lockout_rejected=4 barrier_pct_rejected=0 passed=64
+t=0.55 fold=374: raw_crossings=5 lockout_rejected=0 barrier_pct_rejected=0 passed=5
 t=0.60 fold=374: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=374: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=374: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -6656,15 +6656,15 @@ t=0.85 fold=374: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=374: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=374: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 374 | Train Rows: 15980  | Tested on forward 150 rows. Purged: 13
-t=0.20 fold=375: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
-t=0.25 fold=375: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
-t=0.30 fold=375: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
-t=0.35 fold=375: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
-t=0.40 fold=375: raw_crossings=149 lockout_rejected=45 barrier_pct_rejected=0 passed=104
-t=0.45 fold=375: raw_crossings=145 lockout_rejected=43 barrier_pct_rejected=0 passed=102
-t=0.50 fold=375: raw_crossings=48 lockout_rejected=11 barrier_pct_rejected=0 passed=37
-t=0.55 fold=375: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
-t=0.60 fold=375: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.20 fold=375: raw_crossings=150 lockout_rejected=20 barrier_pct_rejected=0 passed=130
+t=0.25 fold=375: raw_crossings=150 lockout_rejected=20 barrier_pct_rejected=0 passed=130
+t=0.30 fold=375: raw_crossings=150 lockout_rejected=20 barrier_pct_rejected=0 passed=130
+t=0.35 fold=375: raw_crossings=149 lockout_rejected=20 barrier_pct_rejected=0 passed=129
+t=0.40 fold=375: raw_crossings=149 lockout_rejected=20 barrier_pct_rejected=0 passed=129
+t=0.45 fold=375: raw_crossings=135 lockout_rejected=16 barrier_pct_rejected=0 passed=119
+t=0.50 fold=375: raw_crossings=61 lockout_rejected=3 barrier_pct_rejected=0 passed=58
+t=0.55 fold=375: raw_crossings=5 lockout_rejected=0 barrier_pct_rejected=0 passed=5
+t=0.60 fold=375: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
 t=0.65 fold=375: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=375: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=375: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -6673,14 +6673,14 @@ t=0.85 fold=375: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=375: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=375: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 375 | Train Rows: 16013  | Tested on forward 150 rows. Purged: 7
-t=0.20 fold=376: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.25 fold=376: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.30 fold=376: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.35 fold=376: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.40 fold=376: raw_crossings=150 lockout_rejected=39 barrier_pct_rejected=0 passed=111
-t=0.45 fold=376: raw_crossings=148 lockout_rejected=38 barrier_pct_rejected=0 passed=110
-t=0.50 fold=376: raw_crossings=54 lockout_rejected=8 barrier_pct_rejected=0 passed=46
-t=0.55 fold=376: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
+t=0.20 fold=376: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
+t=0.25 fold=376: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
+t=0.30 fold=376: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
+t=0.35 fold=376: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
+t=0.40 fold=376: raw_crossings=150 lockout_rejected=23 barrier_pct_rejected=0 passed=127
+t=0.45 fold=376: raw_crossings=138 lockout_rejected=18 barrier_pct_rejected=0 passed=120
+t=0.50 fold=376: raw_crossings=66 lockout_rejected=5 barrier_pct_rejected=0 passed=61
+t=0.55 fold=376: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
 t=0.60 fold=376: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=376: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=376: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -6690,14 +6690,14 @@ t=0.85 fold=376: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=376: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=376: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 376 | Train Rows: 16027  | Tested on forward 150 rows. Purged: 20
-t=0.20 fold=377: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.25 fold=377: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.30 fold=377: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.35 fold=377: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.40 fold=377: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.45 fold=377: raw_crossings=147 lockout_rejected=35 barrier_pct_rejected=0 passed=112
-t=0.50 fold=377: raw_crossings=61 lockout_rejected=11 barrier_pct_rejected=0 passed=50
-t=0.55 fold=377: raw_crossings=7 lockout_rejected=0 barrier_pct_rejected=0 passed=7
+t=0.20 fold=377: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.25 fold=377: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.30 fold=377: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.35 fold=377: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.40 fold=377: raw_crossings=148 lockout_rejected=24 barrier_pct_rejected=0 passed=124
+t=0.45 fold=377: raw_crossings=128 lockout_rejected=16 barrier_pct_rejected=0 passed=112
+t=0.50 fold=377: raw_crossings=55 lockout_rejected=4 barrier_pct_rejected=0 passed=51
+t=0.55 fold=377: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
 t=0.60 fold=377: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=377: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=377: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -6707,14 +6707,14 @@ t=0.85 fold=377: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=377: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=377: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 377 | Train Rows: 16060  | Tested on forward 150 rows. Purged: 14
-t=0.20 fold=378: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
-t=0.25 fold=378: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
-t=0.30 fold=378: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
-t=0.35 fold=378: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
-t=0.40 fold=378: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
-t=0.45 fold=378: raw_crossings=147 lockout_rejected=32 barrier_pct_rejected=0 passed=115
-t=0.50 fold=378: raw_crossings=68 lockout_rejected=11 barrier_pct_rejected=0 passed=57
-t=0.55 fold=378: raw_crossings=8 lockout_rejected=0 barrier_pct_rejected=0 passed=8
+t=0.20 fold=378: raw_crossings=150 lockout_rejected=24 barrier_pct_rejected=0 passed=126
+t=0.25 fold=378: raw_crossings=150 lockout_rejected=24 barrier_pct_rejected=0 passed=126
+t=0.30 fold=378: raw_crossings=150 lockout_rejected=24 barrier_pct_rejected=0 passed=126
+t=0.35 fold=378: raw_crossings=150 lockout_rejected=24 barrier_pct_rejected=0 passed=126
+t=0.40 fold=378: raw_crossings=149 lockout_rejected=24 barrier_pct_rejected=0 passed=125
+t=0.45 fold=378: raw_crossings=130 lockout_rejected=18 barrier_pct_rejected=0 passed=112
+t=0.50 fold=378: raw_crossings=54 lockout_rejected=5 barrier_pct_rejected=0 passed=49
+t=0.55 fold=378: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.60 fold=378: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=378: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=378: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -6727,11 +6727,11 @@ Fold 378 | Train Rows: 16084  | Tested on forward 150 rows. Purged: 17
 t=0.20 fold=379: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
 t=0.25 fold=379: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
 t=0.30 fold=379: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
-t=0.35 fold=379: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
-t=0.40 fold=379: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
-t=0.45 fold=379: raw_crossings=144 lockout_rejected=26 barrier_pct_rejected=0 passed=118
-t=0.50 fold=379: raw_crossings=72 lockout_rejected=10 barrier_pct_rejected=0 passed=62
-t=0.55 fold=379: raw_crossings=11 lockout_rejected=1 barrier_pct_rejected=0 passed=10
+t=0.35 fold=379: raw_crossings=149 lockout_rejected=27 barrier_pct_rejected=0 passed=122
+t=0.40 fold=379: raw_crossings=143 lockout_rejected=25 barrier_pct_rejected=0 passed=118
+t=0.45 fold=379: raw_crossings=127 lockout_rejected=22 barrier_pct_rejected=0 passed=105
+t=0.50 fold=379: raw_crossings=57 lockout_rejected=7 barrier_pct_rejected=0 passed=50
+t=0.55 fold=379: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.60 fold=379: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=379: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=379: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -6745,10 +6745,10 @@ t=0.20 fold=380: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 pa
 t=0.25 fold=380: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
 t=0.30 fold=380: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
 t=0.35 fold=380: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
-t=0.40 fold=380: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
-t=0.45 fold=380: raw_crossings=147 lockout_rejected=28 barrier_pct_rejected=0 passed=119
-t=0.50 fold=380: raw_crossings=90 lockout_rejected=13 barrier_pct_rejected=0 passed=77
-t=0.55 fold=380: raw_crossings=8 lockout_rejected=1 barrier_pct_rejected=0 passed=7
+t=0.40 fold=380: raw_crossings=142 lockout_rejected=27 barrier_pct_rejected=0 passed=115
+t=0.45 fold=380: raw_crossings=129 lockout_rejected=23 barrier_pct_rejected=0 passed=106
+t=0.50 fold=380: raw_crossings=58 lockout_rejected=6 barrier_pct_rejected=0 passed=52
+t=0.55 fold=380: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.60 fold=380: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=380: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=380: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -6758,14 +6758,14 @@ t=0.85 fold=380: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=380: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=380: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 380 | Train Rows: 16133  | Tested on forward 150 rows. Purged: 22
-t=0.20 fold=381: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
-t=0.25 fold=381: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
-t=0.30 fold=381: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
-t=0.35 fold=381: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
-t=0.40 fold=381: raw_crossings=149 lockout_rejected=29 barrier_pct_rejected=0 passed=120
-t=0.45 fold=381: raw_crossings=147 lockout_rejected=28 barrier_pct_rejected=0 passed=119
-t=0.50 fold=381: raw_crossings=100 lockout_rejected=16 barrier_pct_rejected=0 passed=84
-t=0.55 fold=381: raw_crossings=15 lockout_rejected=1 barrier_pct_rejected=0 passed=14
+t=0.20 fold=381: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
+t=0.25 fold=381: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
+t=0.30 fold=381: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
+t=0.35 fold=381: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
+t=0.40 fold=381: raw_crossings=140 lockout_rejected=28 barrier_pct_rejected=0 passed=112
+t=0.45 fold=381: raw_crossings=124 lockout_rejected=24 barrier_pct_rejected=0 passed=100
+t=0.50 fold=381: raw_crossings=50 lockout_rejected=7 barrier_pct_rejected=0 passed=43
+t=0.55 fold=381: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.60 fold=381: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=381: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=381: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -6775,14 +6775,14 @@ t=0.85 fold=381: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=381: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=381: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 381 | Train Rows: 16169  | Tested on forward 150 rows. Purged: 13
-t=0.20 fold=382: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.25 fold=382: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.30 fold=382: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.35 fold=382: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.40 fold=382: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
-t=0.45 fold=382: raw_crossings=147 lockout_rejected=34 barrier_pct_rejected=0 passed=113
-t=0.50 fold=382: raw_crossings=90 lockout_rejected=17 barrier_pct_rejected=0 passed=73
-t=0.55 fold=382: raw_crossings=12 lockout_rejected=0 barrier_pct_rejected=0 passed=12
+t=0.20 fold=382: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
+t=0.25 fold=382: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
+t=0.30 fold=382: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
+t=0.35 fold=382: raw_crossings=150 lockout_rejected=35 barrier_pct_rejected=0 passed=115
+t=0.40 fold=382: raw_crossings=141 lockout_rejected=33 barrier_pct_rejected=0 passed=108
+t=0.45 fold=382: raw_crossings=130 lockout_rejected=29 barrier_pct_rejected=0 passed=101
+t=0.50 fold=382: raw_crossings=49 lockout_rejected=5 barrier_pct_rejected=0 passed=44
+t=0.55 fold=382: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.60 fold=382: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=382: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=382: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -6792,15 +6792,15 @@ t=0.85 fold=382: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=382: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=382: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 382 | Train Rows: 16194  | Tested on forward 150 rows. Purged: 15
-t=0.20 fold=383: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
-t=0.25 fold=383: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
-t=0.30 fold=383: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
-t=0.35 fold=383: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
-t=0.40 fold=383: raw_crossings=150 lockout_rejected=32 barrier_pct_rejected=0 passed=118
-t=0.45 fold=383: raw_crossings=149 lockout_rejected=31 barrier_pct_rejected=0 passed=118
-t=0.50 fold=383: raw_crossings=86 lockout_rejected=10 barrier_pct_rejected=0 passed=76
-t=0.55 fold=383: raw_crossings=22 lockout_rejected=1 barrier_pct_rejected=0 passed=21
-t=0.60 fold=383: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=383: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
+t=0.25 fold=383: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
+t=0.30 fold=383: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
+t=0.35 fold=383: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
+t=0.40 fold=383: raw_crossings=143 lockout_rejected=35 barrier_pct_rejected=0 passed=108
+t=0.45 fold=383: raw_crossings=135 lockout_rejected=29 barrier_pct_rejected=0 passed=106
+t=0.50 fold=383: raw_crossings=49 lockout_rejected=6 barrier_pct_rejected=0 passed=43
+t=0.55 fold=383: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.60 fold=383: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=383: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=383: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=383: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -6809,14 +6809,14 @@ t=0.85 fold=383: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=383: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=383: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 383 | Train Rows: 16223  | Tested on forward 150 rows. Purged: 13
-t=0.20 fold=384: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.25 fold=384: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.30 fold=384: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.35 fold=384: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.40 fold=384: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.45 fold=384: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
-t=0.50 fold=384: raw_crossings=89 lockout_rejected=19 barrier_pct_rejected=0 passed=70
-t=0.55 fold=384: raw_crossings=9 lockout_rejected=0 barrier_pct_rejected=0 passed=9
+t=0.20 fold=384: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
+t=0.25 fold=384: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
+t=0.30 fold=384: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
+t=0.35 fold=384: raw_crossings=149 lockout_rejected=37 barrier_pct_rejected=0 passed=112
+t=0.40 fold=384: raw_crossings=148 lockout_rejected=37 barrier_pct_rejected=0 passed=111
+t=0.45 fold=384: raw_crossings=131 lockout_rejected=29 barrier_pct_rejected=0 passed=102
+t=0.50 fold=384: raw_crossings=52 lockout_rejected=7 barrier_pct_rejected=0 passed=45
+t=0.55 fold=384: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.60 fold=384: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=384: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=384: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -6826,15 +6826,15 @@ t=0.85 fold=384: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=384: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=384: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 384 | Train Rows: 16249  | Tested on forward 150 rows. Purged: 14
-t=0.20 fold=385: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.25 fold=385: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.30 fold=385: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.35 fold=385: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.40 fold=385: raw_crossings=150 lockout_rejected=44 barrier_pct_rejected=0 passed=106
-t=0.45 fold=385: raw_crossings=146 lockout_rejected=41 barrier_pct_rejected=0 passed=105
-t=0.50 fold=385: raw_crossings=72 lockout_rejected=17 barrier_pct_rejected=0 passed=55
-t=0.55 fold=385: raw_crossings=7 lockout_rejected=0 barrier_pct_rejected=0 passed=7
-t=0.60 fold=385: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
+t=0.20 fold=385: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
+t=0.25 fold=385: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
+t=0.30 fold=385: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
+t=0.35 fold=385: raw_crossings=150 lockout_rejected=38 barrier_pct_rejected=0 passed=112
+t=0.40 fold=385: raw_crossings=147 lockout_rejected=38 barrier_pct_rejected=0 passed=109
+t=0.45 fold=385: raw_crossings=131 lockout_rejected=30 barrier_pct_rejected=0 passed=101
+t=0.50 fold=385: raw_crossings=45 lockout_rejected=5 barrier_pct_rejected=0 passed=40
+t=0.55 fold=385: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.60 fold=385: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.65 fold=385: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=385: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=385: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -6843,14 +6843,14 @@ t=0.85 fold=385: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=385: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=385: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 385 | Train Rows: 16281  | Tested on forward 150 rows. Purged: 9
-t=0.20 fold=386: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.25 fold=386: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.30 fold=386: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.35 fold=386: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.40 fold=386: raw_crossings=150 lockout_rejected=41 barrier_pct_rejected=0 passed=109
-t=0.45 fold=386: raw_crossings=144 lockout_rejected=39 barrier_pct_rejected=0 passed=105
-t=0.50 fold=386: raw_crossings=71 lockout_rejected=16 barrier_pct_rejected=0 passed=55
-t=0.55 fold=386: raw_crossings=5 lockout_rejected=0 barrier_pct_rejected=0 passed=5
+t=0.20 fold=386: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
+t=0.25 fold=386: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
+t=0.30 fold=386: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
+t=0.35 fold=386: raw_crossings=150 lockout_rejected=37 barrier_pct_rejected=0 passed=113
+t=0.40 fold=386: raw_crossings=149 lockout_rejected=37 barrier_pct_rejected=0 passed=112
+t=0.45 fold=386: raw_crossings=133 lockout_rejected=27 barrier_pct_rejected=0 passed=106
+t=0.50 fold=386: raw_crossings=47 lockout_rejected=3 barrier_pct_rejected=0 passed=44
+t=0.55 fold=386: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
 t=0.60 fold=386: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=386: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=386: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -6860,14 +6860,14 @@ t=0.85 fold=386: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=386: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=386: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 386 | Train Rows: 16304  | Tested on forward 150 rows. Purged: 13
-t=0.20 fold=387: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
-t=0.25 fold=387: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
-t=0.30 fold=387: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
-t=0.35 fold=387: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
-t=0.40 fold=387: raw_crossings=150 lockout_rejected=45 barrier_pct_rejected=0 passed=105
-t=0.45 fold=387: raw_crossings=143 lockout_rejected=37 barrier_pct_rejected=0 passed=106
-t=0.50 fold=387: raw_crossings=58 lockout_rejected=10 barrier_pct_rejected=0 passed=48
-t=0.55 fold=387: raw_crossings=5 lockout_rejected=0 barrier_pct_rejected=0 passed=5
+t=0.20 fold=387: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
+t=0.25 fold=387: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
+t=0.30 fold=387: raw_crossings=150 lockout_rejected=36 barrier_pct_rejected=0 passed=114
+t=0.35 fold=387: raw_crossings=149 lockout_rejected=36 barrier_pct_rejected=0 passed=113
+t=0.40 fold=387: raw_crossings=149 lockout_rejected=36 barrier_pct_rejected=0 passed=113
+t=0.45 fold=387: raw_crossings=134 lockout_rejected=22 barrier_pct_rejected=0 passed=112
+t=0.50 fold=387: raw_crossings=54 lockout_rejected=7 barrier_pct_rejected=0 passed=47
+t=0.55 fold=387: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
 t=0.60 fold=387: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=387: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=387: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -6877,13 +6877,13 @@ t=0.85 fold=387: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=387: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=387: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 387 | Train Rows: 16330  | Tested on forward 150 rows. Purged: 14
-t=0.20 fold=388: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.25 fold=388: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.30 fold=388: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.35 fold=388: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.40 fold=388: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.45 fold=388: raw_crossings=145 lockout_rejected=38 barrier_pct_rejected=0 passed=107
-t=0.50 fold=388: raw_crossings=61 lockout_rejected=8 barrier_pct_rejected=0 passed=53
+t=0.20 fold=388: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
+t=0.25 fold=388: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
+t=0.30 fold=388: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
+t=0.35 fold=388: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
+t=0.40 fold=388: raw_crossings=150 lockout_rejected=27 barrier_pct_rejected=0 passed=123
+t=0.45 fold=388: raw_crossings=136 lockout_rejected=19 barrier_pct_rejected=0 passed=117
+t=0.50 fold=388: raw_crossings=51 lockout_rejected=5 barrier_pct_rejected=0 passed=46
 t=0.55 fold=388: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
 t=0.60 fold=388: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=388: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -6894,14 +6894,14 @@ t=0.85 fold=388: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=388: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=388: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 388 | Train Rows: 16353  | Tested on forward 150 rows. Purged: 18
-t=0.20 fold=389: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.25 fold=389: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.30 fold=389: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.35 fold=389: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.40 fold=389: raw_crossings=150 lockout_rejected=42 barrier_pct_rejected=0 passed=108
-t=0.45 fold=389: raw_crossings=144 lockout_rejected=36 barrier_pct_rejected=0 passed=108
-t=0.50 fold=389: raw_crossings=56 lockout_rejected=7 barrier_pct_rejected=0 passed=49
-t=0.55 fold=389: raw_crossings=5 lockout_rejected=0 barrier_pct_rejected=0 passed=5
+t=0.20 fold=389: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.25 fold=389: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.30 fold=389: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.35 fold=389: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.40 fold=389: raw_crossings=149 lockout_rejected=28 barrier_pct_rejected=0 passed=121
+t=0.45 fold=389: raw_crossings=138 lockout_rejected=25 barrier_pct_rejected=0 passed=113
+t=0.50 fold=389: raw_crossings=55 lockout_rejected=4 barrier_pct_rejected=0 passed=51
+t=0.55 fold=389: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
 t=0.60 fold=389: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.65 fold=389: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=389: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -6911,14 +6911,14 @@ t=0.85 fold=389: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=389: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=389: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 389 | Train Rows: 16381  | Tested on forward 150 rows. Purged: 17
-t=0.20 fold=390: raw_crossings=150 lockout_rejected=48 barrier_pct_rejected=0 passed=102
-t=0.25 fold=390: raw_crossings=150 lockout_rejected=48 barrier_pct_rejected=0 passed=102
-t=0.30 fold=390: raw_crossings=150 lockout_rejected=48 barrier_pct_rejected=0 passed=102
-t=0.35 fold=390: raw_crossings=150 lockout_rejected=48 barrier_pct_rejected=0 passed=102
-t=0.40 fold=390: raw_crossings=150 lockout_rejected=48 barrier_pct_rejected=0 passed=102
-t=0.45 fold=390: raw_crossings=146 lockout_rejected=46 barrier_pct_rejected=0 passed=100
-t=0.50 fold=390: raw_crossings=64 lockout_rejected=12 barrier_pct_rejected=0 passed=52
-t=0.55 fold=390: raw_crossings=5 lockout_rejected=0 barrier_pct_rejected=0 passed=5
+t=0.20 fold=390: raw_crossings=150 lockout_rejected=21 barrier_pct_rejected=0 passed=129
+t=0.25 fold=390: raw_crossings=150 lockout_rejected=21 barrier_pct_rejected=0 passed=129
+t=0.30 fold=390: raw_crossings=150 lockout_rejected=21 barrier_pct_rejected=0 passed=129
+t=0.35 fold=390: raw_crossings=150 lockout_rejected=21 barrier_pct_rejected=0 passed=129
+t=0.40 fold=390: raw_crossings=149 lockout_rejected=21 barrier_pct_rejected=0 passed=128
+t=0.45 fold=390: raw_crossings=137 lockout_rejected=17 barrier_pct_rejected=0 passed=120
+t=0.50 fold=390: raw_crossings=54 lockout_rejected=4 barrier_pct_rejected=0 passed=50
+t=0.55 fold=390: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
 t=0.60 fold=390: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.65 fold=390: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=390: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -6928,14 +6928,14 @@ t=0.85 fold=390: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=390: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=390: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 390 | Train Rows: 16407  | Tested on forward 150 rows. Purged: 18
-t=0.20 fold=391: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.25 fold=391: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.30 fold=391: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.35 fold=391: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.40 fold=391: raw_crossings=150 lockout_rejected=43 barrier_pct_rejected=0 passed=107
-t=0.45 fold=391: raw_crossings=146 lockout_rejected=40 barrier_pct_rejected=0 passed=106
-t=0.50 fold=391: raw_crossings=61 lockout_rejected=7 barrier_pct_rejected=0 passed=54
-t=0.55 fold=391: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.20 fold=391: raw_crossings=150 lockout_rejected=21 barrier_pct_rejected=0 passed=129
+t=0.25 fold=391: raw_crossings=150 lockout_rejected=21 barrier_pct_rejected=0 passed=129
+t=0.30 fold=391: raw_crossings=150 lockout_rejected=21 barrier_pct_rejected=0 passed=129
+t=0.35 fold=391: raw_crossings=150 lockout_rejected=21 barrier_pct_rejected=0 passed=129
+t=0.40 fold=391: raw_crossings=148 lockout_rejected=21 barrier_pct_rejected=0 passed=127
+t=0.45 fold=391: raw_crossings=141 lockout_rejected=19 barrier_pct_rejected=0 passed=122
+t=0.50 fold=391: raw_crossings=56 lockout_rejected=2 barrier_pct_rejected=0 passed=54
+t=0.55 fold=391: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
 t=0.60 fold=391: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.65 fold=391: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=391: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -6945,15 +6945,15 @@ t=0.85 fold=391: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=391: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=391: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 391 | Train Rows: 16439  | Tested on forward 150 rows. Purged: 13
-t=0.20 fold=392: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.25 fold=392: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.30 fold=392: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.35 fold=392: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.40 fold=392: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.45 fold=392: raw_crossings=147 lockout_rejected=44 barrier_pct_rejected=0 passed=103
-t=0.50 fold=392: raw_crossings=64 lockout_rejected=10 barrier_pct_rejected=0 passed=54
-t=0.55 fold=392: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
-t=0.60 fold=392: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=392: raw_crossings=150 lockout_rejected=20 barrier_pct_rejected=0 passed=130
+t=0.25 fold=392: raw_crossings=150 lockout_rejected=20 barrier_pct_rejected=0 passed=130
+t=0.30 fold=392: raw_crossings=150 lockout_rejected=20 barrier_pct_rejected=0 passed=130
+t=0.35 fold=392: raw_crossings=150 lockout_rejected=20 barrier_pct_rejected=0 passed=130
+t=0.40 fold=392: raw_crossings=149 lockout_rejected=20 barrier_pct_rejected=0 passed=129
+t=0.45 fold=392: raw_crossings=138 lockout_rejected=18 barrier_pct_rejected=0 passed=120
+t=0.50 fold=392: raw_crossings=63 lockout_rejected=4 barrier_pct_rejected=0 passed=59
+t=0.55 fold=392: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
+t=0.60 fold=392: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=392: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=392: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=392: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -6962,15 +6962,15 @@ t=0.85 fold=392: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=392: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=392: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 392 | Train Rows: 16457  | Tested on forward 150 rows. Purged: 22
-t=0.20 fold=393: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.25 fold=393: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.30 fold=393: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.35 fold=393: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.40 fold=393: raw_crossings=149 lockout_rejected=46 barrier_pct_rejected=0 passed=103
-t=0.45 fold=393: raw_crossings=147 lockout_rejected=44 barrier_pct_rejected=0 passed=103
-t=0.50 fold=393: raw_crossings=58 lockout_rejected=11 barrier_pct_rejected=0 passed=47
-t=0.55 fold=393: raw_crossings=2 lockout_rejected=0 barrier_pct_rejected=0 passed=2
-t=0.60 fold=393: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=393: raw_crossings=150 lockout_rejected=17 barrier_pct_rejected=0 passed=133
+t=0.25 fold=393: raw_crossings=150 lockout_rejected=17 barrier_pct_rejected=0 passed=133
+t=0.30 fold=393: raw_crossings=150 lockout_rejected=17 barrier_pct_rejected=0 passed=133
+t=0.35 fold=393: raw_crossings=150 lockout_rejected=17 barrier_pct_rejected=0 passed=133
+t=0.40 fold=393: raw_crossings=149 lockout_rejected=17 barrier_pct_rejected=0 passed=132
+t=0.45 fold=393: raw_crossings=143 lockout_rejected=15 barrier_pct_rejected=0 passed=128
+t=0.50 fold=393: raw_crossings=69 lockout_rejected=1 barrier_pct_rejected=0 passed=68
+t=0.55 fold=393: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.60 fold=393: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=393: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=393: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=393: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -6979,15 +6979,15 @@ t=0.85 fold=393: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=393: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=393: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 393 | Train Rows: 16493  | Tested on forward 150 rows. Purged: 13
-t=0.20 fold=394: raw_crossings=150 lockout_rejected=56 barrier_pct_rejected=0 passed=94
-t=0.25 fold=394: raw_crossings=150 lockout_rejected=56 barrier_pct_rejected=0 passed=94
-t=0.30 fold=394: raw_crossings=150 lockout_rejected=56 barrier_pct_rejected=0 passed=94
-t=0.35 fold=394: raw_crossings=150 lockout_rejected=56 barrier_pct_rejected=0 passed=94
-t=0.40 fold=394: raw_crossings=150 lockout_rejected=56 barrier_pct_rejected=0 passed=94
-t=0.45 fold=394: raw_crossings=149 lockout_rejected=55 barrier_pct_rejected=0 passed=94
-t=0.50 fold=394: raw_crossings=61 lockout_rejected=10 barrier_pct_rejected=0 passed=51
-t=0.55 fold=394: raw_crossings=3 lockout_rejected=0 barrier_pct_rejected=0 passed=3
-t=0.60 fold=394: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.20 fold=394: raw_crossings=150 lockout_rejected=17 barrier_pct_rejected=0 passed=133
+t=0.25 fold=394: raw_crossings=150 lockout_rejected=17 barrier_pct_rejected=0 passed=133
+t=0.30 fold=394: raw_crossings=150 lockout_rejected=17 barrier_pct_rejected=0 passed=133
+t=0.35 fold=394: raw_crossings=150 lockout_rejected=17 barrier_pct_rejected=0 passed=133
+t=0.40 fold=394: raw_crossings=149 lockout_rejected=17 barrier_pct_rejected=0 passed=132
+t=0.45 fold=394: raw_crossings=141 lockout_rejected=16 barrier_pct_rejected=0 passed=125
+t=0.50 fold=394: raw_crossings=68 lockout_rejected=4 barrier_pct_rejected=0 passed=64
+t=0.55 fold=394: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
+t=0.60 fold=394: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=394: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=394: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.75 fold=394: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -6996,14 +6996,14 @@ t=0.85 fold=394: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=394: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=394: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 394 | Train Rows: 16527  | Tested on forward 150 rows. Purged: 6
-t=0.20 fold=395: raw_crossings=150 lockout_rejected=53 barrier_pct_rejected=0 passed=97
-t=0.25 fold=395: raw_crossings=150 lockout_rejected=53 barrier_pct_rejected=0 passed=97
-t=0.30 fold=395: raw_crossings=150 lockout_rejected=53 barrier_pct_rejected=0 passed=97
-t=0.35 fold=395: raw_crossings=150 lockout_rejected=53 barrier_pct_rejected=0 passed=97
-t=0.40 fold=395: raw_crossings=149 lockout_rejected=53 barrier_pct_rejected=0 passed=96
-t=0.45 fold=395: raw_crossings=146 lockout_rejected=52 barrier_pct_rejected=0 passed=94
-t=0.50 fold=395: raw_crossings=65 lockout_rejected=11 barrier_pct_rejected=0 passed=54
-t=0.55 fold=395: raw_crossings=7 lockout_rejected=0 barrier_pct_rejected=0 passed=7
+t=0.20 fold=395: raw_crossings=150 lockout_rejected=14 barrier_pct_rejected=0 passed=136
+t=0.25 fold=395: raw_crossings=150 lockout_rejected=14 barrier_pct_rejected=0 passed=136
+t=0.30 fold=395: raw_crossings=150 lockout_rejected=14 barrier_pct_rejected=0 passed=136
+t=0.35 fold=395: raw_crossings=150 lockout_rejected=14 barrier_pct_rejected=0 passed=136
+t=0.40 fold=395: raw_crossings=149 lockout_rejected=14 barrier_pct_rejected=0 passed=135
+t=0.45 fold=395: raw_crossings=144 lockout_rejected=14 barrier_pct_rejected=0 passed=130
+t=0.50 fold=395: raw_crossings=76 lockout_rejected=3 barrier_pct_rejected=0 passed=73
+t=0.55 fold=395: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.60 fold=395: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=395: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=395: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -7013,14 +7013,14 @@ t=0.85 fold=395: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=395: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=395: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 395 | Train Rows: 16543  | Tested on forward 150 rows. Purged: 17
-t=0.20 fold=396: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.25 fold=396: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.30 fold=396: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.35 fold=396: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.40 fold=396: raw_crossings=150 lockout_rejected=47 barrier_pct_rejected=0 passed=103
-t=0.45 fold=396: raw_crossings=145 lockout_rejected=43 barrier_pct_rejected=0 passed=102
-t=0.50 fold=396: raw_crossings=83 lockout_rejected=19 barrier_pct_rejected=0 passed=64
-t=0.55 fold=396: raw_crossings=6 lockout_rejected=0 barrier_pct_rejected=0 passed=6
+t=0.20 fold=396: raw_crossings=150 lockout_rejected=22 barrier_pct_rejected=0 passed=128
+t=0.25 fold=396: raw_crossings=150 lockout_rejected=22 barrier_pct_rejected=0 passed=128
+t=0.30 fold=396: raw_crossings=150 lockout_rejected=22 barrier_pct_rejected=0 passed=128
+t=0.35 fold=396: raw_crossings=150 lockout_rejected=22 barrier_pct_rejected=0 passed=128
+t=0.40 fold=396: raw_crossings=148 lockout_rejected=22 barrier_pct_rejected=0 passed=126
+t=0.45 fold=396: raw_crossings=144 lockout_rejected=20 barrier_pct_rejected=0 passed=124
+t=0.50 fold=396: raw_crossings=72 lockout_rejected=5 barrier_pct_rejected=0 passed=67
+t=0.55 fold=396: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.60 fold=396: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=396: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=396: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -7030,14 +7030,14 @@ t=0.85 fold=396: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=396: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=396: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 396 | Train Rows: 16565  | Tested on forward 150 rows. Purged: 22
-t=0.20 fold=397: raw_crossings=150 lockout_rejected=55 barrier_pct_rejected=0 passed=95
-t=0.25 fold=397: raw_crossings=150 lockout_rejected=55 barrier_pct_rejected=0 passed=95
-t=0.30 fold=397: raw_crossings=150 lockout_rejected=55 barrier_pct_rejected=0 passed=95
-t=0.35 fold=397: raw_crossings=150 lockout_rejected=55 barrier_pct_rejected=0 passed=95
-t=0.40 fold=397: raw_crossings=149 lockout_rejected=54 barrier_pct_rejected=0 passed=95
-t=0.45 fold=397: raw_crossings=145 lockout_rejected=51 barrier_pct_rejected=0 passed=94
-t=0.50 fold=397: raw_crossings=81 lockout_rejected=23 barrier_pct_rejected=0 passed=58
-t=0.55 fold=397: raw_crossings=7 lockout_rejected=0 barrier_pct_rejected=0 passed=7
+t=0.20 fold=397: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.25 fold=397: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.30 fold=397: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.35 fold=397: raw_crossings=150 lockout_rejected=25 barrier_pct_rejected=0 passed=125
+t=0.40 fold=397: raw_crossings=149 lockout_rejected=25 barrier_pct_rejected=0 passed=124
+t=0.45 fold=397: raw_crossings=146 lockout_rejected=24 barrier_pct_rejected=0 passed=122
+t=0.50 fold=397: raw_crossings=77 lockout_rejected=9 barrier_pct_rejected=0 passed=68
+t=0.55 fold=397: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.60 fold=397: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=397: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=397: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -7047,14 +7047,14 @@ t=0.85 fold=397: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=397: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=397: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 397 | Train Rows: 16599  | Tested on forward 150 rows. Purged: 15
-t=0.20 fold=398: raw_crossings=150 lockout_rejected=62 barrier_pct_rejected=0 passed=88
-t=0.25 fold=398: raw_crossings=150 lockout_rejected=62 barrier_pct_rejected=0 passed=88
-t=0.30 fold=398: raw_crossings=150 lockout_rejected=62 barrier_pct_rejected=0 passed=88
-t=0.35 fold=398: raw_crossings=150 lockout_rejected=62 barrier_pct_rejected=0 passed=88
-t=0.40 fold=398: raw_crossings=150 lockout_rejected=62 barrier_pct_rejected=0 passed=88
-t=0.45 fold=398: raw_crossings=146 lockout_rejected=60 barrier_pct_rejected=0 passed=86
-t=0.50 fold=398: raw_crossings=74 lockout_rejected=21 barrier_pct_rejected=0 passed=53
-t=0.55 fold=398: raw_crossings=5 lockout_rejected=0 barrier_pct_rejected=0 passed=5
+t=0.20 fold=398: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.25 fold=398: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.30 fold=398: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.35 fold=398: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.40 fold=398: raw_crossings=150 lockout_rejected=29 barrier_pct_rejected=0 passed=121
+t=0.45 fold=398: raw_crossings=144 lockout_rejected=27 barrier_pct_rejected=0 passed=117
+t=0.50 fold=398: raw_crossings=68 lockout_rejected=8 barrier_pct_rejected=0 passed=60
+t=0.55 fold=398: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.60 fold=398: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=398: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=398: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -7064,14 +7064,14 @@ t=0.85 fold=398: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=398: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=398: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 398 | Train Rows: 16631  | Tested on forward 150 rows. Purged: 10
-t=0.20 fold=399: raw_crossings=150 lockout_rejected=55 barrier_pct_rejected=0 passed=95
-t=0.25 fold=399: raw_crossings=150 lockout_rejected=55 barrier_pct_rejected=0 passed=95
-t=0.30 fold=399: raw_crossings=150 lockout_rejected=55 barrier_pct_rejected=0 passed=95
-t=0.35 fold=399: raw_crossings=150 lockout_rejected=55 barrier_pct_rejected=0 passed=95
-t=0.40 fold=399: raw_crossings=150 lockout_rejected=55 barrier_pct_rejected=0 passed=95
-t=0.45 fold=399: raw_crossings=147 lockout_rejected=54 barrier_pct_rejected=0 passed=93
-t=0.50 fold=399: raw_crossings=74 lockout_rejected=16 barrier_pct_rejected=0 passed=58
-t=0.55 fold=399: raw_crossings=5 lockout_rejected=0 barrier_pct_rejected=0 passed=5
+t=0.20 fold=399: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.25 fold=399: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.30 fold=399: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.35 fold=399: raw_crossings=150 lockout_rejected=28 barrier_pct_rejected=0 passed=122
+t=0.40 fold=399: raw_crossings=149 lockout_rejected=28 barrier_pct_rejected=0 passed=121
+t=0.45 fold=399: raw_crossings=143 lockout_rejected=26 barrier_pct_rejected=0 passed=117
+t=0.50 fold=399: raw_crossings=62 lockout_rejected=7 barrier_pct_rejected=0 passed=55
+t=0.55 fold=399: raw_crossings=1 lockout_rejected=0 barrier_pct_rejected=0 passed=1
 t=0.60 fold=399: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=399: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=399: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -7081,14 +7081,14 @@ t=0.85 fold=399: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passe
 t=0.90 fold=399: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.95 fold=399: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 Fold 399 | Train Rows: 16662  | Tested on forward 150 rows. Purged: 6
-t=0.20 fold=400: raw_crossings=150 lockout_rejected=48 barrier_pct_rejected=0 passed=102
-t=0.25 fold=400: raw_crossings=150 lockout_rejected=48 barrier_pct_rejected=0 passed=102
-t=0.30 fold=400: raw_crossings=150 lockout_rejected=48 barrier_pct_rejected=0 passed=102
-t=0.35 fold=400: raw_crossings=150 lockout_rejected=48 barrier_pct_rejected=0 passed=102
-t=0.40 fold=400: raw_crossings=150 lockout_rejected=48 barrier_pct_rejected=0 passed=102
-t=0.45 fold=400: raw_crossings=145 lockout_rejected=46 barrier_pct_rejected=0 passed=99
-t=0.50 fold=400: raw_crossings=67 lockout_rejected=7 barrier_pct_rejected=0 passed=60
-t=0.55 fold=400: raw_crossings=4 lockout_rejected=0 barrier_pct_rejected=0 passed=4
+t=0.20 fold=400: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
+t=0.25 fold=400: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
+t=0.30 fold=400: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
+t=0.35 fold=400: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
+t=0.40 fold=400: raw_crossings=150 lockout_rejected=31 barrier_pct_rejected=0 passed=119
+t=0.45 fold=400: raw_crossings=144 lockout_rejected=28 barrier_pct_rejected=0 passed=116
+t=0.50 fold=400: raw_crossings=63 lockout_rejected=6 barrier_pct_rejected=0 passed=57
+t=0.55 fold=400: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.60 fold=400: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.65 fold=400: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
 t=0.70 fold=400: raw_crossings=0 lockout_rejected=0 barrier_pct_rejected=0 passed=0
@@ -7102,57 +7102,57 @@ Fold 400 | Train Rows: 16681  | Tested on forward 150 rows. Purged: 14
 --- Feature Importance: SHAP vs Permutation (PFI) ---
 --------------------------------------------------------------------------------
 shape: (15, 3)
-┌───────────────┬─────────────────┬───────────────────┐
-│ Feature       ┆ SHAP_Importance ┆ PFI_Mean_AUC_Drop │
-│ ---           ┆ ---             ┆ ---               │
-│ str           ┆ f64             ┆ f64               │
-╞═══════════════╪═════════════════╪═══════════════════╡
-│ sma_14        ┆ 0.035374        ┆ 0.008472          │
-│ tick_autocorr ┆ 0.026122        ┆ 0.007907          │
-│ cvd_delta_z   ┆ 0.020917        ┆ 0.004779          │
-│ spread_bps_z  ┆ 0.012336        ┆ 0.002186          │
-│ inst_ratio    ┆ 0.022472        ┆ 0.00086           │
-│ …             ┆ …               ┆ …                 │
-│ cvd_slope_z   ┆ 0.013064        ┆ -0.001678         │
-│ ma_accel      ┆ 0.006619        ┆ -0.001775         │
-│ rsi_x_ma      ┆ 0.009804        ┆ -0.002133         │
-│ absorption_z  ┆ 0.007195        ┆ -0.002441         │
-│ rsi_2         ┆ 0.012898        ┆ -0.002448         │
-└───────────────┴─────────────────┴───────────────────┘
+┌────────────────────┬─────────────────┬───────────────────┐
+│ Feature            ┆ SHAP_Importance ┆ PFI_Mean_AUC_Drop │
+│ ---                ┆ ---             ┆ ---               │
+│ str                ┆ f64             ┆ f64               │
+╞════════════════════╪═════════════════╪═══════════════════╡
+│ tick_autocorr      ┆ 0.037669        ┆ 0.003404          │
+│ sma_14             ┆ 0.037587        ┆ 0.00268           │
+│ rsi_2              ┆ 0.010809        ┆ 0.002441          │
+│ inst_ratio         ┆ 0.016402        ┆ 0.001774          │
+│ depth_imbalance_z  ┆ 0.009737        ┆ 0.00052           │
+│ …                  ┆ …               ┆ …                 │
+│ price_roc_3        ┆ 0.014936        ┆ -0.000963         │
+│ delta_divergence_z ┆ 0.001543        ┆ -0.000982         │
+│ cvd_delta_z        ┆ 0.006084        ┆ -0.002729         │
+│ cvd_slope_z        ┆ 0.00623         ┆ -0.003268         │
+│ absorption_z       ┆ 0.014393        ┆ -0.004233         │
+└────────────────────┴─────────────────┴───────────────────┘
 
 --- Model Binary Precision & Recall (argmax prediction) — Mean ± Std Across Folds ---
 ----------------------------------------------------------------------
 Class      | Precision            | Recall
 ----------------------------------------------------------------------
-LOSS       | 88.98% ± 3.95%       | 61.61% ± 9.93% 
-WIN        | 11.70% ± 4.53%       | 40.53% ± 15.61%
+LOSS       | 89.40% ± 3.03%       | 61.49% ± 7.05% 
+WIN        | 10.85% ± 4.82%       | 38.57% ± 14.66%
 ----------------------------------------------------------------------
 
 --- Pooled Out-of-Sample Classification Report ---
               precision    recall  f1-score   support
 
-        LOSS       0.89      0.62      0.73     53250
-         WIN       0.11      0.39      0.18      6750
+        LOSS       0.89      0.61      0.73     53571
+         WIN       0.11      0.39      0.17      6429
 
     accuracy                           0.59     60000
    macro avg       0.50      0.50      0.45     60000
-weighted avg       0.80      0.59      0.67     60000
+weighted avg       0.81      0.59      0.67     60000
 
 
 --- Strategy Rolling Expectancy & Stability by P(WIN) Threshold ---
 --------------------------------------------------------------------------------------------------------------------------------------------
 Thresh   | Trades   | Win%     | RR     | Overall Exp  | Exp CVaR (5%)  | Stable (CVaR>0)  | Total R
 --------------------------------------------------------------------------------------------------------------------------------------------
->=  20% | 43382    | 11.2% | 9.89   |       0.22 R |        -1.00 R | NO               | +9711.53 R
->=  25% | 43382    | 11.2% | 9.89   |       0.22 R |        -1.00 R | NO               | +9711.53 R
->=  30% | 43373    | 11.2% | 9.89   |       0.22 R |        -1.00 R | NO               | +9720.53 R
->=  35% | 43289    | 11.2% | 9.89   |       0.22 R |        -1.00 R | NO               | +9623.79 R
->=  40% | 43060    | 11.2% | 9.89   |       0.22 R |        -1.00 R | NO               | +9507.57 R
->=  45% | 41276    | 11.2% | 9.88   |       0.21 R |        -1.00 R | NO               | +8872.10 R
->=  50% | 19129    | 11.7% | 9.87   |       0.28 R |        -1.00 R | NO               | +5262.74 R
->=  55% | 1954     | 12.8% | 9.60   |       0.36 R |        -1.00 R | NO               | +696.63 R
->=  60% | 179      |  7.8% | 10.00  |      -0.14 R |        -1.00 R | NO               | -25.00 R
->=  65% | 7        | 71.4% | 10.00  |       6.86 R |          nan R | N/A (low trades) | +48.00 R
+>=  20% | 47943    | 10.7% | 9.25   |       0.11 R |        -1.10 R | NO               | +5108.42 R
+>=  25% | 47867    | 10.7% | 9.25   |       0.11 R |        -1.10 R | NO               | +5124.57 R
+>=  30% | 47703    | 10.7% | 9.26   |       0.11 R |        -1.10 R | NO               | +5119.58 R
+>=  35% | 47342    | 10.8% | 9.26   |       0.11 R |        -1.10 R | NO               | +5174.81 R
+>=  40% | 46657    | 10.8% | 9.27   |       0.12 R |        -1.10 R | NO               | +5440.51 R
+>=  45% | 44607    | 10.9% | 9.30   |       0.12 R |        -1.10 R | NO               | +5512.64 R
+>=  50% | 20967    | 11.0% | 9.30   |       0.14 R |        -1.09 R | NO               | +2862.65 R
+>=  55% | 1309     | 13.7% | 8.98   |       0.38 R |        -1.07 R | NO               | +500.93 R
+>=  60% | 99       | 11.1% | 9.50   |       0.18 R |        -1.05 R | NO               | +17.36 R
+>=  65% | 7        |  0.0% | 0.00   |      -1.02 R |          nan R | N/A (low trades) |  -7.17 R
 --------------------------------------------------------------------------------------------------------------------------------------------
 Note: 'Exp CVaR (5%)' = avg R per trade during worst 5% of 30-trade streaks.
 
@@ -7165,17 +7165,17 @@ shape: (24, 2)
 │ ---      ┆ ---   │
 │ i8       ┆ u32   │
 ╞══════════╪═══════╡
-│ 0        ┆ 11140 │
-│ 1        ┆ 12317 │
-│ 2        ┆ 12487 │
-│ 3        ┆ 10402 │
-│ 4        ┆ 11873 │
+│ 0        ┆ 13127 │
+│ 1        ┆ 13956 │
+│ 2        ┆ 13700 │
+│ 3        ┆ 11029 │
+│ 4        ┆ 13451 │
 │ …        ┆ …     │
-│ 19       ┆ 11493 │
-│ 20       ┆ 11400 │
-│ 21       ┆ 10109 │
-│ 22       ┆ 13079 │
-│ 23       ┆ 11324 │
+│ 19       ┆ 11728 │
+│ 20       ┆ 11800 │
+│ 21       ┆ 11248 │
+│ 22       ┆ 13817 │
+│ 23       ┆ 12191 │
 └──────────┴───────┘
 Full trade log saved to: walk_forward_trade_log_v3.csv
 Interactive chart saved to: pnl_walkforward_v3.html
@@ -7183,9 +7183,9 @@ Interactive chart saved to: pnl_walkforward_v3.html
 ======================================================================
 SUMMARY — OLS DIVERGENCE + DEEPLOB FEATURES
 ======================================================================
-Sequential (order-aware) binary barrier labels, full dataset: {'LOSS': 46612, 'WIN': 5769}
+Sequential (order-aware) binary barrier labels, full dataset: {'LOSS': 46942, 'WIN': 5439}
 Hunting zone (rsi_2 < 30) rows: 16921
-Trading Setup: Target WIN | Inverting Trade Direction: True
+Trading Setup: Target WIN | Inverting Trade Direction: False
 Model: n_estimators=200, max_depth=3, learning_rate=0.01 (see clf definition above)
 
 Actual Features Used (15 total):
@@ -7204,33 +7204,33 @@ Actual Features Used (15 total):
   - inst_ratio
   - delta_divergence_z
   - depth_imbalance_z
-  LOSS     class precision (argmax): 88.98% ± 3.95% across folds
-  WIN      class precision (argmax): 11.70% ± 4.53% across folds
-Threshold with most out-of-sample trades: 43382 trades at P(WIN) >= 0.20
+  LOSS     class precision (argmax): 89.40% ± 3.03% across folds
+  WIN      class precision (argmax): 10.85% ± 4.82% across folds
+Threshold with most out-of-sample trades: 47943 trades at P(WIN) >= 0.20
 
 Production-Grade Live Execution (Statistic)
 Regime/Hour           Asia (00:00-08:00)      EU-Asia (08:00-09:00)   EU (09:00-13:30)        EU-US (13:30-16:00)     US (16:00-20:00)        Pacific (20:00-00:00)   
 ----------------------------------------------------------------------------------------------------------------------------------------------------------------------
-Weekend (PWE)         0.35                    0.32                    0.39                    -0.39                   0.20                    0.52                    
-Weekday (PWE)         0.31                    0.13                    0.08                    0.06                    0.01                    0.43                    
-Weekend (Sortino)     0.37                    0.35                    0.42                    -0.40                   0.21                    0.56                    
-Weekday (Sortino)     0.33                    0.14                    0.08                    0.06                    0.01                    0.46                    
+Weekend (PWE)         0.22                    0.73                    0.14                    0.51                    0.46                    0.32                    
+Weekday (PWE)         0.02                    0.02                    -0.06                   0.04                    0.18                    0.05                    
+Weekend (Sortino)     0.22                    0.75                    0.14                    0.52                    0.47                    0.32                    
+Weekday (Sortino)     0.02                    0.02                    -0.06                   0.04                    0.19                    0.05                    
 
 Production-Grade Live Execution (Trade Count)
 Regime/Hour           Asia (00:00-08:00)      EU-Asia (08:00-09:00)   EU (09:00-13:30)        EU-US (13:30-16:00)     US (16:00-20:00)        Pacific (20:00-00:00)   
 ----------------------------------------------------------------------------------------------------------------------------------------------------------------------
-Weekend               3813                    432                     2160                    1131                    1898                    1820                    
-Weekday               10659                   1406                    6185                    3707                    4859                    5312                    
-  P(WIN) >= 0.20: 43382 trades, cumulative 9711.53R out-of-sample
-  P(WIN) >= 0.25: 43382 trades, cumulative 9711.53R out-of-sample
-  P(WIN) >= 0.30: 43373 trades, cumulative 9720.53R out-of-sample
-  P(WIN) >= 0.35: 43289 trades, cumulative 9623.79R out-of-sample
-  P(WIN) >= 0.40: 43060 trades, cumulative 9507.57R out-of-sample
-  P(WIN) >= 0.45: 41276 trades, cumulative 8872.10R out-of-sample
-  P(WIN) >= 0.50: 19129 trades, cumulative 5262.74R out-of-sample
-  P(WIN) >= 0.55: 1954 trades, cumulative 696.63R out-of-sample
-  P(WIN) >= 0.60: 179 trades, cumulative -25.00R out-of-sample
-  P(WIN) >= 0.65: 7 trades, cumulative 48.00R out-of-sample
+Weekend               4145                    478                     2313                    1144                    1985                    2039                    
+Weekday               12199                   1456                    6828                    4032                    5606                    5718                    
+  P(WIN) >= 0.20: 47943 trades, cumulative 5108.42R out-of-sample
+  P(WIN) >= 0.25: 47867 trades, cumulative 5124.57R out-of-sample
+  P(WIN) >= 0.30: 47703 trades, cumulative 5119.58R out-of-sample
+  P(WIN) >= 0.35: 47342 trades, cumulative 5174.81R out-of-sample
+  P(WIN) >= 0.40: 46657 trades, cumulative 5440.51R out-of-sample
+  P(WIN) >= 0.45: 44607 trades, cumulative 5512.64R out-of-sample
+  P(WIN) >= 0.50: 20967 trades, cumulative 2862.65R out-of-sample
+  P(WIN) >= 0.55: 1309 trades, cumulative 500.93R out-of-sample
+  P(WIN) >= 0.60: 99 trades, cumulative 17.36R out-of-sample
+  P(WIN) >= 0.65: 7 trades, cumulative -7.17R out-of-sample
 
 Reminder: this run ignores fees, slippage, latency, and partial fills.
 ======================================================================
