@@ -63,6 +63,11 @@ try:
 except ImportError:
     BARRIER_VOL_BAR_WINDOW = 20  # matches features.py fallback default
 
+# All generated report artifacts (feature-importance CSV, trade log, PnL chart)
+# go to the shared build folder — never the repo root / CWD.
+from research.ml_shared_config import BUILD_DIR  # noqa: E402
+os.makedirs(BUILD_DIR, exist_ok=True)
+
 # Live's LiveFeatureEngine only recomputes macro features (RSI, MA slope,
 # spread_bps_z, bar_vol_std, ...) once per TIMEFRAME_BARRIER-second rollover
 # (see features.py _flush_second -> _compute_macro_features), NOT once per
@@ -1058,7 +1063,7 @@ if __name__ == "__main__":
     }).sort_values('PFI_Mean_AUC_Drop', ascending=False)
 
     print(importance_df.to_string(index=False))
-    importance_df.to_csv('feature_importance_v3.csv', index=False)
+    importance_df.to_csv(os.path.join(BUILD_DIR, 'feature_importance_v3.csv'), index=False)
 
     # ============================================================================
     # STEP 8 — Model Class-Level Precision & Recall
@@ -1159,8 +1164,8 @@ if __name__ == "__main__":
 
     if all_trades_list:
         master_trade_df = pd.concat(all_trades_list)
-        master_trade_df.to_csv('walk_forward_trade_log_v3.csv', index=False)
-        print("Full trade log saved to: walk_forward_trade_log_v3.csv")
+        master_trade_df.to_csv(os.path.join(BUILD_DIR, 'walk_forward_trade_log_v3.csv'), index=False)
+        print(f"Full trade log saved to: {os.path.join(BUILD_DIR, 'walk_forward_trade_log_v3.csv')}")
 
     fig.add_hline(y=0, line_dash="dash", line_color="black", opacity=0.5)
 
@@ -1174,8 +1179,8 @@ if __name__ == "__main__":
         template="plotly_white"
     )
 
-    fig.write_html('pnl_walkforward_v3.html')
-    print("Interactive chart saved to: pnl_walkforward_v3.html")
+    fig.write_html(os.path.join(BUILD_DIR, 'pnl_walkforward_v3.html'))
+    print(f"Interactive chart saved to: {os.path.join(BUILD_DIR, 'pnl_walkforward_v3.html')}")
     fig.show()
 
     # ============================================================================

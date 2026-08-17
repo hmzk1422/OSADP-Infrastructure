@@ -3,7 +3,7 @@ Monte Carlo Stress Testing — Circular Block Bootstrap on Trade Return Sequence
 =================================================================================
 Built to consume the per-trade R-multiple output of ml_state_optimized.py's
 walk-forward loop (`trade_log[t]` / `master_trade_df`, or the exported
-`walk_forward_trade_log_v3.csv`) and answer one question: "how bad can this
+`build/walk_forward_trade_log_v3.csv`) and answer one question: "how bad can this
 get, given only the trades I already observed?"
 
 DESIGN NOTES — READ BEFORE TRUSTING THE OUTPUT
@@ -53,11 +53,21 @@ DESIGN NOTES — READ BEFORE TRUSTING THE OUTPUT
 
 from __future__ import annotations
 
+import os
+
 import numpy as np
 from dataclasses import dataclass, field
 from typing import Optional, Sequence
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+
+# All generated report artifacts go under the project's build/ folder (never CWD).
+_BUILD_DIR = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "build"))
+
+
+def _build_output(name: str) -> str:
+    os.makedirs(_BUILD_DIR, exist_ok=True)
+    return os.path.join(_BUILD_DIR, name)
 
 
 # ============================================================================
@@ -133,7 +143,7 @@ class MonteCarloStressTester:
         tester = MonteCarloStressTester(returns_r_multiples, MonteCarloConfig())
         results = tester.run()
         tester.print_summary(results)
-        tester.plot(results, "monte_carlo_stress_report.html")
+        tester.plot(results)          # -> build/monte_carlo_stress_report.html
     """
 
     def __init__(self, returns: Sequence[float], config: Optional[MonteCarloConfig] = None):
@@ -347,7 +357,9 @@ class MonteCarloStressTester:
         print("=" * 70)
 
     # ------------------------------------------------------------------
-    def plot(self, results: MonteCarloResults, output_html: str = "monte_carlo_stress_report.html") -> str:
+    def plot(self, results: MonteCarloResults, output_html: Optional[str] = None) -> str:
+        if output_html is None:
+            output_html = _build_output("monte_carlo_stress_report.html")
         cfg = results.config
         curves = results.sample_curves  # (n_sample, L+1)
         x = np.arange(curves.shape[1])
@@ -433,7 +445,7 @@ class MonteCarloStressTester:
 
 # ============================================================================
 # Convenience: run directly off the walk-forward trade log CSV this pipeline
-# already exports (STEP 10 of ml_state_optimized.py -> walk_forward_trade_log_v3.csv)
+# already exports (STEP 10 of ml_state_optimized.py -> build/walk_forward_trade_log_v3.csv)
 # ============================================================================
 def run_monte_carlo_from_csv(
     csv_path: str,
@@ -442,14 +454,17 @@ def run_monte_carlo_from_csv(
     threshold_col: str = "threshold",
     datetime_col: str = "datetime",
     config: Optional[MonteCarloConfig] = None,
-    output_html: str = "monte_carlo_stress_report.html",
+    output_html: Optional[str] = None,
 ):
     """
-    Loads `walk_forward_trade_log_v3.csv` (or any CSV with the same columns),
+    Loads `build/walk_forward_trade_log_v3.csv` (or any CSV with the same columns),
     optionally filters to one threshold, sorts by datetime, and runs the
     full stress test. Returns (tester, results).
     """
     import polars as pl
+
+    if output_html is None:
+        output_html = _build_output("monte_carlo_stress_report.html")
 
     df = pl.read_csv(csv_path, try_parse_dates=True)
     if threshold is not None and threshold_col in df.columns:

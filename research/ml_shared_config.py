@@ -14,6 +14,25 @@ try:
 except ImportError:
     BARRIER_VOL_BAR_WINDOW = 20
 
+# ============================================================================
+# OUTPUT DIRECTORY CONFIGURATION
+# ----------------------------------------------------------------------------
+# Every generated artifact (backtest reports, feature-importance CSVs, trade
+# logs, HTML charts) is written under the project's `build/` folder so the
+# working directory stays clean. Intermediate state-space parquet chunks are
+# written inside the research package (`research/state_space/`) instead of the
+# repository root.
+# ============================================================================
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+BUILD_DIR = os.path.join(PROJECT_ROOT, "build")
+STATE_SPACE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "state_space")
+
+
+def ensure_dir(path: str) -> str:
+    """Create `path` (and parents) if needed, then return it."""
+    os.makedirs(path, exist_ok=True)
+    return path
+
 SYMBOL_HIST = "SOLUSDT"
 BAR_FREQ = f"{TIMEFRAME_BARRIER}s"
 USE_ORDERFLOW_FEATURES = True
