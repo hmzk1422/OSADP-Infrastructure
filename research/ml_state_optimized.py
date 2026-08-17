@@ -383,13 +383,18 @@ def find_debounced_signals(y_proba: np.ndarray, threshold: float, hysteresis: fl
 # ============================================================================
 def build_historical_state_space(sessions: list[tuple[str, str, int]] | None = None,
                                  chunk_sessions: bool = True,
-                                 chunks_per_session: int = 6) -> pl.DataFrame:
+                                 chunks_per_session: int = 6,
+                                 state_space_dir: str = STATE_SPACE_DIR) -> pl.DataFrame:
     """Build raw historical state space independently from labeling/modeling.
 
     The returned frame is the exact input to barrier labeling and walk-forward
     evaluation. Keeping it separate gives the backtest and live-parity checks
     one concrete, testable feature boundary.
+
+    State-space partitions are persisted under `state_space_dir` (default:
+    ``research/state_space/``) so they never land in the repo root / CWD.
     """
+    os.makedirs(state_space_dir, exist_ok=True)
     sessions = sessions if sessions is not None else get_session_paths()
     print(f"Data source: DATA_FORMAT={DATA_FORMAT!r}, DATA_DIR={DATA_DIR!r}")
     if chunk_sessions:
@@ -414,7 +419,7 @@ def build_historical_state_space(sessions: list[tuple[str, str, int]] | None = N
                 session_id=session_id,
                 session_features=session_features,
             )
-            fname = f"state_space_session{session_id}.parquet"
+            fname = os.path.join(state_space_dir, f"state_space_session{session_id}.parquet")
             session_df.write_parquet(fname)
             chunk_files.append(fname)
             print(f"Session {session_id}: {session_df.height} rows -> {fname}")
@@ -445,7 +450,7 @@ def build_historical_state_space(sessions: list[tuple[str, str, int]] | None = N
                 session_features=session_features,
             )
 
-            fname = f"state_space_session{session_id}_chunk{i}.parquet"
+            fname = os.path.join(state_space_dir, f"state_space_session{session_id}_chunk{i}.parquet")
             # chunk_df is already bounded; sink the final chunk to SSD.
             chunk_df.lazy().sink_parquet(fname)
             chunk_files.append(fname)
@@ -722,14 +727,16 @@ def _start_report_capture(filepath: str = None):
     the run. Cleanup is registered via atexit so the file is always closed
     and flushed to disk — including on an uncaught exception or Ctrl-C.
 
-    Defaults to <script's own directory>/backtest_report_v3.md, NOT the
-    current working directory — so it lands next to this .py file no matter
-    where you launch the run from. Override with BACKTEST_REPORT_PATH."""
+    Defaults to <project>/build/backtest_report_v3.md — the shared build
+    folder that holds every generated report artifact — NOT the current
+    working directory, so it lands in one predictable place no matter where
+    you launch the run from. Override with BACKTEST_REPORT_PATH."""
     if filepath is None:
         filepath = os.environ.get(
             "BACKTEST_REPORT_PATH",
-            os.path.join(_SCRIPT_DIR, "backtest_report_v3.md"),
+            os.path.join(BUILD_DIR, "backtest_report_v3.md"),
         )
+    os.makedirs(os.path.dirname(os.path.abspath(filepath)), exist_ok=True)
     tee = _TeeToMarkdown(filepath, sys.stdout)
     sys.stdout = tee
 
@@ -1145,7 +1152,10 @@ if __name__ == "__main__":
         "Feature": features, "SHAP_Importance": mean_shap, "PFI_Mean_AUC_Drop": mean_pfi,
     }).sort("PFI_Mean_AUC_Drop", descending=True)
     print(importance_df)
-    importance_df.write_csv("feature_importance_v3.csv")
+    ensure_dir(BUILD_DIR)
+    feature_importance_path = os.path.join(BUILD_DIR, "feature_importance_v3.csv")
+    importance_df.write_csv(feature_importance_path)
+    print(f"Feature importance saved to: {feature_importance_path}")
 
     # ------------------------------------------------------------------
     # STEP 8 — Model Class-Level Precision & Recall
@@ -1243,11 +1253,13 @@ if __name__ == "__main__":
 
     if all_trades_frames:
         master_trade_df = pl.concat(all_trades_frames)
-        master_trade_df.write_csv("walk_forward_trade_log_v3.csv")
+        ensure_dir(BUILD_DIR)
+        trade_log_path = os.path.join(BUILD_DIR, "walk_forward_trade_log_v3.csv")
+        master_trade_df.write_csv(trade_log_path)
         print("\n--- DEBUG: hour distribution in final trade log ---")
         print(master_trade_df["datetime"].dt.hour().value_counts().sort("datetime"))
 
-        print("Full trade log saved to: walk_forward_trade_log_v3.csv")
+        print(f"Full trade log saved to: {trade_log_path}")
 
     fig.add_hline(y=0, line_dash="dash", line_color="black", opacity=0.5)
     chart_title = f'Out-of-Sample PnL (OLS Divergence + DeepLOB) — Target: {target_name} | Inverted: {INVERT_RETURNS}'
@@ -1255,8 +1267,9 @@ if __name__ == "__main__":
         title=chart_title, xaxis_title='Trade Number', yaxis_title='Cumulative Return (R)',
         legend_title=f'{prob_label} ≥ (Click!)', hovermode="x unified", template="plotly_white"
     )
-    fig.write_html('pnl_walkforward_v3.html')
-    print("Interactive chart saved to: pnl_walkforward_v3.html")
+    pnl_chart_path = os.path.join(BUILD_DIR, "pnl_walkforward_v3.html")
+    fig.write_html(pnl_chart_path)
+    print(f"Interactive chart saved to: {pnl_chart_path}")
 
     # ------------------------------------------------------------------
     # STEP 11 — Summary Report

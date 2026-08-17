@@ -14,11 +14,14 @@ venv/
 .env
 *.png
 
-main/logs/executor.log
-main/logs/trade_journal.jsonl
+# Generated report/log artifacts (backtest reports, charts, csv exports)
+build/
+research/state_space/
+
+# Stray generated file listings (from e.g. `Get-ChildItem -Recurse` dumps)
+_filelist.txt
 
 binance_cache/
-*.parquet
 main/logs/
 *.log
 target/

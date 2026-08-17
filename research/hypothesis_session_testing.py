@@ -2,10 +2,10 @@
 Session-Regime Hypothesis Testing for Walk-Forward Trade Expectancy
 =====================================================================
 READ-ONLY statistical analysis on the realized, out-of-sample trade log
-(`walk_forward_trade_log_v3.csv`). It never touches training/feature code and
+(`build/walk_forward_trade_log_v3.csv`). It never touches training/feature code and
 introduces zero lookahead risk - every input is a *realized* trade outcome.
 
-Produces `hypothesis_session_testing_report.md` containing:
+Produces `build/hypothesis_session_testing_report.md` containing:
 
   1. Descriptive per-session expectancy (PWE / Sortino / trade count)
   2. Kruskal-Wallis H-test     - do per-trade return medians differ across sessions?
@@ -34,10 +34,11 @@ PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__fi
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from research.ml_shared_config import SESSION_BOUNDS, SESSION_ORDER  # noqa: E402
+from research.ml_shared_config import BUILD_DIR, SESSION_BOUNDS, SESSION_ORDER  # noqa: E402
 
-TRADE_LOG = os.path.join(PROJECT_ROOT, "walk_forward_trade_log_v3.csv")
-REPORT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hypothesis_session_testing_report.md")
+# All inputs/outputs live under the shared build folder — never the repo root.
+TRADE_LOG = os.path.join(BUILD_DIR, "walk_forward_trade_log_v3.csv")
+REPORT = os.path.join(BUILD_DIR, "hypothesis_session_testing_report.md")
 
 ALPHA = 0.05
 
@@ -135,6 +136,7 @@ def nw_maxlags(n: int) -> int:
 class _Report:
     def __init__(self, path: str):
         self.path = path
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
         self._fh = open(path, "w", encoding="utf-8")
 
     def add(self, *entries):

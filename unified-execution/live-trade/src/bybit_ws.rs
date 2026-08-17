@@ -16,7 +16,7 @@
 //!     alive; incoming server Pings are answered with Pongs automatically.
 
 use futures_util::{SinkExt, StreamExt};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::fmt;
 use tokio::net::TcpStream;
@@ -24,7 +24,7 @@ use tokio::time::{interval, Duration, Interval};
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 
 const PUBLIC_WS_URL: &str = "wss://stream.bybit.com/v5/public/linear";
-const PING_INTERVAL_SECS: u64 = 1;
+const PING_INTERVAL_SECS: u64 = 20;
 
 type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
@@ -41,7 +41,7 @@ pub enum BybitError {
 }
 
 /// A single public trade print.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BybitTrade {
     pub timestamp: i64,
     pub price: f64,
@@ -61,7 +61,7 @@ impl fmt::Display for BybitTrade {
 }
 
 /// Best bid / ask snapshot (level-1 order book).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BybitOrderBookTop {
     pub timestamp: i64,
     pub bid_price: f64,

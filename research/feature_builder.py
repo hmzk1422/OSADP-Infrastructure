@@ -29,9 +29,9 @@ books, etc. Compute  features without breaking quant practice (all your features
 If the features fail, logically find out why and make fixes. This is what you can do at root directory.
 
 python -m research.ml_state_optimized --> to run the strategy and output report.
-backtest_report_v3.md --> You read this to get the output of the result
+build/backtest_report_v3.md --> You read this to get the output of the result
 
-Objective: Inside of backtest_report_v3.md, you must return such that the average trade expectancy > 0.2,
+Objective: Inside of build/backtest_report_v3.md, you must return such that the average trade expectancy > 0.2,
 optimize for sortino ratio and edge stability at all cost.
 
 Repeat this until you fufill the objectives.
