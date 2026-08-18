@@ -1,0 +1,435 @@
+//! Venue-agnostic strategy execution loop.
+//!
+//! Connects an [`Exchange`] implementation, feeds normalized market events into
+//! the `engine` strategy, persists state to RocksDB and — in `Live` mode —
+//! routes the engine's entry/exit events to the exchange as real orders.
+//!
+//! The loop is fully async and owns a single `MomentumStrategy` instance; it
+//! is designed to be driven from:
+//!   - the `live-trade` CLI binary, or
+//!   - the PyO3 `Strategy` binding (one loop per ticker on its own tokio
+//!     runtime thread), so Python can run 50+ assets concurrently.
+
+use crate::db::{ClosedTrade, DbWriter, PnLSnapshot};
+use crate::exchange::{
+        symbols, Exchange, ExchangeKind, MarketEvent, OrderRequest, OrderType,
+    TradeSide,
+};
+use crate::model;
+use engine::{EngineEvent, MomentumStrategy, StrategyConfig};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+
+/// Execution mode: simulated fills (paper) vs. real order routing (live).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExecutionMode {
+    /// The engine simulates fills internally (dry-run); no real orders.
+    Paper,
+    /// Engine events are routed to the exchange as real orders.
+    Live,
+}
+
+/// Static configuration for one execution loop.
+#[derive(Debug, Clone)]
+pub struct ExecutionConfig {
+    /// Ticker in lowercase, e.g. "btcusdt".
+    pub ticker: String,
+    pub exchange: ExchangeKind,
+    pub mode: ExecutionMode,
+    pub db_path: String,
+    /// Number of historical composite bars to warm feature rings with.
+    pub seed_bars: u32,
+    /// Persist market data + PnL to RocksDB.
+    pub persist: bool,
+}
+
+/// Cheap shared snapshot of loop state (read by CLI / PyO3 status()).
+#[derive(Debug, Clone, Default)]
+pub struct RunStats {
+    pub running: bool,
+    pub paused: bool,
+    pub stop_requested: bool,
+    pub capital_usd: f64,
+    pub symbol: String,
+    pub equity: f64,
+    pub n_trades: u64,
+    pub n_wins: u64,
+    pub n_losses: u64,
+    pub total_r: f64,
+    pub mid: f64,
+    pub last_event: String,
+    pub last_error: Option<String>,
+}
+
+/// Shared handles the loop and its controlling caller both hold.
+pub struct LoopContext {
+    pub exchange: Box<dyn Exchange>,
+    pub stats: Arc<Mutex<RunStats>>,
+    pub paused: Arc<AtomicBool>,
+    pub stop: Arc<AtomicBool>,
+    /// Allocated capital in USD cents (read for position sizing).
+    pub capital_usd_cents: Arc<AtomicU64>,
+}
+
+/// Run the strategy loop for one ticker until `ctx.stop` is set.
+///
+/// Reconnects with backoff on stream errors, warms feature rings from
+/// historical closes, loads the research model if present, and emits a final
+/// HTML report on shutdown.
+pub async fn run_execution_loop(cfg: ExecutionConfig, mut ctx: LoopContext) {
+    let ticker = cfg.ticker.to_ascii_lowercase();
+    let native_symbol = match cfg.exchange {
+        ExchangeKind::Bybit => symbols::bybit(&ticker),
+        ExchangeKind::Bitfinex => symbols::bitfinex(&ticker),
+    };
+
+    // -- shared-state housekeeping -----------------------------------------
+    {
+        let mut s = ctx.stats.lock().unwrap();
+        s.symbol = ticker.clone();
+        s.running = true;
+        s.capital_usd = ctx.capital_usd_cents.load(Ordering::Relaxed) as f64 / 100.0;
+    }
+
+    // -- connect (with retry + backoff) ------------------------------------
+    if !connect_with_retry(&mut *ctx.exchange, &ticker, &ctx.stop, &ctx.stats).await {
+        finish(&cfg, ctx, &None).await;
+        return;
+    }
+
+    let capital_usd = ctx.capital_usd_cents.load(Ordering::Relaxed) as f64 / 100.0;
+    let mut strategy = MomentumStrategy::new(
+        &ticker,
+        StrategyConfig {
+            max_position_usd: capital_usd,
+            starting_equity: capital_usd,
+            ..StrategyConfig::default()
+        },
+    );
+
+    // -- persistence --------------------------------------------------------
+    let db = if cfg.persist {
+        match DbWriter::connect(&cfg.db_path).await {
+            Ok(db) => Some(Arc::new(db)),
+            Err(e) => {
+                eprintln!("[db] failed to open {}: {e} — running without persistence", cfg.db_path);
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    // -- research model ------------------------------------------------------
+    if let Some(mdl) = model::load_model() {
+        strategy.set_model(mdl);
+    } else {
+        println!("[model] no research model found — using proxy logit (P(WIN) gate only)");
+    }
+
+    // -- warm feature rings from history -------------------------------------
+    match ctx.exchange.historical_closes(&ticker, cfg.seed_bars).await {
+        Ok(closes) if !closes.is_empty() => {
+            strategy.seed_macro_closes(&closes);
+            println!("[seed] warmed {} macro closes from {}", closes.len(), cfg.exchange);
+        }
+        Ok(_) => eprintln!("[seed] no historical closes available — features will warm live"),
+        Err(e) => eprintln!("[seed] historical fetch failed ({e}) — features will warm live"),
+    }
+
+    // -- restore equity from the last persisted snapshot ---------------------
+    let last_exit_ms = AtomicI64::new(i64::MIN);
+    if let Some(db) = &db {
+        if let Ok(snaps) = db.iter_pnl_snapshots(&ticker) {
+            if let Some(last) = snaps.last() {
+                strategy.restore(last.equity, last.last_exit_ms);
+                last_exit_ms.store(last.last_exit_ms, Ordering::SeqCst);
+                println!("[restore] equity={:.2} USD n_trades={}", last.equity, last.n_trades);
+            }
+        }
+    }
+
+    println!(
+        "=== {} loop [{}] mode={} symbol={} ===",
+        cfg.exchange,
+        ticker,
+        match cfg.mode {
+            ExecutionMode::Paper => "paper",
+            ExecutionMode::Live => "live",
+        },
+        native_symbol
+    );
+
+    // -- main feed loop -------------------------------------------------------
+    loop {
+        if ctx.stop.load(Ordering::SeqCst) {
+            break;
+        }
+
+        let events = match ctx.exchange.next_events().await {
+            Ok(events) => events,
+            Err(e) => {
+                eprintln!("[{ticker}] stream error: {e} — reconnecting...");
+                if let Ok(mut s) = ctx.stats.lock() {
+                    s.last_error = Some(e.to_string());
+                }
+                if !connect_with_retry(&mut *ctx.exchange, &ticker, &ctx.stop, &ctx.stats).await {
+                    break;
+                }
+                continue;
+            }
+        };
+
+        for event in events {
+            if ctx.stop.load(Ordering::SeqCst) {
+                break;
+            }
+            if ctx.paused.load(Ordering::SeqCst) {
+                // Paused: keep persisting raw market data but stop feeding the
+                // strategy so no new entries/exits are generated.
+                if let Some(db) = &db {
+                    persist_event(db, &ticker, &event);
+                }
+                continue;
+            }
+
+            match event {
+                MarketEvent::Trade(t) => {
+                    if let Some(db) = &db {
+                        db.record_trade(&ticker, t.clone());
+                    }
+                    let is_buy = t.side == TradeSide::Buy;
+                    let engine_events = strategy.on_trade(t.timestamp, t.price, t.amount, is_buy);
+                    handle_engine_events(
+                        &cfg, &ctx, &mut strategy, &db, &last_exit_ms, &native_symbol,
+                        engine_events,
+                    )
+                    .await;
+                }
+                MarketEvent::BookTop(b) => {
+                    if let Some(db) = &db {
+                        db.record_orderbook_top(&ticker, b.clone());
+                    }
+                    let engine_events = strategy.on_orderbook(
+                        b.timestamp, b.bid_price, b.bid_amount, b.ask_price, b.ask_amount,
+                    );
+                    handle_engine_events(
+                        &cfg, &ctx, &mut strategy, &db, &last_exit_ms, &native_symbol,
+                        engine_events,
+                    )
+                    .await;
+                }
+            }
+        }
+
+        // Refresh the shared stats snapshot.
+        if let Ok(mut s) = ctx.stats.lock() {
+            let snap = strategy.snapshot();
+            s.equity = snap.equity;
+            s.n_trades = snap.n_trades;
+            s.n_wins = snap.n_wins;
+            s.n_losses = snap.n_losses;
+            s.total_r = snap.total_r;
+            s.mid = snap.mid;
+            s.paused = ctx.paused.load(Ordering::SeqCst);
+            s.running = !ctx.stop.load(Ordering::SeqCst);
+        }
+    }
+
+    finish(&cfg, ctx, &db).await;
+}
+
+/// Persist a market event (used while paused so the raw feed is never lost).
+fn persist_event(db: &DbWriter, ticker: &str, event: &MarketEvent) {
+    match event {
+        MarketEvent::Trade(t) => db.record_trade(ticker, t.clone()),
+        MarketEvent::BookTop(b) => db.record_orderbook_top(ticker, b.clone()),
+    }
+}
+
+/// Connect with retry + backoff until `stop` is set. Returns false if the
+/// caller should abort.
+async fn connect_with_retry(
+    exchange: &mut dyn Exchange,
+    ticker: &str,
+    stop: &AtomicBool,
+    stats: &Arc<Mutex<RunStats>>,
+) -> bool {
+    loop {
+        if stop.load(Ordering::SeqCst) {
+            return false;
+        }
+        match exchange.connect(ticker).await {
+            Ok(()) => return true,
+            Err(e) => {
+                eprintln!("[{ticker}] connect failed: {e} — retrying in 2s");
+                if let Ok(mut s) = stats.lock() {
+                    s.last_error = Some(e.to_string());
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            }
+        }
+    }
+}
+
+/// React to strategy events: log, persist PnL snapshots/trade records, and in
+/// `Live` mode route entries/exits to the exchange as real orders.
+async fn handle_engine_events(
+    cfg: &ExecutionConfig,
+    ctx: &LoopContext,
+    strategy: &mut MomentumStrategy,
+    db: &Option<Arc<DbWriter>>,
+    last_exit_ms: &AtomicI64,
+    native_symbol: &str,
+    events: Vec<EngineEvent>,
+) {
+    for event in events {
+        match event {
+            EngineEvent::BarClosed(f) => {
+                if let Ok(mut s) = ctx.stats.lock() {
+                    s.last_event = format!(
+                        "bar ts={} close={:.2} rsi2={:.1} win={:.2}",
+                        f.ts, f.close, f.rsi_2, f.win_prob
+                    );
+                }
+            }
+            EngineEvent::Entered(r) => {
+                println!(
+                    "[entry] {} {} qty={:.4} @ {:.2} stop={:.2} target={:.2} (rsi2={:.1}, win={:.2})",
+                    cfg.ticker, r.side.as_str(), r.qty, r.entry_price, r.stop, r.target, r.rsi_2,
+                    r.win_prob
+                );
+                if cfg.mode == ExecutionMode::Live {
+                    route_entry(ctx.exchange.as_ref(), native_symbol, &r).await;
+                }
+                if let Some(db) = db {
+                    let snap = strategy.snapshot();
+                    let pnl = PnLSnapshot {
+                        ts_ms: r.ts,
+                        equity: snap.equity,
+                        n_trades: snap.n_trades,
+                        n_wins: snap.n_wins,
+                        n_losses: snap.n_losses,
+                        total_r: snap.total_r,
+                        mid: snap.mid,
+                        last_exit_ms: last_exit_ms.load(Ordering::SeqCst),
+                    };
+                    db.record_pnl_snapshot(&snap.symbol, &pnl);
+                }
+                if let Ok(mut s) = ctx.stats.lock() {
+                    s.last_event = format!("entry {} @ {:.2}", r.side.as_str(), r.entry_price);
+                }
+            }
+            EngineEvent::Exited(rec) => {
+                last_exit_ms.store(rec.exit_ms, Ordering::SeqCst);
+                println!(
+                    "[exit] {} reason={} @ {:.2} r={:+.2} net={:+.2} equity={:.2} ({:.0}s)",
+                    cfg.ticker, rec.reason, rec.exit_price, rec.r_multiple, rec.net_usd,
+                    rec.equity_after, rec.duration_s
+                );
+                if cfg.mode == ExecutionMode::Live {
+                    route_exit(ctx.exchange.as_ref(), native_symbol, &rec).await;
+                }
+                if let Some(db) = db {
+                    let snap = strategy.snapshot();
+                    let pnl = PnLSnapshot {
+                        ts_ms: rec.exit_ms,
+                        equity: snap.equity,
+                        n_trades: snap.n_trades,
+                        n_wins: snap.n_wins,
+                        n_losses: snap.n_losses,
+                        total_r: snap.total_r,
+                        mid: snap.mid,
+                        last_exit_ms: rec.exit_ms,
+                    };
+                    db.record_pnl_snapshot(&snap.symbol, &pnl);
+
+                    let ct = ClosedTrade {
+                        entry_ms: rec.entry_ms,
+                        exit_ms: rec.exit_ms,
+                        side: rec.side.as_str().to_string(),
+                        entry_price: rec.entry_price,
+                        exit_price: rec.exit_price,
+                        reason: rec.reason.to_string(),
+                        qty: rec.qty,
+                        net_usd: rec.net_usd,
+                        r_multiple: rec.r_multiple,
+                        equity_after: rec.equity_after,
+                        duration_s: rec.duration_s,
+                    };
+                    db.record_closed_trade(&snap.symbol, &ct);
+                }
+                if let Ok(mut s) = ctx.stats.lock() {
+                    s.last_event = format!("exit {} r={:+.2}", rec.reason, rec.r_multiple);
+                }
+            }
+        }
+    }
+}
+
+/// Graceful teardown: final stats, HTML report, close the exchange.
+async fn finish(cfg: &ExecutionConfig, mut ctx: LoopContext, db: &Option<Arc<DbWriter>>) {
+    if let Ok(mut s) = ctx.stats.lock() {
+        s.running = false;
+        s.stop_requested = true;
+        s.paused = false;
+    }
+    if cfg.persist {
+        if let Some(db) = db {
+            crate::report::generate_html_report(db, &cfg.ticker).await;
+        }
+    }
+    if let Err(e) = ctx.exchange.close().await {
+        eprintln!("[close] {e}");
+    }
+}
+
+/// Route an engine entry to the exchange (Live mode): market order sized to
+/// the engine receipt quantity.
+async fn route_entry(exchange: &dyn Exchange, symbol: &str, r: &engine::EntryReceipt) {
+    let side = if r.side == engine::Side::Long {
+        TradeSide::Buy
+    } else {
+        TradeSide::Sell
+    };
+    let req = OrderRequest {
+        symbol: symbol.to_string(),
+        side,
+        order_type: OrderType::Market,
+        price: 0.0,
+        amount: r.qty,
+    };
+    match exchange.place_order(&req).await {
+        Ok(resp) => println!(
+            "[order] submitted {} side={} status={}",
+            resp.exchange_order_id,
+            if side == TradeSide::Buy { "buy" } else { "sell" },
+            resp.status
+        ),
+        Err(e) => eprintln!("[order] FAILED to place entry order: {e}"),
+    }
+}
+
+/// Route an engine exit to the exchange (Live mode): close the position by
+/// trading back the recorded quantity on the opposite side.
+async fn route_exit(exchange: &dyn Exchange, symbol: &str, rec: &engine::TradeRecord) {
+    let side = if rec.side == engine::Side::Long {
+        TradeSide::Sell
+    } else {
+        TradeSide::Buy
+    };
+    let req = OrderRequest {
+        symbol: symbol.to_string(),
+        side,
+        order_type: OrderType::Market,
+        price: 0.0,
+        amount: rec.qty,
+    };
+    match exchange.place_order(&req).await {
+        Ok(resp) => println!(
+            "[order] closed {} status={}",
+            resp.exchange_order_id, resp.status
+        ),
+        Err(e) => eprintln!("[order] FAILED to place exit order: {e}"),
+    }
+}

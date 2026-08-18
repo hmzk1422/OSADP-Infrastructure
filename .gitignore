@@ -1,27 +1,47 @@
-# Ignore environment and data
+# =============================================================================
+# OSADP-Core — repository ignore rules
+# =============================================================================
+
+# ── Python ───────────────────────────────────────────────────────────────────
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+.mypy_cache/
+.ruff_cache/
+
+# Environment variables / secrets
 .env
+*.key
+*.pem
+
+# ── Rust ─────────────────────────────────────────────────────────────────────
+target/
+
+# ── Data & runtime stores (RocksDB, downloaded archives, analytics caches) ──
+data/
+binance_cache/
+research/state_space/
 *.csv
 *.parquet
 *.db
-__pycache__/
-.vscode/
-.pyc
+*.sst
 
-# Ignore the virtual environment
-venv/
-
-# Ignore environment variables/secrets
-.env
-*.png
-
-# Generated report/log artifacts (backtest reports, charts, csv exports)
+# ── Output artifacts (reports, charts, trade logs) ──────────────────────────
 build/
-research/state_space/
-
-# Stray generated file listings (from e.g. `Get-ChildItem -Recurse` dumps)
-_filelist.txt
-
-binance_cache/
-main/logs/
 *.log
-target/
+*.png
+main/logs/
+
+# ── Editors / OS ─────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+.DS_Store
+
+# ── Tooling / misc ──────────────────────────────────────────────────────────
+dist/
+_filelist.txt
+filelist.txt

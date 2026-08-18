@@ -18,7 +18,7 @@
 //! landing on the same millisecond can never collide and silently overwrite
 //! each other.
 
-use crate::bybit_ws::{BybitOrderBookTop, BybitTrade};
+use crate::exchange::{MarketBookTop, MarketTrade};
 use rocksdb::{ColumnFamilyDescriptor, Direction, IteratorMode, Options, DB};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -109,7 +109,7 @@ impl DbWriter {
     /// Persists a single trade print. Write failures are logged and swallowed
     /// rather than propagated -- a transient local I/O error shouldn't take
     /// down a live market data feed.
-    pub fn record_trade(&self, symbol: &str, trade: BybitTrade) {
+    pub fn record_trade(&self, symbol: &str, trade: MarketTrade) {
         if let Err(e) = self.try_record_trade(symbol, &trade) {
             eprintln!(
                 "[db] failed to write trade {symbol} @ {}: {e}",
@@ -120,7 +120,7 @@ impl DbWriter {
 
     /// Persists a single L1 order book snapshot. Same fire-and-forget error
     /// handling as `record_trade`.
-    pub fn record_orderbook_top(&self, symbol: &str, top: BybitOrderBookTop) {
+    pub fn record_orderbook_top(&self, symbol: &str, top: MarketBookTop) {
         if let Err(e) = self.try_record_orderbook_top(symbol, &top) {
             eprintln!(
                 "[db] failed to write orderbook top {symbol} @ {}: {e}",
@@ -130,7 +130,7 @@ impl DbWriter {
     }
 
     /// Returns all stored trades for `symbol`, oldest first.
-    pub fn iter_trades(&self, symbol: &str) -> Result<Vec<BybitTrade>, DbError> {
+    pub fn iter_trades(&self, symbol: &str) -> Result<Vec<MarketTrade>, DbError> {
         let cf = self.cf(CF_TRADES)?;
         let prefix = Self::symbol_prefix(symbol);
         let mut out = Vec::new();
@@ -148,7 +148,7 @@ impl DbWriter {
     }
 
     /// Returns all stored L1 snapshots for `symbol`, oldest first.
-    pub fn iter_orderbook(&self, symbol: &str) -> Result<Vec<BybitOrderBookTop>, DbError> {
+    pub fn iter_orderbook(&self, symbol: &str) -> Result<Vec<MarketBookTop>, DbError> {
         let cf = self.cf(CF_ORDERBOOK)?;
         let prefix = Self::symbol_prefix(symbol);
         let mut out = Vec::new();
@@ -167,7 +167,7 @@ impl DbWriter {
 
     // ---- internal helpers -------------------------------------------------
 
-    fn try_record_trade(&self, symbol: &str, trade: &BybitTrade) -> Result<(), DbError> {
+    fn try_record_trade(&self, symbol: &str, trade: &MarketTrade) -> Result<(), DbError> {
         let cf = self.cf(CF_TRADES)?;
         let key = Self::trade_key(symbol, trade.timestamp, &trade.id, self.next_seq());
         let value = serde_json::to_vec(trade)?;
@@ -178,7 +178,7 @@ impl DbWriter {
     fn try_record_orderbook_top(
         &self,
         symbol: &str,
-        top: &BybitOrderBookTop,
+        top: &MarketBookTop,
     ) -> Result<(), DbError> {
         let cf = self.cf(CF_ORDERBOOK)?;
         let key = Self::orderbook_key(symbol, top.timestamp, self.next_seq());
