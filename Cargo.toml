@@ -1,0 +1,21 @@
+# =============================================================================
+# OSADP-Core — Root Rust Workspace
+# =============================================================================
+# All Rust crates live under `unified-execution/`:
+#   engine/     — research-faithful strategy engine (also the maturin/PyO3 module)
+#   live-trade/ — real-market execution (Bybit WebSocket + RocksDB store)
+#   live-test/  — historical replay / paper-trading runner
+#
+# Usage:
+#   cargo build --workspace        # build all crates
+#   cargo test --workspace         # run engine unit tests + integration
+#   maturin develop --release      # build the Python bindings (see pyproject.toml)
+
+[workspace]
+members = [
+    "unified-execution/engine",
+    "unified-execution/live-test",
+    "unified-execution/live-trade",
+    "unified-execution/bindings",
+]
+resolver = "2"

@@ -1,0 +1,264 @@
+//! PyO3 bindings — the Python-visible `engine` module.
+//!
+//! Exposes a `Strategy` class that wraps the Rust execution stack:
+//!
+//!   * `engine` crate      — research-faithful strategy logic
+//!   * `live-trade` crate  — exchange abstraction, execution loop, RocksDB
+//!
+//! Python is only the control plane (`reallocate` / `run` / `pause` /
+//! `resume` / `stop` / `status`); every tick of the strategy runs on its own
+//! tokio runtime thread inside the Rust process, so a Python `Portfolio` can
+//! drive 50+ assets concurrently without Python ever touching market data.
+//!
+//! Build with `maturin develop --release` (enables the `python` feature).
+
+#![cfg(feature = "python")]
+
+use live_trade::exchange::{create_exchange, ExchangeKind};
+use live_trade::execution::{
+    run_execution_loop, ExecutionConfig, ExecutionMode, LoopContext, RunStats,
+};
+use pyo3::exceptions::{PyRuntimeError, PyValueError};
+use pyo3::prelude::*;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+
+fn parse_mode(s: &str) -> PyResult<ExecutionMode> {
+    match s.to_ascii_lowercase().as_str() {
+        "paper" | "dry-run" | "dryrun" => Ok(ExecutionMode::Paper),
+        "live" => Ok(ExecutionMode::Live),
+        other => Err(PyValueError::new_err(format!(
+            "unknown mode {other:?} (expected 'paper' or 'live')"
+        ))),
+    }
+}
+
+/// Control-plane handle to one Rust strategy runner.
+///
+/// ```python
+/// s = engine.Strategy("btcusdt", exchange="bitfinex", mode="paper", capital=1000.0)
+/// s.run()              # starts the Rust loop on its own thread
+/// s.reallocate(5000.0) # resize position sizing
+/// s.pause()            # stop generating new trades (feed still persists)
+/// s.resume()
+/// s.status()           # -> JSON string
+/// s.stop()             # graceful shutdown + HTML report
+/// ```
+#[pyclass(module = "engine", name = "Strategy")]
+pub struct Strategy {
+    ticker: String,
+    exchange: ExchangeKind,
+    mode: ExecutionMode,
+    db_path: String,
+    stats: Arc<Mutex<RunStats>>,
+    paused: Arc<AtomicBool>,
+    stop: Arc<AtomicBool>,
+    capital_usd_cents: Arc<AtomicU64>,
+    started: Arc<AtomicBool>,
+    handle: Arc<Mutex<Option<std::thread::JoinHandle<()>>>>,
+}
+
+#[pymethods]
+impl Strategy {
+    #[new]
+    #[pyo3(signature = (ticker, exchange="bitfinex", mode="paper", capital=10_000.0, db_path=None))]
+    fn new(
+        ticker: String,
+        exchange: &str,
+        mode: &str,
+        capital: f64,
+        db_path: Option<String>,
+    ) -> PyResult<Self> {
+        let kind = ExchangeKind::parse(exchange).ok_or_else(|| {
+            PyValueError::new_err(format!(
+                "unknown exchange {exchange:?} (expected 'bybit' or 'bitfinex')"
+            ))
+        })?;
+        let mode = parse_mode(mode)?;
+        if capital <= 0.0 {
+            return Err(PyValueError::new_err("capital must be > 0"));
+        }
+        let ticker = ticker.to_ascii_lowercase();
+        let db_path = db_path.unwrap_or_else(|| "./data/marketdata.rocksdb".to_string());
+        Ok(Self {
+                        stats: Arc::new(Mutex::new(RunStats {
+                capital_usd: capital,
+                symbol: ticker.clone(),
+                equity: capital,
+                ..Default::default()
+            })),
+            ticker,
+            exchange: kind,
+            mode,
+            db_path,
+            paused: Arc::new(AtomicBool::new(false)),
+            stop: Arc::new(AtomicBool::new(false)),
+            capital_usd_cents: Arc::new(AtomicU64::new((capital * 100.0) as u64)),
+            started: Arc::new(AtomicBool::new(false)),
+            handle: Arc::new(Mutex::new(None)),
+        })
+    }
+
+    /// Set the capital (USD) allocated to this strategy for position sizing.
+    /// While running, the loop re-reads it on every new entry, so an in-flight
+    /// reallocation applies to the next position immediately.
+    fn reallocate(&self, capital_usd: f64) -> PyResult<()> {
+        if capital_usd <= 0.0 {
+            return Err(PyValueError::new_err("capital must be > 0"));
+        }
+        self.capital_usd_cents
+            .store((capital_usd * 100.0) as u64, Ordering::Relaxed);
+        if let Ok(mut s) = self.stats.lock() {
+            s.capital_usd = capital_usd;
+        }
+        Ok(())
+    }
+
+    /// Start the Rust execution loop on a dedicated thread (returns
+    /// immediately). The loop owns the strategy + exchange and runs until
+    /// `stop()` or a fatal stream error.
+    fn run(&self) -> PyResult<()> {
+        if self.started.swap(true, Ordering::SeqCst) {
+            return Err(PyRuntimeError::new_err("strategy already running"));
+        }
+        self.stop.store(false, Ordering::SeqCst);
+        self.paused.store(false, Ordering::SeqCst);
+
+        let ticker = self.ticker.clone();
+        let exchange_kind = self.exchange;
+        let mode = self.mode;
+        let db_path = self.db_path.clone();
+        let stats = Arc::clone(&self.stats);
+        let paused = Arc::clone(&self.paused);
+        let stop = Arc::clone(&self.stop);
+        let capital = Arc::clone(&self.capital_usd_cents);
+
+        let handle = std::thread::Builder::new()
+            .name(format!("strategy-{ticker}"))
+            .spawn(move || {
+                let rt = match tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                {
+                    Ok(rt) => rt,
+                    Err(e) => {
+                        if let Ok(mut s) = stats.lock() {
+                            s.last_error = Some(format!("tokio runtime: {e}"));
+                        }
+                        return;
+                    }
+                };
+                rt.block_on(run_execution_loop(
+                    ExecutionConfig {
+                        ticker: ticker.clone(),
+                        exchange: exchange_kind,
+                        mode,
+                        db_path,
+                        seed_bars: 150,
+                        persist: true,
+                    },
+                    LoopContext {
+                        exchange: create_exchange(exchange_kind),
+                        stats,
+                        paused,
+                        stop,
+                        capital_usd_cents: capital,
+                    },
+                ));
+            })
+            .map_err(|e| {
+                PyRuntimeError::new_err(format!("failed to spawn runner thread: {e}"))
+            })?;
+
+        *self.handle.lock().unwrap() = Some(handle);
+        Ok(())
+    }
+
+    /// Gracefully pause signal consumption: streams stay connected and raw
+    /// market data keeps persisting, but no new entries/exits are generated.
+    fn pause(&self) {
+        self.paused.store(true, Ordering::SeqCst);
+        if let Ok(mut s) = self.stats.lock() {
+            s.paused = true;
+        }
+    }
+
+    /// Resume after `pause()`.
+    fn resume(&self) {
+        self.paused.store(false, Ordering::SeqCst);
+        if let Ok(mut s) = self.stats.lock() {
+            s.paused = false;
+        }
+    }
+
+    /// Hard stop: request loop shutdown, wait briefly for it to drain, and
+    /// detach the thread if it needs longer (it exits on its next tick).
+    fn stop(&self) -> PyResult<()> {
+        self.stop.store(true, Ordering::SeqCst);
+        self.started.store(false, Ordering::SeqCst);
+        if let Ok(mut s) = self.stats.lock() {
+            s.stop_requested = true;
+        }
+
+        let mut guard = self
+            .handle
+            .lock()
+            .map_err(|_| PyRuntimeError::new_err("handle lock poisoned"))?;
+        if let Some(handle) = guard.take() {
+            // Give the loop up to ~5s to drain, then detach.
+            for _ in 0..50 {
+                if handle.is_finished() {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            if handle.is_finished() {
+                let _ = handle.join();
+            }
+        }
+        Ok(())
+    }
+
+    /// JSON string snapshot of runtime state (equity, trades, capital, ...).
+    fn status(&self) -> PyResult<String> {
+        let s = self
+            .stats
+            .lock()
+            .map_err(|_| PyRuntimeError::new_err("stats lock poisoned"))?;
+        let json = serde_json::json!({
+            "symbol": s.symbol,
+            "exchange": self.exchange.as_str(),
+            "mode": match self.mode {
+                ExecutionMode::Paper => "paper",
+                ExecutionMode::Live => "live",
+            },
+            "running": s.running,
+            "paused": s.paused,
+            "stop_requested": s.stop_requested,
+            "capital_usd": s.capital_usd,
+            "equity": s.equity,
+            "n_trades": s.n_trades,
+            "n_wins": s.n_wins,
+            "n_losses": s.n_losses,
+            "total_r": s.total_r,
+            "mid": s.mid,
+            "last_event": s.last_event,
+            "last_error": s.last_error,
+                });
+        Ok(json.to_string())
+    }
+
+    /// Whether the strategy loop is currently running (`started && !stop`).
+    #[getter]
+    fn is_running(&self) -> bool {
+        self.started.load(Ordering::SeqCst) && !self.stop.load(Ordering::SeqCst)
+    }
+}
+
+/// The Python-visible module: `import engine`.
+#[pymodule]
+fn engine(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_class::<Strategy>()?;
+    m.add("__version__", env!("CARGO_PKG_VERSION"))?;
+    Ok(())
+}

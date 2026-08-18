@@ -1,0 +1,32 @@
+# =============================================================================
+# OSADP-Core — Python / Maturin packaging
+# =============================================================================
+# maturin compiles the Rust `engine` crate (unified-execution/engine) into a
+# native Python extension. The compiled module is imported by `unified_runner.py`
+# and exposes the strategy entry point `run_strategy(ticker)`.
+
+[build-system]
+requires = ["maturin>=1.14,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "unified-execution"
+description = "OSADP-Core — OrderFlow Systematic Alpha Discovery Pipeline (hybrid Python/Rust quant framework)."
+readme = "README.md"
+requires-python = ">=3.9"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: 3",
+    "Intended Audience :: Financial and Insurance Industry",
+    "Topic :: Office/Business :: Financial :: Investment",
+]
+dynamic = ["version"]
+
+[tool.maturin]
+# The crate hosting the PyO3 bindings. It depends on `engine` (strategy) and
+# `live-trade` (exchange abstraction + execution loop) and exposes the Python
+# module `engine` with the `Strategy` class used by unified_runner.py.
+manifest-path = "unified-execution/bindings/Cargo.toml"
+module-name = "engine"
+features = ["python"]
