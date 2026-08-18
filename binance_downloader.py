@@ -66,6 +66,8 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
 
 from binance_to_ccxt import convert_orderbook_df, convert_trades_df
 
@@ -219,57 +221,104 @@ def download_and_convert(symbol, start_date, end_date, outdir="./research/csv",
     UTC daily files), convert to CCXT format, and write ONE combined file
     per data type to `outdir`.
 
+    Processes one day at a time and streams each day's converted rows
+    straight to disk (Parquet via ParquetWriter, CSV via append mode)
+    instead of accumulating every day's raw + converted DataFrame in
+    memory before a single final concat/write. For symbols like BTCUSDT
+    over a multi-day/week range, holding the *entire* range in RAM twice
+    (once as a list of per-day frames, once as the concatenated result)
+    is what causes MemoryError/ArrayMemoryError on long ranges — this
+    keeps peak memory to roughly one day's worth of data at a time.
+
     Returns (trades_path, orderbook_path).
     """
     ticker = ticker or symbol.upper()
     days = _date_range(start_date, end_date)
-
-    if verbose:
-        print(f"Fetching aggTrades for {symbol} {start_date}..{end_date} ({len(days)} day(s))")
-    agg_frames = [
-        f for f in (
-            _fetch_day(base_url, trading_type, 'aggTrades', symbol, day,
-                       cache_dir, AGGTRADES_COLUMNS, 'aggTrades', verbose)
-            for day in days
-        ) if f is not None
-    ]
-    if not agg_frames:
-        raise RuntimeError(f"No aggTrades data found for {symbol} in {start_date}..{end_date}")
-    raw_trades = pd.concat(agg_frames, ignore_index=True)
-
-    if verbose:
-        print(f"Fetching bookDepth for {symbol} {start_date}..{end_date} ({len(days)} day(s))")
-    depth_frames = [
-        f for f in (
-            _fetch_day(base_url, trading_type, 'bookDepth', symbol, day,
-                       cache_dir, BOOKDEPTH_COLUMNS, 'bookDepth', verbose)
-            for day in days
-        ) if f is not None
-    ]
-    if not depth_frames:
-        raise RuntimeError(f"No bookDepth data found for {symbol} in {start_date}..{end_date}")
-    raw_bookdepth = pd.concat(depth_frames, ignore_index=True)
-
-    if verbose:
-        print("Converting to CCXT format and combining...")
-    trades = convert_trades_df(raw_trades)
-    orderbook = convert_orderbook_df(raw_bookdepth, trades)
 
     os.makedirs(outdir, exist_ok=True)
     ext = 'parquet' if out_format == 'parquet' else 'csv'
     trades_out = os.path.join(outdir, f"{ticker}_trades.{ext}")
     ob_out = os.path.join(outdir, f"{ticker}_orderbook.{ext}")
 
-    if out_format == 'parquet':
-        trades.to_parquet(trades_out, index=False)
-        orderbook.to_parquet(ob_out, index=False)
-    else:
-        trades.to_csv(trades_out, index=False)
-        orderbook.to_csv(ob_out, index=False)
+    # Start clean — CSV mode uses append, and a stale file from a previous
+    # (e.g. failed) run must not get mixed in with this run's rows.
+    for path in (trades_out, ob_out):
+        if os.path.exists(path):
+            os.remove(path)
+
+    trades_writer = None  # pyarrow ParquetWriter, opened lazily on first day
+    ob_writer = None
+    trades_header_written = False
+    ob_header_written = False
+    total_trades = 0
+    total_ob = 0
+    days_with_trades = 0
+    days_with_ob = 0
 
     if verbose:
-        print(f"Wrote {len(trades):,} trades      (combined, {len(agg_frames)} day(s)) -> {trades_out}")
-        print(f"Wrote {len(orderbook):,} orderbook rows (combined, {len(depth_frames)} day(s)) -> {ob_out}")
+        print(f"Streaming aggTrades + bookDepth for {symbol} {start_date}..{end_date} "
+              f"({len(days)} day(s)) -> {outdir}")
+
+    try:
+        for day in days:
+            raw_trades_day = _fetch_day(base_url, trading_type, 'aggTrades', symbol, day,
+                                         cache_dir, AGGTRADES_COLUMNS, 'aggTrades', verbose)
+            if raw_trades_day is None:
+                continue
+            trades_day = convert_trades_df(raw_trades_day)
+            del raw_trades_day
+
+            raw_depth_day = _fetch_day(base_url, trading_type, 'bookDepth', symbol, day,
+                                        cache_dir, BOOKDEPTH_COLUMNS, 'bookDepth', verbose)
+            ob_day = None
+            if raw_depth_day is not None:
+                try:
+                    ob_day = convert_orderbook_df(raw_depth_day, trades_day)
+                except ValueError as e:
+                    if verbose:
+                        print(f"  [bookDepth] {day}: {e} — skipping this day's orderbook")
+                del raw_depth_day
+
+            if out_format == 'parquet':
+                table = pa.Table.from_pandas(trades_day, preserve_index=False)
+                if trades_writer is None:
+                    trades_writer = pq.ParquetWriter(trades_out, table.schema)
+                trades_writer.write_table(table)
+            else:
+                trades_day.to_csv(trades_out, mode='a', index=False,
+                                   header=not trades_header_written)
+                trades_header_written = True
+            total_trades += len(trades_day)
+            days_with_trades += 1
+            del trades_day
+
+            if ob_day is not None and len(ob_day) > 0:
+                if out_format == 'parquet':
+                    table = pa.Table.from_pandas(ob_day, preserve_index=False)
+                    if ob_writer is None:
+                        ob_writer = pq.ParquetWriter(ob_out, table.schema)
+                    ob_writer.write_table(table)
+                else:
+                    ob_day.to_csv(ob_out, mode='a', index=False,
+                                   header=not ob_header_written)
+                    ob_header_written = True
+                total_ob += len(ob_day)
+                days_with_ob += 1
+            del ob_day
+    finally:
+        if trades_writer is not None:
+            trades_writer.close()
+        if ob_writer is not None:
+            ob_writer.close()
+
+    if total_trades == 0:
+        raise RuntimeError(f"No aggTrades data found for {symbol} in {start_date}..{end_date}")
+    if total_ob == 0:
+        raise RuntimeError(f"No bookDepth data found for {symbol} in {start_date}..{end_date}")
+
+    if verbose:
+        print(f"Wrote {total_trades:,} trades      ({days_with_trades} day(s)) -> {trades_out}")
+        print(f"Wrote {total_ob:,} orderbook rows ({days_with_ob} day(s)) -> {ob_out}")
     return trades_out, ob_out
 
 
