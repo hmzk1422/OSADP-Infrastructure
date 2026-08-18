@@ -3,9 +3,9 @@ mod db;
 
 use bybit_ws::{BybitTrade, OrderBookWatcher, TradeWatcher};
 use db::{ClosedTrade, DbWriter, PnLSnapshot};
-use engine::{EngineEvent, MomentumStrategy, StrategyConfig};
-use std::sync::Arc;
+use engine::{lgbm::LightGbm, EngineEvent, MomentumStrategy, StrategyConfig};
 use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::Arc;
 use tokio::sync::Mutex;
 
 const SYMBOL: &str = "BTCUSDT";
@@ -34,6 +34,49 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let last_exit_ms = Arc::new(AtomicI64::new(0));
+
+    // ── Load the research LightGBM model ──────────────────────────────
+    // Walk up from cwd looking for main/models/lgb_model.txt so this works
+    // whether we're run from the workspace root or a sub-crate dir.
+    match find_model_path(&["main/models/lgb_model.txt"]) {
+        Some(model_path) => match std::fs::read_to_string(&model_path) {
+            Ok(mdl_str) => match LightGbm::from_str(&mdl_str) {
+                Ok(mdl) => {
+                    println!(
+                        "[model] loaded real LightGBM from {} ({} trees, {} features)",
+                        model_path.display(),
+                        mdl.num_trees(),
+                        mdl.num_features()
+                    );
+                    let mut strat = strategy.lock().await;
+                    strat.set_model(mdl);
+                }
+                Err(e) => {
+                    eprintln!("[model] failed to parse lgb_model.txt: {e} — running with proxy logit only");
+                }
+            },
+            Err(e) => {
+                eprintln!("[model] read error: {e} — running with proxy logit only");
+            }
+        },
+        None => {
+            eprintln!("[model] lgb_model.txt not found — running with proxy logit only; place model at main/models/lgb_model.txt");
+        }
+    }
+
+    // Seed macro (regime) closes from REST historical data so rsi_2/sma_14/etc.
+    // are warm from the first live 1-second bar (mirrors executor.py seed_historical_data).
+    match bybit_ws::get_historical_klines(SYMBOL, 300, 150).await {
+        Ok(klines) => {
+            let closes: Vec<f64> = klines.into_iter().map(|k| k.close).collect();
+            let mut strat = strategy.lock().await;
+            strat.seed_macro_closes(&closes);
+            println!("[seed] seeded {} macro closes from historical 5m bars", closes.len());
+        }
+        Err(e) => {
+            eprintln!("[seed] could not fetch historical klines ({e}) — macro features will warm on live data");
+        }
+    }
 
     let trade_strategy = Arc::clone(&strategy);
     let trade_db = Arc::clone(&db);
@@ -114,7 +157,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Wait for Ctrl+C or for both stream tasks to exit.
     let ctrl_c = tokio::spawn(async move {
-        tokio::signal::ctrl_c().await.expect("ctrl_c monitor");
+        tokio::signal::ctrl_c().await.expect("monitor ctrl_c");
     });
     let _ = tokio::select! {
         _ = async { let _ = tokio::join!(trades_task, ob_task); } => {},
@@ -138,7 +181,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         db.record_pnl_snapshot(SYMBOL, &pnl);
     }
 
-    println!("\n=== Dry-Run Summary ({SYMBOL}) ===");
+    println!("=== Dry-Run Summary ({SYMBOL}) ===");
     let strat = strategy.lock().await;
     let snap = strat.snapshot();
     let wins = snap.n_wins as f64;
@@ -154,8 +197,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// Walk up from the current directory looking for any of `paths`.
+fn find_model_path(paths: &[&str]) -> Option<std::path::PathBuf> {
+    let cwd = std::env::current_dir().ok()?;
+    let mut dir: Option<&std::path::Path> = Some(cwd.as_path());
+    while let Some(d) = dir {
+        for p in paths {
+            let cand = d.join(p);
+            if cand.exists() {
+                return Some(cand);
+            }
+        }
+        dir = d.parent();
+    }
+    None
+}
 
-    
 /// Feed a single Bybit trade into the engine and persist any emitted events.
 async fn feed_trade(
     strategy: &Arc<Mutex<MomentumStrategy>>,
@@ -248,6 +305,7 @@ async fn handle_events(
         }
     }
 }
+
 /// Generate a standalone HTML PnL report from persisted RocksDB data.
 async fn generate_html_report(db: &Arc<DbWriter>, symbol: &str) {
     let snaps = db.iter_pnl_snapshots(symbol).unwrap_or_default();
@@ -312,7 +370,7 @@ async fn generate_html_report(db: &Arc<DbWriter>, symbol: &str) {
         ));
     }
 
-    let pf_str = if profit_factor.is_infinite() { "\u{221e}".to_string() } else { format!("{:.2}", profit_factor) };
+    let pf_str = if profit_factor.is_infinite() { "∞".to_string() } else { format!("{:.2}", profit_factor) };
     let tbody = if rows.is_empty() {
         "<tr><td colspan=\"11\" style=\"text-align:center;color:#888\">No closed trades yet.</td></tr>".to_string()
     } else { rows };

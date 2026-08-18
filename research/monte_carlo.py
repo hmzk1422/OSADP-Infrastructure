@@ -85,29 +85,29 @@ class MonteCarloConfig:
 
     # --- capital / equity model ---
     starting_equity: float = 100_000.0
-    risk_per_trade: float = 0.0005           # fraction of equity risked per 1.0R
+    risk_per_trade: float = 0.0001           # fraction of equity risked per 1.0R
     compounding: bool = True               # fixed-fractional compounding vs fixed-dollar additive
 
     # --- stressor toggles ---
-    apply_stressors: bool = False
+    apply_stressors: bool = True
 
     # Slippage inflation: each trade's assumed baseline slippage cost
     # (in R) gets multiplied by a random factor in this range and the
     # EXTRA cost beyond baseline is subtracted from that trade's return.
     # For now, keep it at 0 for analysis of edge expectancy
-    slippage_r_base: float = 0
-    slippage_mult_range: tuple = (0, 0)
+    slippage_r_base: float = 0.01
+    slippage_mult_range: tuple = (1, 1)
 
     # Win-rate sensitivity shock: per path, this fraction of trades gets
     # flipped from win -> loss (applied to currently-winning trades only).
-    win_rate_shock_range: tuple = (0.02, 0.05)
+    win_rate_shock_range: tuple = (0.00, 0.00)
 
     # Returns shuffling with volatility scaling: trades whose ORIGINAL
     # historical return sits above this percentile are "outlier winners";
     # in each simulated path they get scaled down by a random factor in
     # winner_scale_down_range (e.g. 0.10 -> keep 90% of the outlier's edge).
     winner_percentile: float = 90.0
-    winner_scale_down_range: tuple = (0.10, 0.20)
+    winner_scale_down_range: tuple = (0.00, 0.00)
 
     # --- tail-risk metric parameters ---
     ruin_drawdown_pct: float = 0.20        # e.g. 0.20 = 20% equity drawdown

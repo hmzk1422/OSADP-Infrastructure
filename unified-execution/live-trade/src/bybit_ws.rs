@@ -24,9 +24,11 @@ use tokio::time::{interval, Duration, Interval};
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 
 const PUBLIC_WS_URL: &str = "wss://stream.bybit.com/v5/public/linear";
+const REST_BASE_URL: &str = "https://api.bybit.com";
 const PING_INTERVAL_SECS: u64 = 20;
 
 type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
+
 
 #[derive(Debug, thiserror::Error)]
 pub enum BybitError {
@@ -38,6 +40,8 @@ pub enum BybitError {
     SubscriptionRejected(String),
     #[error("connection closed by server")]
     ConnectionClosed,
+    #[error("http request error: {0}")]
+    Http(#[from] reqwest::Error),   // <-- new
 }
 
 /// A single public trade print.
@@ -289,4 +293,68 @@ fn parse_book_msg(text: &str) -> Result<Option<BybitOrderBookTop>, BybitError> {
         ask_price: best_ask[0].parse().unwrap_or(0.0),
         ask_amount: best_ask[1].parse().unwrap_or(0.0),
     }))
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Kline {
+    pub open_time: i64,
+    pub open: f64,
+    pub high: f64,
+    pub low: f64,
+    pub close: f64,
+    pub volume: f64,
+}
+
+#[derive(Debug, Deserialize)]
+struct KlineResponse {
+    #[serde(rename = "retCode")]
+    ret_code: i32,
+    #[serde(rename = "retMsg")]
+    ret_msg: String,
+    result: KlineResult,
+}
+
+#[derive(Debug, Deserialize)]
+struct KlineResult {
+    list: Vec<[String; 7]>,
+}
+
+/// Fetch historical klines via Bybit's public REST endpoint, used to seed the
+/// macro/regime feature rings on startup so they're warm from the first live
+/// bar (mirrors executor.py's `seed_historical_data`).
+///
+/// `interval_secs` is the composite bar size in seconds (300 -> Bybit's "5" =
+/// 5-minute interval); `limit` is the number of most-recent bars to fetch
+/// (Bybit max 1000). Returns bars oldest-first.
+pub async fn get_historical_klines(
+    symbol: &str,
+    interval_secs: i64,
+    limit: u32,
+) -> Result<Vec<Kline>, BybitError> {
+    let interval_min = (interval_secs / 60).max(1);
+    let url = format!(
+        "{REST_BASE_URL}/v5/market/kline?category=linear&symbol={symbol}&interval={interval_min}&limit={limit}"
+    );
+
+    let resp: KlineResponse = reqwest::get(&url).await?.json().await?;
+    if resp.ret_code != 0 {
+        return Err(BybitError::SubscriptionRejected(resp.ret_msg));
+    }
+
+    // Bybit returns newest-first; flip to chronological (oldest-first).
+    let mut klines: Vec<Kline> = resp
+        .result
+        .list
+        .iter()
+        .map(|row| Kline {
+            open_time: row[0].parse().unwrap_or(0),
+            open: row[1].parse().unwrap_or(0.0),
+            high: row[2].parse().unwrap_or(0.0),
+            low: row[3].parse().unwrap_or(0.0),
+            close: row[4].parse().unwrap_or(0.0),
+            volume: row[5].parse().unwrap_or(0.0),
+        })
+        .collect();
+    klines.reverse();
+    Ok(klines)
 }

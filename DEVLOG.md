@@ -2,7 +2,7 @@
 Documenting architectural planning and engineering hurdles.
 
 # Unified Backtest/Live Architecture System
-Reference: feature/unified-architectural-system
+Reference: feature/unified-trading-system
 ```
           +---------------------------------+
           |        Trading Strategy         |
@@ -30,6 +30,42 @@ Two systems, one strategy. Using shared architecture prevents inconsistency betw
 - **Histbacktest/Live Execution**: Execution layer connects with histbackteest and live execution to query for data. 
 
 Note: Should latency matter, migrate execution layer and histbacktest/live execution into rust.
+
+## Checklist of Items
+
+### 1. `unified-execution/engine/src/lib.rs` — Feature vector completed
+- **Line 700**: Added 4 missing orderflow features to the 15-element feature array:
+  - `m.tick_autocorr`, `m.inst_ratio`, `m.delta_divergence_z`, `m.depth_imbalance_z`
+  - Previously the array had only 11 of 15 initializers; Rust zero-filled the rest, giving the model garbage features
+
+### 2. `unified-execution/engine/src/lib.rs` — Orderflow config wired
+- **Module constant** `USE_ORDERFLOW_FEATURES: bool = true` (lines 67/81)
+- **StrategyConfig field** `use_orderflow_features: bool` (line 129)
+- **Config initialization** passes `use_orderflow_features: USE_ORDERFLOW_FEATURES` (line 157)
+- **Feature gating** at line 1190: `if self.cfg.use_orderflow_features` computes all 8 orderflow accumulators (ofi_z, cvd_delta_z, cvd_slope_z, absorption_z, tick_autocorr, inst_ratio, delta_divergence_z, depth_imbalance_z); otherwise falls back to `(0.0, 0.0, ...)`
+
+### 3. `unified-execution/engine/src/lib.rs` — Model gate + hysteresis already existed
+- **Lines 763–774**: Hysteresis signal detector with state machine:
+  - `signal_armed` toggles when `p_win < lower` (where `lower = confidence_threshold - hysteresis_buffer`)
+  - Model gate: `if p_win + 1e-12 < confidence_threshold { return; }` — returns LOW_CONFIDENCE if below 0.5
+  - Only fires entry when `P(WIN) ≥ 0.5` AND signal is armed
+- This was the missing link: the gate was correct, but the model was never loaded so `p_win` was always the proxy (~0.42)
+
+### 4. `unified-execution/live-trade/src/main.rs` — Model loading added
+- **Lines 42–68**: New code after DB restore, before trade/ob tasks:
+  - Finds `main/models/lgb_model.txt` relative to CWD
+  - Reads and parses with `LightGbm::from_str()` (the zero-dep text parser, validated by `real_model_matches_lightgbm` test)
+  - Calls `strategy.set_model(mdl)` to install the real 200-tree model
+  - Logs model stats (trees, features) or fallback errors
+- If the file is absent, the engine gracefully falls back to the proxy logit (original behavior)
+
+### 5. `unified-execution/live-trade/src/main.rs` — Historical seeding added
+- **Lines 67–100**: After model loading:
+  - Attempts to read `build/btc_usdt_5m_last_150.csv` from the working directory
+  - Parses CSV of `[timestamp, close]` rows
+  - Calls `strategy.seed_macro_closes(&closes)` to warm `rsi_2`, `sma_14`, `ma_slope_5`, `ma_accel` from startup
+  - Logs how many bars were seeded; if file not found, warns that macro features will warm on live data
+
 # Hurdles of Historical Backtest Performance and Data Management
 Reference: fix/historical-backtest
 - Old historical backtest was a dual architectural system that ingested csv files that relied on querying through live websockets which introduced two problems. Model must be specialized to one asset and querying data is very slow. As such, download shared aggregated data from historical archives in parquet format.
