@@ -82,3 +82,9 @@ Reference: features/unified-trading-system
 The importance of difference between live trading and historical backtest requires a very accurate infrastructure.
 1. Feature Timing Issue: Initially 1s aggregation was done to reduce feature mismatch risk where for example, websocket during network spikes would cause feature distortion. Using 1s allows trades too be evaluated slowly but never truly solved the problem where for example, 1s interval features received is 0.200s late would still affect it either way.
 2. Requires more comprehensive system to calculate/prioritize for limit order and market fills. Using TWAP hysteresis method might be too predictable and cause alpha to decay both from position size and alpha signal being revealed.
+
+## Latency, Staleness and clock skew
+These 3 variables are used to determined the viability of our strategy in live execution.
+- Staleness (stal): Trades received from the market. If the market receives trades >1000ms it signifies this market isn't a viable option as data source as it might be an illiquid market with very few participants.
+- Latency (lat): How fast our executor process information accepted.
+- Skew (SK): Time it takes for algorithm to receive transmission from exchange

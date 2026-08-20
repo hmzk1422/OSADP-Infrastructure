@@ -55,7 +55,7 @@ import pandas as pd
 
 import lightgbm as lgb
 
-from scripts.ingestion.utils.indicators import calculate_zscore
+from scripts.utils.indicators import calculate_zscore
 
 # Reuse the tested macro building blocks from the optimized pipeline so the
 # two files can't silently drift.

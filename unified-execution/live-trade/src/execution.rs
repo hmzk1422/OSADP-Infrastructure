@@ -18,6 +18,47 @@ use crate::model;
 use engine::{EngineEvent, MomentumStrategy, StrategyConfig};
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::collections::VecDeque;
+
+/// Rolling minimum of `raw_skew` over a trailing window. Since `raw_skew =
+/// now - exchange_ts` mixes clock offset and network/exchange transit delay
+/// into one number that can't be split without an independent time source,
+/// this tracks the best (lowest) value seen recently as a live baseline.
+/// `raw_skew - floor` then isolates *relative* staleness — how much worse
+/// than normal the newest event is — without claiming to know the absolute
+/// clock offset or transit time.
+struct SkewFloor {
+    window: VecDeque<(std::time::Instant, f64)>,
+    max_age: std::time::Duration,
+}
+
+impl SkewFloor {
+    fn new(max_age_secs: u64) -> Self {
+        Self {
+            window: VecDeque::new(),
+            max_age: std::time::Duration::from_secs(max_age_secs),
+        }
+    }
+
+    /// Feed a new raw_skew sample (ms), evict stale entries, return the
+    /// current floor. Returns `raw_skew` itself if the window is empty
+    /// (first sample — nothing to compare against yet).
+    fn push(&mut self, raw_skew: f64) -> f64 {
+        let now = std::time::Instant::now();
+        self.window.push_back((now, raw_skew));
+        while self
+            .window
+            .front()
+            .map_or(false, |(t, _)| now.duration_since(*t) > self.max_age)
+        {
+            self.window.pop_front();
+        }
+        self.window
+            .iter()
+            .map(|(_, s)| *s)
+            .fold(f64::INFINITY, f64::min)
+    }
+}
 
 /// Execution mode: simulated fills (paper) vs. real order routing (live).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -62,6 +103,7 @@ pub struct ExecutionConfig {
 ///   * `loop_cadence_ms` -- wall time of one full feed iteration (wait + work).
 ///   * `batch_process_ms` -- pure processing time of the last event batch.
 #[derive(Debug, Clone, Default)]
+
 pub struct RunStats {
     pub running: bool,
     pub paused: bool,
@@ -96,6 +138,17 @@ pub struct RunStats {
     pub loop_cadence_ms: f64,
     /// Pure processing time of the last event batch (ms).
     pub batch_process_ms: f64,
+        /// Wall-clock delta (local - exchange) on the newest event; the raw NTP
+    /// skew, unchanged — mixes clock offset and transit delay, kept for
+    /// backward compatibility and as the input to skew_floor_ms.
+    /// Rolling minimum of clock_skew_ms over the trailing window (see
+    /// SkewFloor). A live best-case baseline; NOT an absolute clock offset.
+    pub skew_floor_ms: f64,
+    /// clock_skew_ms - skew_floor_ms: how much staler than recent-normal the
+    /// newest event is. This is the number to act on (widen stops, pause
+    /// entries) — it isolates transient queuing/network jitter from whatever
+    /// constant baseline (clock error + typical transit time) is present.
+    pub relative_staleness_ms: f64,
 }
 
 /// Shared handles the loop and its controlling caller both hold.
@@ -173,7 +226,8 @@ pub async fn run_execution_loop(cfg: ExecutionConfig, mut ctx: LoopContext) {
     }
 
     // -- restore equity from the last persisted snapshot ---------------------
-    let last_exit_ms = AtomicI64::new(i64::MIN);
+        let last_exit_ms = AtomicI64::new(i64::MIN);
+    let mut skew_floor = SkewFloor::new(120); // 2-minute trailing window
     if let Some(db) = &db {
         if let Ok(snaps) = db.iter_pnl_snapshots(&ticker) {
             if let Some(last) = snaps.last() {
@@ -228,7 +282,8 @@ pub async fn run_execution_loop(cfg: ExecutionConfig, mut ctx: LoopContext) {
         // Per-batch diagnostics. No per-event lock: tally locally and publish
         // once on the stats refresh below.
         let mut batch_events: u64 = 0;
-        let mut batch_last_ts: Option<i64> = None;
+        let mut batch_last_ts: Option<i64> = None;      // any event — drives stal
+        let mut batch_last_trade_ts: Option<i64> = None; // trades only — drives sk
         let batch_started = feed_recv;
 
         for event in events {
@@ -258,6 +313,8 @@ pub async fn run_execution_loop(cfg: ExecutionConfig, mut ctx: LoopContext) {
                     .await;
                     batch_events += 1;
                     batch_last_ts = Some(t.timestamp);
+                    batch_last_trade_ts = Some(t.timestamp);   // new
+
                 }
                 MarketEvent::BookTop(b) => {
                     if let Some(db) = &db {
@@ -292,12 +349,15 @@ pub async fn run_execution_loop(cfg: ExecutionConfig, mut ctx: LoopContext) {
             s.events_seen += batch_events;
             if let Some(ts) = batch_last_ts {
                 s.last_event_ts_ms = Some(ts);
-                // Freshness anchor: only advances on real, ingested data.
                 s.last_event_instant = Some(feed_recv);
-                // Monotonic code latency: dequeue -> fully processed (ms).
                 s.last_event_latency_ms = feed_recv.elapsed().as_secs_f64() * 1000.0;
-                // Wall-clock delta (local - exchange) = NTP skew, NOT latency.
-                s.clock_skew_ms = clock_skew_ms(ts);
+            }
+            if let Some(trade_ts) = batch_last_trade_ts {
+                let raw_skew = clock_skew_ms(trade_ts);
+                let floor = skew_floor.push(raw_skew);
+                s.clock_skew_ms = raw_skew;
+                s.skew_floor_ms = floor;
+                s.relative_staleness_ms = raw_skew - floor;
             }
             s.loop_cadence_ms = iter_started.elapsed().as_secs_f64() * 1000.0;
             s.batch_process_ms = batch_started.elapsed().as_secs_f64() * 1000.0;

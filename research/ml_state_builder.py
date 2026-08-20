@@ -94,7 +94,7 @@ import tempfile
 import numpy as np
 import polars as pl
 from numpy.lib.stride_tricks import sliding_window_view
-from scripts.ingestion.utils.indicators import get_wilders_rsi, sma
+from scripts.utils.indicators import get_wilders_rsi, sma
 
 import lightgbm as lgb
 from sklearn.metrics import precision_score, recall_score, classification_report
