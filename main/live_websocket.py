@@ -1,5 +1,5 @@
-from utils.bybit import BybitConnector
-from utils.engine import *
+from scripts.ingestion.utils.bybit import BybitConnector
+from scripts.ingestion.utils.engine import *
 import asyncio
 import sys
 

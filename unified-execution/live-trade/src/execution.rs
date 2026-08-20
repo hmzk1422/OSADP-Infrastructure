@@ -1,7 +1,7 @@
-//! Venue-agnostic strategy execution loop.
+﻿//! Venue-agnostic strategy execution loop.
 //!
 //! Connects an [`Exchange`] implementation, feeds normalized market events into
-//! the `engine` strategy, persists state to RocksDB and — in `Live` mode —
+//! the `engine` strategy, persists state to RocksDB and -- in `Live` mode --
 //! routes the engine's entry/exit events to the exchange as real orders.
 //!
 //! The loop is fully async and owns a single `MomentumStrategy` instance; it
@@ -12,8 +12,7 @@
 
 use crate::db::{ClosedTrade, DbWriter, PnLSnapshot};
 use crate::exchange::{
-        symbols, Exchange, ExchangeKind, MarketEvent, OrderRequest, OrderType,
-    TradeSide,
+    symbols, Exchange, ExchangeKind, MarketEvent, OrderRequest, OrderType, TradeSide,
 };
 use crate::model;
 use engine::{EngineEvent, MomentumStrategy, StrategyConfig};
@@ -43,7 +42,25 @@ pub struct ExecutionConfig {
     pub persist: bool,
 }
 
-/// Cheap shared snapshot of loop state (read by CLI / PyO3 status()).
+/// Cheap shared snapshot of loop state (read by CLI / PyO3 `status()`).
+///
+/// The latency fields are the substrate for arbitrage work:
+///   * `last_event_ts_ms` / `last_event_instant` -- exchange timestamp and the
+///     monotonic instant the newest WS frame landed in the loop (`feed_recv`).
+///     `last_event_instant` is set per delivered data frame, NOT per loop
+///     iteration, so `feed_staleness_ms` (age since it; computed live in
+///     `status()`) grows on a silent feed instead of sawing to the 2s cadence.
+///   * `last_event_latency_ms` -- MONOTONIC local code latency: WS dequeue
+///     (`feed_recv`) -> fully processed (parse + strategy + db write).
+///     Clock-independent; NOT venue RTT.
+///   * `clock_skew_ms` -- wall-clock delta (local - exchange) on the newest
+///     event. ~0 when NTP-synced; a large value (e.g. -64s) is a CLOCK/NTP
+///     problem, surfaced separately, never as `last_event_latency_ms`.
+///   * `last_feed_wakeup` -- monotonic instant of the last loop wake (real data
+///     OR the 2s read timeout). Drives `loop_liveness_ms`; decoupled from
+///     `feed_staleness_ms`.
+///   * `loop_cadence_ms` -- wall time of one full feed iteration (wait + work).
+///   * `batch_process_ms` -- pure processing time of the last event batch.
 #[derive(Debug, Clone, Default)]
 pub struct RunStats {
     pub running: bool,
@@ -59,6 +76,26 @@ pub struct RunStats {
     pub mid: f64,
     pub last_event: String,
     pub last_error: Option<String>,
+    /// Total market events (trades + book-top ticks) ingested by the loop.
+    pub events_seen: u64,
+    /// Exchange-side timestamp (ms since epoch) of the newest ingested event.
+    pub last_event_ts_ms: Option<i64>,
+    /// Monotonic instant the latest WS frame was delivered to the loop (right
+    /// after `next_events()` returned). Staleness + code-latency anchor.
+    pub last_event_instant: Option<std::time::Instant>,
+    /// Local code latency: `feed_recv` -> fully processed (ms). Monotonic,
+    /// not venue RTT; relative changes are reliable.
+    pub last_event_latency_ms: f64,
+    /// Wall-clock delta (local - exchange) on the newest event; the NTP skew,
+    /// kept separate from `last_event_latency_ms` on purpose.
+    pub clock_skew_ms: f64,
+    /// Monotonic instant of the last feed wakeup (next_events() returned OR the
+    /// 2s read timeout fired). Liveness/stall detector.
+    pub last_feed_wakeup: Option<std::time::Instant>,
+    /// Wall time of the last full loop iteration, wait included (ms).
+    pub loop_cadence_ms: f64,
+    /// Pure processing time of the last event batch (ms).
+    pub batch_process_ms: f64,
 }
 
 /// Shared handles the loop and its controlling caller both hold.
@@ -69,9 +106,7 @@ pub struct LoopContext {
     pub stop: Arc<AtomicBool>,
     /// Allocated capital in USD cents (read for position sizing).
     pub capital_usd_cents: Arc<AtomicU64>,
-}
-
-/// Run the strategy loop for one ticker until `ctx.stop` is set.
+}/// Run the strategy loop for one ticker until `ctx.stop` is set.
 ///
 /// Reconnects with backoff on stream errors, warms feature rings from
 /// historical closes, loads the research model if present, and emits a final
@@ -112,7 +147,7 @@ pub async fn run_execution_loop(cfg: ExecutionConfig, mut ctx: LoopContext) {
         match DbWriter::connect(&cfg.db_path).await {
             Ok(db) => Some(Arc::new(db)),
             Err(e) => {
-                eprintln!("[db] failed to open {}: {e} — running without persistence", cfg.db_path);
+                eprintln!("[db] failed to open {}: {e} ??? running without persistence", cfg.db_path);
                 None
             }
         }
@@ -124,7 +159,7 @@ pub async fn run_execution_loop(cfg: ExecutionConfig, mut ctx: LoopContext) {
     if let Some(mdl) = model::load_model() {
         strategy.set_model(mdl);
     } else {
-        println!("[model] no research model found — using proxy logit (P(WIN) gate only)");
+        println!("[model] no research model found ??? using proxy logit (P(WIN) gate only)");
     }
 
     // -- warm feature rings from history -------------------------------------
@@ -133,8 +168,8 @@ pub async fn run_execution_loop(cfg: ExecutionConfig, mut ctx: LoopContext) {
             strategy.seed_macro_closes(&closes);
             println!("[seed] warmed {} macro closes from {}", closes.len(), cfg.exchange);
         }
-        Ok(_) => eprintln!("[seed] no historical closes available — features will warm live"),
-        Err(e) => eprintln!("[seed] historical fetch failed ({e}) — features will warm live"),
+        Ok(_) => eprintln!("[seed] no historical closes available ??? features will warm live"),
+        Err(e) => eprintln!("[seed] historical fetch failed ({e}) ??? features will warm live"),
     }
 
     // -- restore equity from the last persisted snapshot ---------------------
@@ -165,13 +200,15 @@ pub async fn run_execution_loop(cfg: ExecutionConfig, mut ctx: LoopContext) {
         if ctx.stop.load(Ordering::SeqCst) {
             break;
         }
+        let iter_started = std::time::Instant::now();
 
         let events = match ctx.exchange.next_events().await {
             Ok(events) => events,
             Err(e) => {
-                eprintln!("[{ticker}] stream error: {e} — reconnecting...");
+                eprintln!("[{ticker}] stream error: {e} ??? reconnecting...");
                 if let Ok(mut s) = ctx.stats.lock() {
                     s.last_error = Some(e.to_string());
+                    s.last_feed_wakeup = Some(std::time::Instant::now());
                 }
                 if !connect_with_retry(&mut *ctx.exchange, &ticker, &ctx.stop, &ctx.stats).await {
                     break;
@@ -179,6 +216,20 @@ pub async fn run_execution_loop(cfg: ExecutionConfig, mut ctx: LoopContext) {
                 continue;
             }
         };
+
+        // Monotonic instant the WS frame was delivered to the loop, captured
+        // right after next_events() returned. Drives last_event_instant (feed
+        // freshness) and last_event_latency_ms (code latency) clock-skew-free.
+        let feed_recv = std::time::Instant::now();
+        if let Ok(mut s) = ctx.stats.lock() {
+            s.last_feed_wakeup = Some(feed_recv);
+        }
+
+        // Per-batch diagnostics. No per-event lock: tally locally and publish
+        // once on the stats refresh below.
+        let mut batch_events: u64 = 0;
+        let mut batch_last_ts: Option<i64> = None;
+        let batch_started = feed_recv;
 
         for event in events {
             if ctx.stop.load(Ordering::SeqCst) {
@@ -205,6 +256,8 @@ pub async fn run_execution_loop(cfg: ExecutionConfig, mut ctx: LoopContext) {
                         engine_events,
                     )
                     .await;
+                    batch_events += 1;
+                    batch_last_ts = Some(t.timestamp);
                 }
                 MarketEvent::BookTop(b) => {
                     if let Some(db) = &db {
@@ -218,6 +271,8 @@ pub async fn run_execution_loop(cfg: ExecutionConfig, mut ctx: LoopContext) {
                         engine_events,
                     )
                     .await;
+                    batch_events += 1;
+                    batch_last_ts = Some(b.timestamp);
                 }
             }
         }
@@ -233,18 +288,45 @@ pub async fn run_execution_loop(cfg: ExecutionConfig, mut ctx: LoopContext) {
             s.mid = snap.mid;
             s.paused = ctx.paused.load(Ordering::SeqCst);
             s.running = !ctx.stop.load(Ordering::SeqCst);
+
+            s.events_seen += batch_events;
+            if let Some(ts) = batch_last_ts {
+                s.last_event_ts_ms = Some(ts);
+                // Freshness anchor: only advances on real, ingested data.
+                s.last_event_instant = Some(feed_recv);
+                // Monotonic code latency: dequeue -> fully processed (ms).
+                s.last_event_latency_ms = feed_recv.elapsed().as_secs_f64() * 1000.0;
+                // Wall-clock delta (local - exchange) = NTP skew, NOT latency.
+                s.clock_skew_ms = clock_skew_ms(ts);
+            }
+            s.loop_cadence_ms = iter_started.elapsed().as_secs_f64() * 1000.0;
+            s.batch_process_ms = batch_started.elapsed().as_secs_f64() * 1000.0;
         }
     }
 
     finish(&cfg, ctx, &db).await;
-}
-
-/// Persist a market event (used while paused so the raw feed is never lost).
+}/// Persist a market event (used while paused so the raw feed is never lost).
 fn persist_event(db: &DbWriter, ticker: &str, event: &MarketEvent) {
     match event {
         MarketEvent::Trade(t) => db.record_trade(ticker, t.clone()),
         MarketEvent::BookTop(b) => db.record_orderbook_top(ticker, b.clone()),
     }
+}
+
+/// Wall-clock delta between this machine and the venue server, in ms, for the
+/// newest exchange-reported event timestamp: `now - exchange_ts`.
+///
+/// ~0 when the box is NTP-synced to the venue; a large value (e.g. -64s in
+/// this sandbox) is a CLOCK/NTP problem, not a code or network problem. It is
+/// surfaced separately from `last_event_latency_ms` on purpose and never
+/// returned as ingest latency.
+fn clock_skew_ms(exchange_ts_ms: i64) -> f64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let now_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+    (now_ms - exchange_ts_ms) as f64
 }
 
 /// Connect with retry + backoff until `stop` is set. Returns false if the
@@ -262,7 +344,7 @@ async fn connect_with_retry(
         match exchange.connect(ticker).await {
             Ok(()) => return true,
             Err(e) => {
-                eprintln!("[{ticker}] connect failed: {e} — retrying in 2s");
+                eprintln!("[{ticker}] connect failed: {e} ??? retrying in 2s");
                 if let Ok(mut s) = stats.lock() {
                     s.last_error = Some(e.to_string());
                 }

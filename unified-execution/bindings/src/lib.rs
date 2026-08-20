@@ -148,23 +148,32 @@ impl Strategy {
                         return;
                     }
                 };
-                rt.block_on(run_execution_loop(
-                    ExecutionConfig {
-                        ticker: ticker.clone(),
-                        exchange: exchange_kind,
-                        mode,
-                        db_path,
-                        seed_bars: 150,
-                        persist: true,
-                    },
-                    LoopContext {
-                        exchange: create_exchange(exchange_kind),
-                        stats,
-                        paused,
-                        stop,
-                        capital_usd_cents: capital,
-                    },
-                ));
+                // Build the exchange (and its tokio::time resources) INSIDE the
+                // runtime context: `BitfinexExchange::new` / bybit construct a
+                // WS ping `interval`, which requires a current Tokio reactor.
+                // Evaluating `create_exchange` as a plain arg to `rt.block_on`
+                // runs it before the reactor is entered and panics with
+                // "there is no reactor running".
+                rt.block_on(async {
+                    run_execution_loop(
+                        ExecutionConfig {
+                            ticker: ticker.clone(),
+                            exchange: exchange_kind,
+                            mode,
+                            db_path,
+                            seed_bars: 150,
+                            persist: true,
+                        },
+                        LoopContext {
+                            exchange: create_exchange(exchange_kind),
+                            stats,
+                            paused,
+                            stop,
+                            capital_usd_cents: capital,
+                        },
+                    )
+                    .await
+                });
             })
             .map_err(|e| {
                 PyRuntimeError::new_err(format!("failed to spawn runner thread: {e}"))
@@ -244,6 +253,18 @@ impl Strategy {
             "mid": s.mid,
             "last_event": s.last_event,
             "last_error": s.last_error,
+            "events_seen": s.events_seen,
+            "last_event_ts_ms": s.last_event_ts_ms,
+            "last_event_latency_ms": s.last_event_latency_ms,
+            "clock_skew_ms": s.clock_skew_ms,
+            "feed_staleness_ms": s.last_event_instant
+                .map(|t| t.elapsed().as_secs_f64() * 1000.0)
+                .unwrap_or(0.0),
+            "loop_liveness_ms": s.last_feed_wakeup
+                .map(|t| t.elapsed().as_secs_f64() * 1000.0)
+                .unwrap_or(0.0),
+            "loop_cadence_ms": s.loop_cadence_ms,
+            "batch_process_ms": s.batch_process_ms,
                 });
         Ok(json.to_string())
     }

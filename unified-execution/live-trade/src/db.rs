@@ -88,6 +88,14 @@ impl DbWriter {
         })
     }
 
+    fn column_family_descriptors() -> Vec<ColumnFamilyDescriptor> {
+        vec![
+            ColumnFamilyDescriptor::new(CF_TRADES, Options::default()),
+            ColumnFamilyDescriptor::new(CF_ORDERBOOK, Options::default()),
+            ColumnFamilyDescriptor::new(CF_PNL, Options::default()),
+        ]
+    }
+
     fn open(path: &str) -> Result<DB, DbError> {
         if let Some(parent) = Path::new(path).parent() {
             let _ = std::fs::create_dir_all(parent); // best effort; DB::open surfaces real errors
@@ -97,13 +105,113 @@ impl DbWriter {
         db_opts.create_if_missing(true);
         db_opts.create_missing_column_families(true);
 
-                let cfs = vec![
-            ColumnFamilyDescriptor::new(CF_TRADES, Options::default()),
-            ColumnFamilyDescriptor::new(CF_ORDERBOOK, Options::default()),
-            ColumnFamilyDescriptor::new(CF_PNL, Options::default()),
-        ];
+        match DB::open_cf_descriptors(&db_opts, path, Self::column_family_descriptors()) {
+            Ok(db) => Ok(db),
+            Err(open_err) => Self::recover_and_reopen(&db_opts, path, open_err),
+        }
+    }
 
-        Ok(DB::open_cf_descriptors(&db_opts, path, cfs)?)
+    /// Attempt to recover a store whose metadata got corrupted by an unclean
+    /// quit (e.g. "Corruption: CURRENT file corrupted"). Recovery is staged to
+    /// lose as little data as possible:
+    ///
+    ///   1. Point CURRENT back at the newest MANIFEST in the directory (LF-only,
+    ///      no stray CR). This is the common, cheap recovery — no data loss.
+    ///   2. Only if that still won't open, run RocksDB's `repair`, which
+    ///      rebuilds the metadata from what it can verify (may move stale files
+    ///      into a `lost/` subdirectory, but restores the store).
+    ///
+    fn recover_and_reopen(
+        db_opts: &Options,
+        path: &str,
+        first_err: rocksdb::Error,
+    ) -> Result<DB, DbError> {
+        if Self::try_fix_current(path) {
+            eprintln!("[db] repaired CURRENT pointer at {path} — reopening");
+            if let Ok(db) = DB::open_cf_descriptors(
+                db_opts,
+                path,
+                Self::column_family_descriptors(),
+            ) {
+                return Ok(db);
+            }
+        }
+
+        eprintln!(
+            "[db] open failed ({first_err}) — attempting one-shot RocksDB repair at {path}"
+        );
+        match DB::repair(db_opts, path) {
+            Ok(()) => {
+                eprintln!("[db] repair OK — reopening {path}");
+                DB::open_cf_descriptors(db_opts, path, Self::column_family_descriptors())
+                    .map_err(DbError::from)
+            }
+            Err(repair_err) => {
+                eprintln!("[db] repair failed: {repair_err}");
+                Err(DbError::RocksDb(first_err))
+            }
+        }
+    }
+
+    /// Best-effort rewrite of the `CURRENT` file so it points (LF-only) at the
+    /// highest-numbered MANIFEST present in the store directory.
+    ///
+    /// RocksDB resolves its current manifest by reading this one line; a stray
+    /// `\r` (CRLF, seen after Windows quits) breaks that lookup and is reported
+    /// as "Corruption: CURRENT file corrupted" even though the MANIFEST + every
+    /// data file is intact. Returns true if the file was rewritten or requires
+    /// a reopen.
+    fn try_fix_current(path: &str) -> bool {
+        let root = Path::new(path);
+        let current_path = root.join("CURRENT");
+
+        // Find the highest-numbered MANIFEST-<seq> present.
+        let mut seqs: Vec<u64> = Vec::new();
+        if let Ok(entries) = std::fs::read_dir(root) {
+            for entry in entries.flatten() {
+                let name = entry.file_name();
+                let name = name.to_string_lossy();
+                if let Some(stripped) = name.strip_prefix("MANIFEST-") {
+                    if let Ok(seq) = stripped.parse::<u64>() {
+                        seqs.push(seq);
+                    }
+                }
+            }
+        }
+        let Some(&max_seq) = seqs.iter().max() else {
+            return false; // no manifest at all — leave it to `::repair`
+        };
+
+        let line = format!("MANIFEST-{max_seq:06}");
+
+        // If CURRENT is already a clean LF-only line naming that manifest,
+        // there is nothing to fix.
+        if let Ok(cur) = std::fs::read(&current_path) {
+            if let Ok(text) = std::str::from_utf8(&cur) {
+                let trimmed = text.trim_end_matches(|c| c == '\r' || c == '\n');
+                let clean = !cur.ends_with(b"\r\n");
+                if clean && trimmed == line {
+                    return false;
+                }
+            }
+        }
+
+        let _ = std::fs::write(&current_path, format!("{line}\n").as_bytes());
+        true
+    }
+
+    /// Flush all pending writes to disk and sync the write-ahead log. Called
+    /// during graceful shutdown so the SST / MANIFEST / CURRENT files are
+    /// durably updated before the handle is dropped — a hard kill between
+    /// writes is exactly what corrupts `CURRENT`.
+    pub fn flush(&self) -> Result<(), DbError> {
+        // `DB::flush()` (default FlushOptions, wait = true) writes every
+        // column family's memtable out to an SST file.
+        self.db.flush().map_err(DbError::from)?;
+        // Force the WAL to disk so committed writes are durable even if the
+        // process dies before the memtable is flushed again.
+        self.db.flush_wal(true).map_err(DbError::from)?;
+        Ok(())
     }
 
     /// Persists a single trade print. Write failures are logged and swallowed
@@ -315,5 +423,109 @@ impl DbWriter {
         key.push(0x00);
         key.extend_from_slice(&seq.to_be_bytes());
         key
+    }
+}
+
+/// Last-chance flush before the RocksDB handle/threads are torn down.
+/// This is the safety net that makes abrupt drops (strategy dropped without an
+/// explicit `stop()`, early `return`s, etc.) still land their data durably on
+/// disk before the DB is closed. Errors cannot be propagated from `drop`, so
+/// they are logged at the interactive level.
+impl Drop for DbWriter {
+    fn drop(&mut self) {
+        if let Err(e) = self.db.flush() {
+            eprintln!("[db] final flush during close failed: {e}");
+        }
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_opts() -> Options {
+        let mut opts = Options::default();
+        opts.create_if_missing(true);
+        opts.create_missing_column_families(true);
+        opts
+    }
+
+    fn temp_db_dir(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "imc_rocksdb_{tag}_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        dir
+    }
+
+    /// Build a healthy store with one row, flushed + closed cleanly.
+    fn seed_healthy_store(path: &str) {
+        let db = DB::open_cf_descriptors(
+            &test_opts(),
+            path,
+            DbWriter::column_family_descriptors(),
+        )
+        .expect("initial open");
+        let cf = db.cf_handle(CF_TRADES).expect("trades cf exists");
+        db.put_cf(cf, b"k1", b"v1").expect("put");
+        db.flush().expect("flush");
+        db.flush_wal(true).expect("flush_wal");
+        // db dropped -> RocksDB closes and rewrites CURRENT/MANIFEST
+    }
+
+    /// Regression test for "Corruption: CURRENT file corrupted" caused by a
+    /// stray CRLF line ending in `CURRENT` (seen after unclean Windows quits).
+    /// `DbWriter::open` must point CURRENT back at the real MANIFEST and
+    /// preserve all data — no `repair`, no data loss.
+    #[test]
+    fn open_fixes_crlf_current() {
+        let dir = temp_db_dir("crlf");
+        let path = dir.to_str().expect("temp path is utf8");
+        seed_healthy_store(path);
+
+        // Corrupt CURRENT with CRLF, exactly as observed in the wild.
+        let good = std::fs::read(dir.join("CURRENT")).expect("current exists");
+        let text = std::str::from_utf8(&good)
+            .expect("current utf8")
+            .trim_end_matches(|c| c == '\r' || c == '\n');
+        std::fs::write(dir.join("CURRENT"), format!("{text}\r\n").as_bytes())
+            .expect("corrupt CURRENT");
+
+        let db = DbWriter::open(path).expect("open after CURRENT fix");
+        let cf = db.cf_handle(CF_TRADES).expect("trades cf survived");
+        let got = db.get_cf(cf, b"k1").expect("read after recovery");
+        assert_eq!(got.as_deref(), Some(&b"v1"[..]), "pre-corruption data must survive");
+
+        drop(db);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Fallback path: if the MANIFEST itself is gone (no CURRENT fix possible),
+    /// `DB::repair` must still produce an openable store rather than leaving
+    /// the caller with "running without persistence".
+    #[test]
+    fn open_falls_back_to_repair_when_manifest_missing() {
+        let dir = temp_db_dir("repair");
+        let path = dir.to_str().expect("temp path is utf8");
+        seed_healthy_store(path);
+
+        // Delete every MANIFEST so CURRENT cannot be repaired by pointing at one.
+        for entry in std::fs::read_dir(&dir).expect("read dir") {
+            let entry = entry.expect("entry");
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with("MANIFEST-") {
+                std::fs::remove_file(entry.path()).expect("remove manifest");
+            }
+        }
+        // CURRENT now points at a manifest that no longer exists.
+        std::fs::write(dir.join("CURRENT"), b"MANIFEST-999999\n").expect("write CURRENT");
+
+        let db = DbWriter::open(path).expect("open after repair fallback");
+        drop(db);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

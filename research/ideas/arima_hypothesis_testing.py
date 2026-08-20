@@ -54,8 +54,8 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 # Also try current working directory parent
 os.chdir(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from utils.bybit import BybitConnector
-from utils.indicators import get_wilders_rsi, sma
+from scripts.ingestion.utils.bybit import BybitConnector
+from scripts.ingestion.utils.indicators import get_wilders_rsi, sma
 
 # ── Statsmodels ─────────────────────────────────────────────────────────────
 from statsmodels.tsa.stattools import adfuller, kpss, acf, pacf
