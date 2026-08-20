@@ -5,9 +5,9 @@ MA(200) on MA_Acceleration equivalent holds bias either > 0 or < 0
 
 import pandas as pd
 import numpy as np
-from scripts.ingestion.utils.engine import *
-from scripts.ingestion.utils.bybit import *
-from scripts.ingestion.utils.indicators import *
+from scripts.utils.engine import *
+from scripts.utils.bybit import *
+from scripts.utils.indicators import *
 from concurrent.futures import ThreadPoolExecutor
 
 def fetch_single_ticker(connector, ticker):

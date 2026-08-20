@@ -10,8 +10,8 @@ from scipy.stats import mannwhitneyu
 
 warnings.filterwarnings('ignore')
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from scripts.ingestion.utils.bybit import BybitConnector
-from scripts.ingestion.utils.indicators import get_wilders_rsi, sma
+from scripts.utils.bybit import BybitConnector
+from scripts.utils.indicators import get_wilders_rsi, sma
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt

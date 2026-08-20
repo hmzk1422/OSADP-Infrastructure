@@ -18,7 +18,7 @@
 
 use super::{
     header_map, hmac_sha384, now_ms, symbols, Balance, Exchange, ExchangeError, ExchangeKind,
-        MarketEvent, MarketTrade, OrderRequest, OrderResponse, OrderType, TradeSide,
+    MarketBookTop, MarketEvent, MarketTrade, OrderRequest, OrderResponse, OrderType, TradeSide,
 };
 use futures_util::{SinkExt, StreamExt};
 use serde_json::json;
@@ -40,9 +40,12 @@ type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
 pub struct BitfinexExchange {
     api_key: Option<String>,
     api_secret: Option<String>,
-    symbol: String,       // venue-native, e.g. "tBTCUST"
-    ws: Option<WsStream>, // public trades channel
-    chan_id: Option<i64>, // channel id of the trades subscription
+    symbol: String,
+    ws: Option<WsStream>,
+    chan_id: Option<i64>,         // trades channel
+    book_chan_id: Option<i64>,    // book channel (new)
+    last_bid: Option<(f64, f64)>, // (price, amount) — new
+    last_ask: Option<(f64, f64)>, // (price, amount) — new
     ping: Interval,
 }
 
@@ -54,10 +57,13 @@ impl BitfinexExchange {
             symbol: String::new(),
             ws: None,
             chan_id: None,
+            book_chan_id: None,
+            last_bid: None,
+            last_ask: None,
             ping: interval(Duration::from_secs(PING_INTERVAL_SECS)),
         }
     }
-
+    // credentials() unchanged
     fn credentials(&self) -> Result<(&str, &str), ExchangeError> {
         let key = self
             .api_key
@@ -77,31 +83,51 @@ impl Exchange for BitfinexExchange {
         ExchangeKind::Bitfinex
     }
 
-    async fn connect(&mut self, ticker: &str) -> Result<(), ExchangeError> {
+        async fn connect(&mut self, ticker: &str) -> Result<(), ExchangeError> {
         self.symbol = symbols::bitfinex(ticker);
 
         let (mut ws, _resp) = connect_async(PUBLIC_WS_URL).await?;
 
-        // Subscribe to the public trades channel. `hbt: true` asks the server
-        // to emit `[chanId, "hb"]` heartbeats so we can detect a dead pipe.
-        let sub = json!({
+        let sub_trades = json!({
             "event": "subscribe",
             "channel": "trades",
             "symbol": self.symbol,
             "hbt": true,
         });
-        ws.send(Message::Text(sub.to_string())).await?;
+        ws.send(Message::Text(sub_trades.to_string())).await?;
 
-        // Wait for the subscription ack before handing the stream back.
-        loop {
+        // Top-of-book only: prec=P0 (raw), freq=F0 (realtime), len="1"
+        // (single level per side — best bid / best ask only).
+        let sub_book = json!({
+            "event": "subscribe",
+            "channel": "book",
+            "symbol": self.symbol,
+            "prec": "P0",
+            "freq": "F0",
+            "len": "1",
+            "hbt": true,
+        });
+        ws.send(Message::Text(sub_book.to_string())).await?;
+
+        // Wait for both subscription acks before handing the stream back.
+        let mut trades_acked = false;
+        let mut book_acked = false;
+        while !trades_acked || !book_acked {
             let msg = ws.next().await.ok_or(ExchangeError::ConnectionClosed)??;
             if let Message::Text(text) = &msg {
                 let v: serde_json::Value = serde_json::from_str(text)?;
                 match v.get("event").and_then(|e| e.as_str()) {
-                    Some("subscribed") => {
-                        self.chan_id = v.get("chanId").and_then(|c| c.as_i64());
-                        break;
-                    }
+                    Some("subscribed") => match v.get("channel").and_then(|c| c.as_str()) {
+                        Some("trades") => {
+                            self.chan_id = v.get("chanId").and_then(|c| c.as_i64());
+                            trades_acked = true;
+                        }
+                        Some("book") => {
+                            self.book_chan_id = v.get("chanId").and_then(|c| c.as_i64());
+                            book_acked = true;
+                        }
+                        _ => {}
+                    },
                     Some("error") => return Err(ExchangeError::SubscriptionRejected(text.clone())),
                     _ => {} // info / conf / pong frames
                 }
@@ -114,7 +140,8 @@ impl Exchange for BitfinexExchange {
 
     async fn next_events(&mut self) -> Result<Vec<MarketEvent>, ExchangeError> {
         let ws = self.ws.as_mut().expect("connect() must be called first");
-        let expected_chan = self.chan_id;
+        let trades_chan = self.chan_id;
+        let book_chan = self.book_chan_id;
         loop {
             tokio::select! {
                 _ = self.ping.tick() => {
@@ -123,7 +150,12 @@ impl Exchange for BitfinexExchange {
                 msg = ws.next() => {
                     match msg {
                         Some(Ok(Message::Text(text))) => {
-                            if let Some(events) = parse_trade_msg(&text, expected_chan)? {
+                            if let Some(events) = parse_trade_msg(&text, trades_chan)? {
+                                return Ok(events);
+                            }
+                            if let Some(events) = parse_book_msg(
+                                &text, book_chan, &mut self.last_bid, &mut self.last_ask,
+                            )? {
                                 return Ok(events);
                             }
                         }
@@ -394,6 +426,99 @@ fn parse_trade(row: &serde_json::Value) -> Result<MarketTrade, ExchangeError> {
         side: if signed_amount > 0.0 { TradeSide::Buy } else { TradeSide::Sell },
         id,
     })
+}
+/// Parse a raw Bitfinex WS book-channel frame into a top-of-book event (or
+/// `None` for control/heartbeat frames or frames on a channel we don't own).
+/// With `len="1"`, the book carries exactly one level per side:
+///   snapshot: [chanId, [[price, count, amount], [price, count, amount]]]
+///   update:   [chanId, [price, count, amount]]
+/// `amount > 0` = bid level, `amount < 0` = ask level (magnitude = size);
+/// `count == 0` deletes that side's current level.
+///
+/// Bitfinex book rows carry no timestamp, unlike trades — the emitted
+/// event's `timestamp` is therefore local receive time (`now_ms()`), not an
+/// exchange-stamped time. Downstream clock-skew diagnostics computed from a
+/// book-top event will read ~0 by construction; only trade-derived skew is
+/// meaningful for that purpose.
+fn parse_book_msg(
+    text: &str,
+    expected_chan: Option<i64>,
+    last_bid: &mut Option<(f64, f64)>,
+    last_ask: &mut Option<(f64, f64)>,
+) -> Result<Option<Vec<MarketEvent>>, ExchangeError> {
+    let v: serde_json::Value = serde_json::from_str(text)?;
+
+    // Control frames are handled during connect()'s ack loop; ignore here.
+    if v.as_object().is_some() {
+        return Ok(None);
+    }
+
+    let arr = v
+        .as_array()
+        .ok_or_else(|| ExchangeError::Parse("expected JSON array".into()))?;
+    if arr.len() < 2 {
+        return Ok(None);
+    }
+    let chan = arr[0].as_i64().unwrap_or(-1);
+    let Some(expected) = expected_chan else { return Ok(None) };
+    if chan != expected {
+        return Ok(None); // trades channel frame, or not yet subscribed
+    }
+
+    match &arr[1] {
+        serde_json::Value::String(tag) if tag == "hb" => Ok(None),
+        // Snapshot: array of [price, count, amount] rows.
+        serde_json::Value::Array(rows) if rows.first().map_or(false, |r| r.is_array()) => {
+            for row in rows {
+                apply_book_row(row, last_bid, last_ask);
+            }
+            Ok(emit_book_top(last_bid, last_ask))
+        }
+        // Update: a single [price, count, amount] row.
+        serde_json::Value::Array(row) if row.len() == 3 => {
+            apply_book_row(&serde_json::Value::Array(row.clone()), last_bid, last_ask);
+            Ok(emit_book_top(last_bid, last_ask))
+        }
+        _ => Ok(None),
+    }
+}
+
+/// Apply one `[price, count, amount]` row to the running best-bid/best-ask
+/// state. `count == 0` deletes that side's current level.
+fn apply_book_row(
+    row: &serde_json::Value,
+    last_bid: &mut Option<(f64, f64)>,
+    last_ask: &mut Option<(f64, f64)>,
+) {
+    let Some(a) = row.as_array() else { return };
+    if a.len() < 3 {
+        return;
+    }
+    let price = a[0].as_f64().unwrap_or(0.0);
+    let count = a[1].as_i64().unwrap_or(0);
+    let amount = a[2].as_f64().unwrap_or(0.0);
+
+    if amount > 0.0 {
+        *last_bid = if count == 0 { None } else { Some((price, amount)) };
+    } else if amount < 0.0 {
+        *last_ask = if count == 0 { None } else { Some((price, amount.abs())) };
+    }
+}
+
+/// Build a MarketEvent::BookTop once both sides are known.
+fn emit_book_top(
+    last_bid: &Option<(f64, f64)>,
+    last_ask: &Option<(f64, f64)>,
+) -> Option<Vec<MarketEvent>> {
+    let (bid_price, bid_amount) = (*last_bid)?;
+    let (ask_price, ask_amount) = (*last_ask)?;
+    Some(vec![MarketEvent::BookTop(MarketBookTop {
+        timestamp: now_ms(),
+        bid_price,
+        bid_amount,
+        ask_price,
+        ask_amount,
+    })])
 }
 
 #[cfg(test)]
