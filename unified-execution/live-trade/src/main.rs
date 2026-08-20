@@ -10,7 +10,7 @@ use live_trade::exchange::{create_exchange, ExchangeKind};
 use live_trade::execution::{
     run_execution_loop, ExecutionConfig, ExecutionMode, LoopContext, RunStats,
 };
-use std::sync::atomic::{AtomicBool, AtomicU64};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 fn usage<T>() -> T {
@@ -89,11 +89,23 @@ async fn main() {
         exchange: create_exchange(exchange),
         stats: Arc::clone(&stats),
         paused,
-        stop,
+        stop: Arc::clone(&stop),
         capital_usd_cents: capital_cents,
     };
 
-    run_execution_loop(cfg, ctx).await;
+    // Run the loop until Ctrl-C, then let it drain fully so the RocksDB store
+    // is flushed and closed before the process exits (a hard kill here is what
+    // corrupts CURRENT/MANIFEST).
+    let run = run_execution_loop(cfg, ctx);
+    tokio::pin!(run);
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {
+            println!("\nCtrl-C received — draining loop and closing RocksDB...");
+            stop.store(true, Ordering::SeqCst);
+            (&mut run).await;
+        }
+        _ = &mut run => {}
+    }
 
     let s = stats.lock().unwrap();
     println!(

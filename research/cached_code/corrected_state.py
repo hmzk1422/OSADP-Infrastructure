@@ -7,14 +7,14 @@ import numpy as np
 import pandas as pd
 from numpy.lib.stride_tricks import sliding_window_view
 
-from utils.indicators import *
-from utils.engine import *
+from scripts.ingestion.utils.indicators import *
+from scripts.ingestion.utils.engine import *
 
 import lightgbm as lgb
 from sklearn.metrics import precision_score, recall_score, classification_report
 import matplotlib.pyplot as plt
 
-from utils.engine import *
+from scripts.ingestion.utils.engine import *
 
 # ============================================================================
 # CONFIG

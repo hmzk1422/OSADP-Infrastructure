@@ -75,3 +75,10 @@ Reference: fix/historical-backtest
     - Virtual Memory and Disk allocation. With polars, partition tasks to drive to reduce as much load in the main memory as possible at the cost of possible disk thrashing. However, when considering limited hardware resources, this method is advantageous.
     - Biggest process bottlenecks lies within sorting algorithm and model training, where sorting takes up O(nlog(n)) complexity which could be easily avoided provided endpoints are already sorted. Tree model training with O(n*m), where m represent features, is the main priority.
 - Why is ml_state_optimized to ml_state_optimized_csv transition considered lossy? All features are recursive and affected slightly by chunking. For example, micro-cvd has a 1.2*10^-5 error margin from mean value 17. Very small error when compounded over time, becomes an error that could affect ML decision.
+
+# Hurdles of Live Trading Execution
+Reference: features/unified-trading-system
+
+The importance of difference between live trading and historical backtest requires a very accurate infrastructure.
+1. Feature Timing Issue: Initially 1s aggregation was done to reduce feature mismatch risk where for example, websocket during network spikes would cause feature distortion. Using 1s allows trades too be evaluated slowly but never truly solved the problem where for example, 1s interval features received is 0.200s late would still affect it either way.
+2. Requires more comprehensive system to calculate/prioritize for limit order and market fills. Using TWAP hysteresis method might be too predictable and cause alpha to decay both from position size and alpha signal being revealed.

@@ -54,8 +54,8 @@ from main.features import LiveFeatureEngine
 from main.execution import QuantSimulator
 
 # --- Utils ---
-from utils.indicators import get_wilders_rsi, sma, calculate_zscore
-from utils.bybit import BybitConnector
+from scripts.ingestion.utils.indicators import get_wilders_rsi, sma, calculate_zscore
+from scripts.ingestion.utils.bybit import BybitConnector
 
 # --- ML ---
 import lightgbm as lgb

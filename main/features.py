@@ -25,7 +25,7 @@ import numpy as np
 import pandas as pd
 from collections import deque
 from typing import Dict, Optional
-from utils.indicators import get_wilders_rsi, sma, calculate_zscore
+from scripts.ingestion.utils.indicators import get_wilders_rsi, sma, calculate_zscore
 
 import sys
 sys.path.append('.')
@@ -707,7 +707,7 @@ class LiveFeatureEngine:
         preventing 'cold start' math errors on initialization.
         """
         import logging
-        from utils.bybit import BybitConnector
+        from scripts.ingestion.utils.bybit import BybitConnector
         from main.config import API_KEY, API_SECRET, TESTNET
         
         logger = logging.getLogger("features")

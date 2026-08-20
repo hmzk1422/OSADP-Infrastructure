@@ -26,8 +26,8 @@ meta version of the same question.
 
 import numpy as np
 import pandas as pd
-from utils.indicators import *
-from utils.screener import *
+from scripts.ingestion.utils.indicators import *
+from scripts.ingestion.utils.screener import *
 
 
 # ---------------------------------------------------------------------------
@@ -169,7 +169,7 @@ def build_composite(screened_data, period=7, base_value=100.0,
 #    (the 200-length version) on the composite's own price series.
 # ---------------------------------------------------------------------------
 def test_composite_persistency(composite_df):
-    from utils.screener import trend_persistency
+    from scripts.ingestion.utils.screener import trend_persistency
     bias, rsi_sma_dist = trend_persistency(composite_df)
     return bias, rsi_sma_dist
 

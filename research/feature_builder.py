@@ -44,8 +44,12 @@ Rules:
 """
 
 import sys
-
 import os
+
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
 import json
 import datetime as _dt
 import gc
@@ -55,17 +59,12 @@ import tempfile
 import numpy as np
 import polars as pl
 from numpy.lib.stride_tricks import sliding_window_view
-from utils.indicators import get_wilders_rsi, sma
+from scripts.ingestion.utils.indicators import get_wilders_rsi, sma
 
 import lightgbm as lgb
 from sklearn.metrics import precision_score, recall_score, classification_report
 import shap
 from sklearn.inspection import permutation_importance
-
-
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
-if PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, PROJECT_ROOT)
 
 os.environ["POLARS_MAX_THREADS"] = "4"
 

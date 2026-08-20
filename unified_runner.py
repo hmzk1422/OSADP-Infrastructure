@@ -47,6 +47,7 @@ CLI
 from __future__ import annotations
 
 import argparse
+import atexit
 import importlib
 import json
 import logging
@@ -55,6 +56,7 @@ import signal
 import subprocess
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterator, Optional, Sequence
 
@@ -169,7 +171,12 @@ class Strategy:
         self._rust.resume()
 
     def stop(self) -> None:
-        """Request graceful shutdown and detach the runner thread."""
+        """Request a graceful shutdown.
+
+        Blocks until the Rust runner thread has fully drained and its RocksDB
+        store has been flushed + closed, so the DB is never left in a
+        corrupted state when the process exits.
+        """
         self._rust.stop()
 
     def reallocate(self, capital_usd: float) -> None:
@@ -287,26 +294,40 @@ def cmd_live_trade(args: argparse.Namespace) -> int:
         return 1
 
     pf = Portfolio()
+    state = {"stopped": False}
+
+    def _shutdown(signum, _frame):
+        sig = signal.Signals(signum).name
+        if not state["stopped"]:
+            state["stopped"] = True
+            logger.info(
+                "%s received — stopping all strategies (flush + close RocksDB)", sig
+            )
+        else:
+            logger.warning(
+                "%s received again — already stopping (this may take a few seconds)", sig
+            )
+
+    # Safety net: whichever path the process exits on (signal, KeyboardInterrupt,
+    # exception, sys.exit), make sure every native runner thread is joined and
+    # each RocksDB store is flushed + closed before the interpreter tears down.
+    # Idempotent and safe to call even when nothing is running, so register it
+    # before any strategy is spawned. This is what prevents the "CURRENT file
+    # corrupted" failure after an unclean quit.
+    def _stop_all() -> None:
+        try:
+            pf.stop()
+        except Exception as exc:  # noqa: BLE001 — never mask the original error
+            logger.warning("error while stopping strategies: %s", exc)
+
+    atexit.register(_stop_all)
+
     for ticker in args.tickers:
         try:
             pf.add(ticker, exchange=args.exchange, mode=args.mode, capital=args.capital)
         except ValueError as exc:
             print(f"ERROR: {exc}", file=sys.stderr)
             return 1
-    pf.run()
-    logger.info(
-        "running %d strategy/strategies on %s (%s) — Ctrl-C to stop",
-        len(pf), args.exchange, args.mode,
-    )
-
-    state = {"stopped": False}
-
-    def _shutdown(signum, _frame):
-        state["stopped"] = True
-        sig = signal.Signals(signum).name
-        logger.info("%s received — stopping all strategies", sig)
-        pf.stop()
-        sys.exit(0)
 
     signal.signal(signal.SIGINT, _shutdown)
     try:
@@ -314,21 +335,40 @@ def cmd_live_trade(args: argparse.Namespace) -> int:
     except (ValueError, OSError):
         pass  # SIGTERM not available on this platform (e.g. Windows)
 
+    pf.run()
+    logger.info(
+        "running %d strategy/strategies on %s (%s) — Ctrl-C to stop",
+        len(pf), args.exchange, args.mode,
+    )
+
     try:
         while not state["stopped"] and any(s.is_running for s in pf):
-            time.sleep(2)
+            # High-frequency control-plane sampling: the Rust loop ingests every
+            # websocket frame in real time — the sleep below only sets how often
+            # Python prints a status line, NOT how fresh the data is. Use a
+            # sub-second cadence and surface the millisecond latency counters so
+            # feed staleness is visible end-to-end (arbitrage diagnostics).
+            time.sleep(0.5)
+            stamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
             for ticker, st in pf.status().items():
                 mid = f'{st["mid"]:.2f}' if st["mid"] else "—"
+                stal = st.get("feed_staleness_ms")
+                lat = st.get("last_event_latency_ms")
+                sk = st.get("clock_skew_ms")
                 logger.info(
-                    "  %-10s equity=%9.2f  trades=%d  r=%+.2f  mid=%s",
-                    ticker, st["equity"], st["n_trades"], st["total_r"], mid,
+                    "  %-10s %s  eq=%9.2f tr=%d r=%+.2f mid=%s stal=%7.1fms lat=%6.2fms sk=%+8.1fms",
+                    ticker, stamp,
+                    st["equity"], st["n_trades"], st["total_r"], mid,
+                    stal if isinstance(stal, (int, float)) else -1.0,
+                    lat if isinstance(lat, (int, float)) else -1.0,
+                    sk if isinstance(sk, (int, float)) else 0.0,
                 )
     except KeyboardInterrupt:
         pass
     finally:
         logger.info("stopping strategies ...")
-        pf.stop()
-    logger.info("done.")
+        _stop_all()
+    logger.info("done — database flushed and closed cleanly")
     return 0
 
 def cmd_live_test(args: argparse.Namespace) -> int:
