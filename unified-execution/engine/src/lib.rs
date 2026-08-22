@@ -6,7 +6,7 @@
 //! using the SAME numbers as [`main/config.py`](../../main/config.py):
 //!
 //! * **1-second micro bars** — the tick stream is aggregated into 1 s bars and
-//!   the full 7-feature vector is assembled + evaluated on EVERY 1 s bar close
+//!   the full 15-feature vector is assembled + evaluated on EVERY 1 s bar close
 //!   (the research state space is `df_trades.resample('1s')` → one row/second);
 //! * **`TIMEFRAME_BARRIER` (300 s) regime filter** — on each 300 s rollover the
 //!   composite-bar features are recomputed once (Wilder RSI(2), RSI(14), SMA(14)
@@ -17,8 +17,8 @@
 //! * hunting zone entry — `rsi_2 < 30` (single-zone, `TRADE_DIRECTION='long'`
 //!   → buy the snapback), gated by a *model-free confidence proxy* calibrated
 //!   to reproduce the LightGBM P(WIN) ≥ 0.50 gate of the research pipeline
-//!   (Rust cannot host the exported `lgb_model.txt`, so we substitute a
-//!   transparent, deterministic logit over the same 7 features and keep every
+//!   (Rust loads the exported `lgb_model.txt`; when it is unavailable, it uses a
+//!   transparent deterministic proxy over the base features and keeps every
 //!   other mechanic byte-for-byte identical);
 //! * vol-scaled barriers — `barrier_pct = bar_vol_std × BARRIER_MULTIPLIER`
 //!   (bootstrap floor `0.001 × BARRIER_MULTIPLIER`), stop at `entry × (1 ∓ bp)`,
@@ -67,9 +67,9 @@ pub const BARRIER_MULTIPLIER: f64 = 0.3;
 pub const USE_ORDERFLOW_FEATURES: bool = true;
 pub const RR_RATIO: f64 = 10.0;
 pub const RSI_FILTER_THRESHOLD: f64 = 30.0;
-pub const ENABLE_RSI_ACCEL_FILTER: bool = false;
+pub const ENABLE_RSI_ACCEL_FILTER: bool = true;
 pub const TRADE_DIRECTION_IS_LONG: bool = true; // config TRADE_DIRECTION = "long"
-pub const CONFIDENCE_THRESHOLD: f64 = 0.5;
+pub const CONFIDENCE_THRESHOLD: f64 = 0.2;
 pub const LOCKOUT_SECONDS: i64 = 1000;
 pub const MAX_POSITION_USD: f64 = 100.0;
 pub const MIN_ORDER_SIZE: f64 = 0.001;
@@ -79,8 +79,7 @@ pub const SLIPPAGE_BPS_FALLBACK: f64 = 0.75;
 pub const MIN_BARRIER_PCT: f64 = 0.0;
 pub const MAX_BARRIER_PCT: f64 = 0.05;
 
-pub const HYSTERESIS_BUFFER: f64 = 0.0;       // config HYSTERESIS_BUFFER = 0
-
+pub const HYSTERESIS_BUFFER: f64 = 0.0; // config HYSTERESIS_BUFFER = 0
 
 pub const RSI_14_WINDOW: usize = 14;
 pub const RSI_2_WINDOW: usize = 2;
@@ -91,8 +90,7 @@ pub const DEEPLOB_Z_WINDOW: usize = 10;
 pub const RSI_Z_WINDOW: usize = 20;
 pub const BARRIER_VOL_WINDOW: usize = 20; // BARRIER_VOL_BAR_WINDOW (main/config.py) — rolling(20), ddof=0
 pub const ORDERFLOW_Z_WINDOW: usize = 10; // rolling z window for orderflow features
-pub const RETAIL_THRESHOLD: f64 = 0.05;   // trade-size cutoff retail vs institutional
-
+pub const RETAIL_THRESHOLD: f64 = 0.05; // trade-size cutoff retail vs institutional
 
 const EPS: f64 = 1e-9;
 const MAX_MICRO_CLOSES: usize = 300; // features.py `_price_buffer` — 1s closes → price_roc_3
@@ -121,7 +119,7 @@ pub struct StrategyConfig {
     pub fee_bps: f64,
     pub enable_slippage: bool,
     pub slippage_bps_fallback: f64,
-        pub min_barrier_pct: f64,
+    pub min_barrier_pct: f64,
     pub max_barrier_pct: f64,
     /// Whether the model was exported with the orderflow block (see
     /// `lgb_model.features.json` `includes_orderflow`). When off, the 8
@@ -195,11 +193,11 @@ pub struct MacroFeatures {
 }
 
 /// Feature snapshot assembled at every closed 1-second (micro) bar — the full
-/// 7-feature vector = micro `price_roc_3` + forward-filled macro features
-/// (mirrors `LiveFeatureEngine.compute_1s_feature_vector`).
+/// 15-feature vector = micro `price_roc_3` + forward-filled macro features
+/// plus the orderflow block (mirrors `LiveFeatureEngine.compute_1s_feature_vector`).
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct Feature {
-    pub ts: i64,             // bar close timestamp (ms)
+    pub ts: i64, // bar close timestamp (ms)
     pub close: f64,
     pub n_bars: usize,
     pub spread_bps: f64,
@@ -399,7 +397,11 @@ impl MomentumStrategy {
             macro_closes: VecDeque::with_capacity(MAX_MACRO_CLOSES),
             spreads: VecDeque::with_capacity(MAX_SPREADS),
             rsi2_hist: VecDeque::with_capacity(MAX_RSI_HIST),
-            macro_features: Some(MacroFeatures { rsi_2: 100.0, sma_14: 50.0, ..Default::default() }),
+            macro_features: Some(MacroFeatures {
+                rsi_2: 100.0,
+                sma_14: 50.0,
+                ..Default::default()
+            }),
             model: None,
             ofi_prev_bid_price: None,
             ofi_prev_bid_amount: 0.0,
@@ -483,7 +485,7 @@ impl MomentumStrategy {
 
     // ---- market-data entry points ----------------------------------------
 
-        /// Feed a single trade print (`is_buy` = aggressor bought).
+    /// Feed a single trade print (`is_buy` = aggressor bought).
     pub fn on_trade(&mut self, ts: i64, price: f64, amount: f64, is_buy: bool) -> Vec<EngineEvent> {
         if self.mid == 0.0 {
             self.mid = price; // bootstrap before first orderbook snapshot
@@ -523,10 +525,11 @@ impl MomentumStrategy {
         self.push_price(ts, price, Some((amount, is_buy)))
     }
 
-        /// Feed a level-1 orderbook snapshot (updates mid + spread series).
+    /// Feed a level-1 orderbook snapshot. Quotes update midpoint/spread and
+    /// orderflow state, but do not create trade-derived bars or exits.
     pub fn on_orderbook(
         &mut self,
-        ts: i64,
+        _ts: i64,
         bid: f64,
         _bid_amt: f64,
         ask: f64,
@@ -543,9 +546,10 @@ impl MomentumStrategy {
         if self.orderflow_enabled() {
             // OFI (Cont et al.) — needs the PREVIOUS tick, computed BEFORE
             // overwriting the prev snapshot (features.py on_orderbook Step 1).
-            if let (Some(prev_bid_p), Some(prev_ask_p)) =
-                (self.ofi_prev_bid_price.as_ref(), self.ofi_prev_ask_price.as_ref())
-            {
+            if let (Some(prev_bid_p), Some(prev_ask_p)) = (
+                self.ofi_prev_bid_price.as_ref(),
+                self.ofi_prev_ask_price.as_ref(),
+            ) {
                 let delta_bid = if bid > *prev_bid_p {
                     _bid_amt
                 } else if bid < *prev_bid_p {
@@ -576,10 +580,10 @@ impl MomentumStrategy {
             self.last_bid_amount = _bid_amt;
             self.last_ask_amount = _ask_amt;
         }
-        self.push_price(ts, mid.max(f64::EPSILON), None)
+        Vec::new()
     }
 
-// ---- core bar/price pipeline -----------------------------------------
+    // ---- core bar/price pipeline -----------------------------------------
 
     fn push_price(&mut self, ts: i64, price: f64, trade: Option<(f64, bool)>) -> Vec<EngineEvent> {
         let micro_ms = self.cfg.micro_barrier_secs * 1000;
@@ -593,13 +597,26 @@ impl MomentumStrategy {
         //    and evaluate a fresh entry from it. The model runs on every 1 s row.
         match self.micro_idx {
             None => self.start_micro(micro_idx, price),
-            Some(cur) if micro_idx != cur => {
-                let close = self.micro_close;
-                let feat = self.finish_micro(close, cur * micro_ms);
-                events.push(EngineEvent::BarClosed(feat));
-                self.evaluate_entry(&mut events);
-                self.start_micro(micro_idx, price);
+            Some(cur) if micro_idx > cur => {
+                // The research state space is dense at one-second resolution.
+                // Close every missing interval at the last trade price so a
+                // sparse feed cannot change model cadence or timeout timing.
+                let mut idx = cur;
+                while idx < micro_idx {
+                    let feat = self.finish_micro(self.micro_close, idx * micro_ms);
+                    events.push(EngineEvent::BarClosed(feat));
+                    self.evaluate_entry(&mut events);
+
+                    let next_idx = idx + 1;
+                    if next_idx * micro_ms % macro_ms == 0 {
+                        self.compute_macro_features();
+                        self.start_macro(next_idx, self.micro_close);
+                    }
+                    self.start_micro(next_idx, self.micro_close);
+                    idx = next_idx;
+                }
             }
+            Some(cur) if micro_idx < cur => return events,
             Some(_) => {}
         }
 
@@ -653,10 +670,10 @@ impl MomentumStrategy {
         self.macro_close = price;
     }
 
-    /// Finalize the completed 1-second (micro) bar: assemble the 7-feature
-    /// vector — micro `price_roc_3` (fresh every second) + macro/regime features
-    /// forward-filled from the last TIMEFRAME_BARRIER rollover (mirrors
-    /// `LiveFeatureEngine.compute_1s_feature_vector`).
+    /// Finalize the completed 1-second (micro) bar: assemble the 15-feature
+    /// vector — micro `price_roc_3` (fresh every second) + macro/regime and
+    /// orderflow features forward-filled from the last TIMEFRAME_BARRIER
+    /// rollover (mirrors `LiveFeatureEngine.compute_1s_feature_vector`).
     fn finish_micro(&mut self, close: f64, close_ms: i64) -> Feature {
         self.last_bar_close_ms = close_ms;
 
@@ -702,16 +719,16 @@ impl MomentumStrategy {
             m.rsi_x_ma,
             m.ma_accel,
             price_roc_3_opt,
-            m.tick_autocorr,
-            m.inst_ratio,
-            m.delta_divergence_z,
-            m.depth_imbalance_z,
             m.rsi_2,
             m.sma_14,
             m.ofi_z,
             m.cvd_delta_z,
             m.cvd_slope_z,
             m.absorption_z,
+            m.tick_autocorr,
+            m.inst_ratio,
+            m.delta_divergence_z,
+            m.depth_imbalance_z,
         ];
         let win_prob = match self.model.as_ref() {
             Some(mdl) => mdl.predict_proba(&features),
@@ -746,7 +763,9 @@ impl MomentumStrategy {
         {
             return;
         }
-        let Some(feat) = self.last_features else { return };
+        let Some(feat) = self.last_features else {
+            return;
+        };
 
         // Vol filter mirrors `_passes_vol_filter` (MIN/MAX_BARRIER_PCT).
         let bp = self.barrier_pct();
@@ -831,7 +850,7 @@ impl MomentumStrategy {
         }
     }
 
-fn enter_position(&mut self, ts: i64, side: Side, mid: f64, bp: f64) {
+    fn enter_position(&mut self, ts: i64, side: Side, mid: f64, bp: f64) {
         let slip = if self.cfg.enable_slippage {
             self.cfg.slippage_bps_fallback
         } else {
@@ -923,7 +942,7 @@ fn enter_position(&mut self, ts: i64, side: Side, mid: f64, bp: f64) {
         Some(self.close_position(ts, reason, theoretical_exit))
     }
 
-/// PnL accounting — byte-for-byte port of `PositionTracker._exit`.
+    /// PnL accounting — byte-for-byte port of `PositionTracker._exit`.
     fn close_position(
         &mut self,
         ts: i64,
@@ -934,6 +953,7 @@ fn enter_position(&mut self, ts: i64, side: Side, mid: f64, bp: f64) {
             .position
             .take()
             .expect("close_position with no open position");
+        self.signal_armed = true;
         let is_timeout = reason == "timeout";
 
         let slip_bps = if self.cfg.enable_slippage {
@@ -1009,9 +1029,9 @@ fn enter_position(&mut self, ts: i64, side: Side, mid: f64, bp: f64) {
         rec
     }
 
-// ---- feature computation (mirrors main/features.py) ------------------
+    // ---- feature computation (mirrors main/features.py) ------------------
 
-// ---- model + orderflow lifecycle ------------------------------------------
+    // ---- model + orderflow lifecycle ------------------------------------------
 
     /// Install the research LightGBM model (loaded at startup). Once present,
     /// every 1-second feature vector is scored with the real 15-feature model
@@ -1054,8 +1074,16 @@ fn enter_position(&mut self, ts: i64, side: Side, mid: f64, bp: f64) {
         }
         // Warm the OHLC trackers for the in-progress composite bar.
         self.macro_close = *closes.last().expect("non-empty");
-        self.macro_high = self.macro_closes.iter().copied().fold(self.macro_close, f64::max);
-        self.macro_low = self.macro_closes.iter().copied().fold(self.macro_close, f64::min);
+        self.macro_high = self
+            .macro_closes
+            .iter()
+            .copied()
+            .fold(self.macro_close, f64::max);
+        self.macro_low = self
+            .macro_closes
+            .iter()
+            .copied()
+            .fold(self.macro_close, f64::min);
         // Force one macro feature computation so rsi_2/sma_14 are warm on the
         // first live bar (compute_macro_features will push `macro_close` once
         // more — identical to features.py seed path at lines 731-749).
@@ -1068,7 +1096,11 @@ fn enter_position(&mut self, ts: i64, side: Side, mid: f64, bp: f64) {
     /// logic; `finish_micro` calls the real LightGBM whenever `self.model`
     /// is `Some`.
     fn proxy_win_prob(&self, m: &MacroFeatures, price_roc_3: f64, close: f64) -> f64 {
-        let dir = if self.cfg.trade_direction_is_long { 1.0 } else { -1.0 };
+        let dir = if self.cfg.trade_direction_is_long {
+            1.0
+        } else {
+            -1.0
+        };
         let vol2 = m.bar_vol_std.max(EPS);
         let thr = self.cfg.rsi_filter_threshold;
         let oversold = if dir > 0.0 {
@@ -1081,11 +1113,10 @@ fn enter_position(&mut self, ts: i64, side: Side, mid: f64, bp: f64) {
             + 0.20 * tanh(dir * m.ma_accel / vol2 * 0.5)
             + 0.10 * tanh(dir * (close - m.ma5_last) / vol2 * 0.5)
             + 0.10 * tanh(dir * price_roc_3 / vol2 * 0.5);
-                1.0 / (1.0 + (-score).exp())
+        1.0 / (1.0 + (-score).exp())
     }
 
-
-// ---- composite (macro / regime) feature computation (mirrors main/features.py) ----
+    // ---- composite (macro / regime) feature computation (mirrors main/features.py) ----
 
     /// Recompute the composite (TIMEFRAME_BARRIER = 300 s) features once at each
     /// macro-bar boundary. These ARE the regime filter — RSI(2) + MA
@@ -1151,8 +1182,7 @@ fn enter_position(&mut self, ts: i64, side: Side, mid: f64, bp: f64) {
             0.0
         };
         let ma_accel = if ma5.len() >= 3 {
-            (ma5[ma5.len() - 1] - ma5[ma5.len() - 2])
-                - (ma5[ma5.len() - 2] - ma5[ma5.len() - 3])
+            (ma5[ma5.len() - 1] - ma5[ma5.len() - 2]) - (ma5[ma5.len() - 2] - ma5[ma5.len() - 3])
         } else {
             0.0
         };
@@ -1181,81 +1211,91 @@ fn enter_position(&mut self, ts: i64, side: Side, mid: f64, bp: f64) {
         // are summed over the composite bar, z-scored vs the trailing
         // ORDERFLOW_Z_WINDOW, then reset for the next bar.
         // ================================================================
-        let (ofi_z, cvd_delta_z, cvd_slope_z, absorption_z, tick_autocorr,
-             inst_ratio, delta_divergence_z, depth_imbalance_z) =
-            if self.cfg.use_orderflow_features {
-                let zw = ORDERFLOW_Z_WINDOW;
+        let (
+            ofi_z,
+            cvd_delta_z,
+            cvd_slope_z,
+            absorption_z,
+            tick_autocorr,
+            inst_ratio,
+            delta_divergence_z,
+            depth_imbalance_z,
+        ) = if self.cfg.use_orderflow_features {
+            let zw = ORDERFLOW_Z_WINDOW;
 
-                // --- OFI: this bar's total minus last bar's total, z-scored ---
-                let ofi_diff = self.bar_ofi_sum - self.prev_bar_ofi;
-                let ofi_z = push_roll_z(&mut self.ofi_diff_buffer, ofi_diff, zw);
-                self.prev_bar_ofi = self.bar_ofi_sum;
+            // --- OFI: this bar's total minus last bar's total, z-scored ---
+            let ofi_diff = self.bar_ofi_sum - self.prev_bar_ofi;
+            let ofi_z = push_roll_z(&mut self.ofi_diff_buffer, ofi_diff, zw);
+            self.prev_bar_ofi = self.bar_ofi_sum;
 
-                // --- CVD: per-bar net delta + 5-bar slope, each z-scored ---
-                let cvd_delta_z =
-                    push_roll_z(&mut self.cvd_delta_buffer, self.bar_cvd_net, zw);
-                let cvd_hist: Vec<f64> =
-                    self.cvd_delta_buffer.iter().copied().collect();
-                let cvd_slope_5 = if cvd_hist.len() >= 5 {
-                    cvd_hist[cvd_hist.len() - 5..].iter().sum()
+            // --- CVD: per-bar net delta + 5-bar slope, each z-scored ---
+            let cvd_delta_z = push_roll_z(&mut self.cvd_delta_buffer, self.bar_cvd_net, zw);
+            let cvd_hist: Vec<f64> = self.cvd_delta_buffer.iter().copied().collect();
+            let cvd_slope_5 = if cvd_hist.len() >= 5 {
+                cvd_hist[cvd_hist.len() - 5..].iter().sum()
+            } else {
+                0.0
+            };
+            let cvd_slope_z = push_roll_z(&mut self.cvd_slope_buffer, cvd_slope_5, zw);
+
+            // --- Absorption ratio: CVD net / orderbook price range ---
+            let price_range = match (self.bar_ask_high, self.bar_bid_low) {
+                (Some(h), Some(l)) => h - l,
+                _ => 0.0,
+            };
+            let abs_raw = self.bar_cvd_net / (price_range + EPS);
+            let absorption_z = push_roll_z(&mut self.absorption_buffer, abs_raw, zw);
+
+            // --- Trade-sign lag-1 autocorrelation over this bar's
+            //     per-second tick-sign series ---
+            let tick_autocorr = {
+                let s: Vec<f64> = self.bar_tick_signs.iter().map(|&v| v as f64).collect();
+                if s.len() > 5 && pop_std(&s) > 0.0 {
+                    pearson_lag1(&s)
                 } else {
                     0.0
-                };
-                let cvd_slope_z =
-                    push_roll_z(&mut self.cvd_slope_buffer, cvd_slope_5, zw);
-
-                // --- Absorption ratio: CVD net / orderbook price range ---
-                let price_range = match (self.bar_ask_high, self.bar_bid_low) {
-                    (Some(h), Some(l)) => h - l,
-                    _ => 0.0,
-                };
-                let abs_raw = self.bar_cvd_net / (price_range + EPS);
-                let absorption_z =
-                    push_roll_z(&mut self.absorption_buffer, abs_raw, zw);
-
-                // --- Trade-sign lag-1 autocorrelation over this bar's
-                //     per-second tick-sign series ---
-                let tick_autocorr = {
-                    let s: Vec<f64> =
-                        self.bar_tick_signs.iter().map(|&v| v as f64).collect();
-                    if s.len() > 5 && pop_std(&s) > 0.0 {
-                        pearson_lag1(&s)
-                    } else {
-                        0.0
-                    }
-                };
-
-                // --- Retail vs institutional flow divergence ---
-                let bar_volume = self.bar_retail_buy + self.bar_retail_sell
-                    + self.bar_inst_buy + self.bar_inst_sell;
-                let inst_delta = self.bar_inst_buy - self.bar_inst_sell;
-                let retail_delta = self.bar_retail_buy - self.bar_retail_sell;
-                let delta_divergence = inst_delta - retail_delta;
-                let inst_ratio =
-                    (self.bar_inst_buy + self.bar_inst_sell) / (bar_volume + EPS);
-                let delta_divergence_z = push_roll_z(&mut self.delta_divergence_buffer, delta_divergence, zw);
-
-                // --- Depth imbalance: latest snapshot (bid_amt - ask_amt)/sum ---
-                let depth_imb = (self.last_bid_amount - self.last_ask_amount)
-                    / (self.last_bid_amount + self.last_ask_amount + EPS);
-                let depth_imbalance_z = push_roll_z(&mut self.depth_imbalance_buffer, depth_imb, zw);
-
-                // --- Reset per-bar accumulators (features.py block at 562-571) ---
-                self.bar_ofi_sum = 0.0;
-                self.bar_cvd_net = 0.0;
-                self.bar_ask_high = None;
-                self.bar_bid_low = None;
-                self.bar_tick_signs.clear();
-                self.bar_retail_buy = 0.0;
-                self.bar_retail_sell = 0.0;
-                self.bar_inst_buy = 0.0;
-                self.bar_inst_sell = 0.0;
-
-                (ofi_z, cvd_delta_z, cvd_slope_z, absorption_z, tick_autocorr,
-                 inst_ratio, delta_divergence_z, depth_imbalance_z)
-            } else {
-                (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+                }
             };
+
+            // --- Retail vs institutional flow divergence ---
+            let bar_volume =
+                self.bar_retail_buy + self.bar_retail_sell + self.bar_inst_buy + self.bar_inst_sell;
+            let inst_delta = self.bar_inst_buy - self.bar_inst_sell;
+            let retail_delta = self.bar_retail_buy - self.bar_retail_sell;
+            let delta_divergence = inst_delta - retail_delta;
+            let inst_ratio = (self.bar_inst_buy + self.bar_inst_sell) / (bar_volume + EPS);
+            let delta_divergence_z =
+                push_roll_z(&mut self.delta_divergence_buffer, delta_divergence, zw);
+
+            // --- Depth imbalance: latest snapshot (bid_amt - ask_amt)/sum ---
+            let depth_imb = (self.last_bid_amount - self.last_ask_amount)
+                / (self.last_bid_amount + self.last_ask_amount + EPS);
+            let depth_imbalance_z = push_roll_z(&mut self.depth_imbalance_buffer, depth_imb, zw);
+
+            // --- Reset per-bar accumulators (features.py block at 562-571) ---
+            self.bar_ofi_sum = 0.0;
+            self.bar_cvd_net = 0.0;
+            self.bar_ask_high = None;
+            self.bar_bid_low = None;
+            self.bar_tick_signs.clear();
+            self.bar_retail_buy = 0.0;
+            self.bar_retail_sell = 0.0;
+            self.bar_inst_buy = 0.0;
+            self.bar_inst_sell = 0.0;
+
+            (
+                ofi_z,
+                cvd_delta_z,
+                cvd_slope_z,
+                absorption_z,
+                tick_autocorr,
+                inst_ratio,
+                delta_divergence_z,
+                depth_imbalance_z,
+            )
+        } else {
+            (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+        };
 
         self.macro_features = Some(MacroFeatures {
             rsi_2: rsi2,
@@ -1278,18 +1318,13 @@ fn enter_position(&mut self, ts: i64, side: Side, mid: f64, bp: f64) {
     }
 }
 
-
 // ============================================================================
 // Indicator helpers
 // ============================================================================
 
 fn tanh(x: f64) -> f64 {
     if !x.is_finite() {
-        if x.is_sign_positive() {
-            1.0
-        } else {
-            -1.0
-        }
+        if x.is_sign_positive() { 1.0 } else { -1.0 }
     } else {
         x.tanh()
     }
@@ -1305,7 +1340,8 @@ fn wilders_rsi_series(delta: &[f64], period: usize) -> Vec<f64> {
         return out;
     }
     let mut avg_gain: f64 = delta[..period].iter().map(|d| d.max(0.0)).sum::<f64>() / period as f64;
-    let mut avg_loss: f64 = delta[..period].iter().map(|d| (-d).max(0.0)).sum::<f64>() / period as f64;
+    let mut avg_loss: f64 =
+        delta[..period].iter().map(|d| (-d).max(0.0)).sum::<f64>() / period as f64;
     out[period] = 100.0 - 100.0 / (1.0 + avg_gain / (avg_loss + 1e-10));
     for i in (period + 1)..n {
         avg_gain = (avg_gain * (period as f64 - 1.0) + delta[i].max(0.0)) / period as f64;
@@ -1382,14 +1418,8 @@ fn pearson_lag1(series: &[f64]) -> f64 {
         db += db_i * db_i;
     }
     let den = (da * db).sqrt();
-    if den <= EPS {
-        0.0
-    } else {
-        num / den
-    }
+    if den <= EPS { 0.0 } else { num / den }
 }
-
-
 
 /// Append `value` to `buf`, trim to `MAX_Z_HIST`, then return its rolling
 /// z-score vs the trailing `window` samples (population std, matches
@@ -1429,6 +1459,21 @@ mod tests {
         assert!((pop_std(&v) - 2.0).abs() < 1e-12);
     }
 
+    #[test]
+    fn sparse_trades_finalize_every_missing_second() {
+        let mut s = MomentumStrategy::new("GAP", StrategyConfig::default());
+        let _ = s.on_trade(0, 100.0, 1.0, true);
+        let events = s.on_trade(5_000, 101.0, 1.0, true);
+        let bars: Vec<i64> = events
+            .iter()
+            .filter_map(|event| match event {
+                EngineEvent::BarClosed(feature) => Some(feature.ts),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(bars, vec![0, 1_000, 2_000, 3_000, 4_000]);
+    }
+
     /// End-to-end: warm up the 300 s composite regime features on a steady
     /// uptrend (macro RSI(2) ≈ 100, no warm-up entries) → one full sharp-down
     /// composite bar collapses macro RSI(2) into the hunting zone → a 1-second
@@ -1442,6 +1487,7 @@ mod tests {
             min_barrier_pct: 0.0,
             max_barrier_pct: 0.5,
             lockout_seconds: 0,
+            enable_rsi_accel_filter: false,
             ..Default::default()
         };
         let micro_ms = cfg.micro_barrier_secs * 1000;
@@ -1497,7 +1543,10 @@ mod tests {
             }
             ts += micro_ms;
         }
-        assert!(entered.is_some(), "expected a hunting-zone entry after the dump");
+        assert!(
+            entered.is_some(),
+            "expected a hunting-zone entry after the dump"
+        );
         let entry = entered.expect("entry present");
         assert!(
             entry.rsi_2 < RSI_FILTER_THRESHOLD,
@@ -1515,7 +1564,11 @@ mod tests {
             for e in ev {
                 if let EngineEvent::Exited(r) = e {
                     exited = true;
-                    assert!(r.r_multiple <= RR_RATIO + 1e-9, "barrier R clipped to +RR_RATIO, got {}", r.r_multiple);
+                    assert!(
+                        r.r_multiple <= RR_RATIO + 1e-9,
+                        "barrier R clipped to +RR_RATIO, got {}",
+                        r.r_multiple
+                    );
                     assert_eq!(r.reason, "take_profit");
                     assert_eq!(r.side, Side::Long);
                 }
@@ -1523,6 +1576,7 @@ mod tests {
             ts += micro_ms;
         }
         assert!(exited, "position never hit its target");
+        assert!(s.signal_armed, "signal must re-arm after exit");
         assert_eq!(s.closed_trades().len(), 1);
         assert!(s.snapshot().n_trades == 1);
     }

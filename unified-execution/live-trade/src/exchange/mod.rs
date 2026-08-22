@@ -11,9 +11,12 @@
 
 pub mod bitfinex;
 pub mod bybit;
+pub mod parquet;
 
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Venue identity
@@ -24,6 +27,9 @@ use std::fmt;
 pub enum ExchangeKind {
     Bybit,
     Bitfinex,
+    /// Historical replay of a pre-converted parquet feed (`live-test`).
+    /// Not a real venue: no orders are ever routed in this mode.
+    Parquet,
 }
 
 impl ExchangeKind {
@@ -31,6 +37,7 @@ impl ExchangeKind {
         match s.trim().to_ascii_lowercase().as_str() {
             "bybit" => Some(Self::Bybit),
             "bitfinex" => Some(Self::Bitfinex),
+            "parquet" | "replay" => Some(Self::Parquet),
             _ => None,
         }
     }
@@ -39,6 +46,7 @@ impl ExchangeKind {
         match self {
             Self::Bybit => "bybit",
             Self::Bitfinex => "bitfinex",
+            Self::Parquet => "parquet",
         }
     }
 }
@@ -226,7 +234,37 @@ pub fn create_exchange(kind: ExchangeKind) -> Box<dyn Exchange> {
             std::env::var("BFX_API_KEY").ok(),
             std::env::var("BFX_API_SECRET").ok(),
         )),
+        // Only reachable if a caller drives a replay via `--exchange parquet`;
+        // `live-test` builds its own feed path directly. Falls back to the
+        // `LIVE_TEST_FEED` env var (connect will fail loudly if it is unset).
+        ExchangeKind::Parquet => Box::new(parquet::ReplayExchange::new(
+            &std::env::var("LIVE_TEST_FEED").unwrap_or_default(),
+            None,
+            None,
+            None,
+            false,
+            None,
+        )),
     }
+}
+
+/// Construct a historical replay exchange that reads a pre-converted parquet
+/// feed (see `unified_runner.py live-test`). `start_ms` / `end_ms` / `limit`
+/// bound the replayed window (useful for the multi-GB research parquet files);
+/// when `stop` is provided and the feed is exhausted, the exchange flips it so
+/// `run_execution_loop` drains and emits the final report — exactly like
+/// Ctrl-C on a live session.
+pub fn create_replay_exchange(
+    feed_path: &str,
+    start_ms: Option<i64>,
+    end_ms: Option<i64>,
+    limit: Option<usize>,
+    loop_feed: bool,
+    stop: Option<Arc<AtomicBool>>,
+) -> Box<dyn Exchange> {
+    Box::new(parquet::ReplayExchange::new(
+        feed_path, start_ms, end_ms, limit, loop_feed, stop,
+    ))
 }
 
 /// Ticker → venue-native symbol mapping helpers.
@@ -289,4 +327,3 @@ pub fn header_map(pairs: &[(&str, String)]) -> reqwest::header::HeaderMap {
     }
     map
 }
-

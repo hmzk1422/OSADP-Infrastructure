@@ -1,97 +1,176 @@
-use engine::{MomentumStrategy, StrategyConfig};
+//! live-test CLI binary — historical replay through the live-trade loop.
+//!
+//! Instead of a live WebSocket feed, the exchange is a [`ReplayExchange`]
+//! that replays a pre-converted parquet feed. `unified_runner.py live-test`
+//! reads the research parquet files (`research/csv/{TICKER}_trades.parquet`,
+//! `{TICKER}_orderbook.parquet`) via pyarrow/pandas and merges them into a
+//! timestamp-ordered replay stream (`build/live_test_feed_{ticker}.replay`).
+//! Everything downstream — 1 s micro-bars, 300 s composite features,
+//! entry/exit gates, RocksDB persistence, HTML report — is the identical
+//! code path as `live-trade`, so a replay of the same data that produced the
+//! research backtest should reproduce the same trades.
+//!
+//!     cargo run -p live-test -- btcusdt --feed build/live_test_feed_btcusdt.replay
+//!     cargo run -p live-test -- ethusdt --feed build/live_test_feed_ethusdt.replay \
+//!         --capital 2000 --seed 150
 
-fn sortino_ratio(ret: &[f64], risk_free_annual: f64) -> f64 {
-    if ret.is_empty() {
-        return 0.0;
-    }
-    let excess: Vec<f64> = ret.iter().map(|r| r - risk_free_annual / 365.0).collect();
-    let mean_excess: f64 = excess.iter().sum::<f64>() / excess.len() as f64;
-    if mean_excess.abs() < 1e-12 {
-        return 0.0;
-    }
-    let std_dev: f64 = excess.iter().map(|x| (x - mean_excess).powi(2)).sum::<f64>().sqrt()
-        / (ret.len() as f64).sqrt();
-    if std_dev.abs() < 1e-12 {
-        return 0.0;
-    }
-    mean_excess / std_dev
+use live_trade::exchange::{ExchangeKind, create_replay_exchange};
+use live_trade::execution::{
+    ExecutionConfig, ExecutionMode, LoopContext, RunStats, run_execution_loop,
+};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+
+fn usage<T>() -> T {
+    eprintln!(
+        "usage: live-test [ticker] [--feed PATH] [--capital USD] [--db PATH] [--no-db]\
+         [--seed BARS] [--loop] [--start-ms MS] [--end-ms MS] [--limit N]"
+    );
+    std::process::exit(2);
 }
 
-fn main() {
-    let args: Vec<String> = std::env::args().collect();
-    let _parquet_path = args.get(1).map(|s| s.as_str()).unwrap_or("");
+#[tokio::main]
+async fn main() {
+    let mut ticker = "btcusdt".to_string();
+    let mut feed: Option<String> = None;
+    let mut capital = 10_000.0f64;
+    let mut db_path: Option<String> = None;
+    let mut persist = true;
+    let mut seed_bars = 0u32;
+    let mut loop_feed = false;
+    let mut start_ms: Option<i64> = None;
+    let mut end_ms: Option<i64> = None;
+    let mut limit: Option<usize> = None;
 
-    let cfg = StrategyConfig::default();
-    let mut strategy = MomentumStrategy::new("BTCUSDT", cfg);
-
-    let risk_free_annual = 0.05f64;
-
-    // Simulated price data — in a full impl this would read from parquet:
-    // price drops into RSI<30 hunting zone, then recovers for barrier exit
-    let simulated_prices: Vec<f64> = vec![
-        100.0,  // start
-        99.5,   // slight dip
-        97.0,   // dump into RSI<30 zone → triggers long entry
-        98.5,   // recovery
-        100.5,  // target reached → barrier exit with R ~ +1
-        102.0,  // past target
-        101.0,  // pullback
-        103.5,  // new high
-        105.0,  // continued up
-        104.0,  // minor pullback
-    ];
-
-    let mut equity = 100.0f64;
-    let mut trades: Vec<f64> = Vec::new();
-    let mut prev_price: Option<f64> = None;
-
-    // Simulate tick-by-tick feed through the strategy
-    for (idx, price) in simulated_prices.iter().enumerate() {
-        let ts = (idx as i64) * 60000; // 1-min bars for demo
-        let side = price < &99.5; // simplified: enter when price drops below threshold
-        let events = strategy.on_trade(ts, *price, 1.0, side);
-        for event in events.iter() {
-            match event {
-                engine::EngineEvent::Entered(_receipt) => {
-                    let notional = price * 1.0;
-                    equity -= notional;
-                }
-                engine::EngineEvent::Exited(receipt) => {
-                    equity += receipt.r_multiple * 10.0;
-                    if let Some(p) = prev_price {
-                        let ret = (price - p) / p;
-                        trades.push(ret);
-                    }
-                    prev_price = Some(*price);
-                }
-                _ => {}
+    let mut args = std::env::args().skip(1);
+    while let Some(a) = args.next() {
+        match a.as_str() {
+            "--feed" => feed = Some(args.next().unwrap_or_else(usage)),
+            "--capital" => {
+                capital = args
+                    .next()
+                    .unwrap_or_else(usage)
+                    .parse()
+                    .unwrap_or_else(|_| usage())
             }
+            "--db" => db_path = Some(args.next().unwrap_or_else(usage)),
+            "--no-db" => persist = false,
+            "--seed" => {
+                seed_bars = args
+                    .next()
+                    .unwrap_or_else(usage)
+                    .parse()
+                    .unwrap_or_else(|_| usage())
+            }
+            "--loop" => loop_feed = true,
+            "--start-ms" => {
+                start_ms = Some(
+                    args.next()
+                        .unwrap_or_else(usage)
+                        .parse()
+                        .unwrap_or_else(|_| usage()),
+                )
+            }
+            "--end-ms" => {
+                end_ms = Some(
+                    args.next()
+                        .unwrap_or_else(usage)
+                        .parse()
+                        .unwrap_or_else(|_| usage()),
+                )
+            }
+            "--limit" => {
+                limit = Some(
+                    args.next()
+                        .unwrap_or_else(usage)
+                        .parse()
+                        .unwrap_or_else(|_| usage()),
+                )
+            }
+            "--help" | "-h" => usage(),
+            other if other.starts_with("--") => usage(),
+            other => ticker = other.to_ascii_lowercase(),
         }
     }
 
-    let total_trades = strategy.closed_trades().len();
-    let final_equity = equity;
-    let _total_return = (final_equity - 100.0) / 100.0;
-    let sortino = sortino_ratio(&trades, risk_free_annual);
+    let ticker_lower = ticker.to_ascii_lowercase();
+    let feed = feed.unwrap_or_else(|| format!("build/live_test_feed_{ticker_lower}.replay"));
 
-    let _ = std::fs::create_dir_all("build");
+    // A replay run must start from a clean slate. The default DB location is
+    // wiped every run so a re-run can't restore stale equity or duplicate
+    // trades; an explicitly provided `--db` is left alone (user's choice).
+    let db_path = db_path.clone().unwrap_or_else(|| {
+        let p = format!("build/live_test_{ticker_lower}.rocksdb");
+        if persist && std::path::Path::new(&p).exists() {
+            let _ = std::fs::remove_dir_all(&p);
+        }
+        p
+    });
 
-    let html = format!(
-        r#"<html><head><meta charset="utf-8"><title>PnL Report - Live Test</title>
-<style>
-body{{font-family:'Segoe UI',sans-serif;margin:20px;background:#1a1a2e;color:#e0e0e0}}
-h1{{color:#00d4ff}}.summary{{margin:20px 0;flex-wrap:wrap}}.card{{background:#0f0f20;border-radius:8px;padding:16px 20px;min-width:200px;text-align:center}}.card .label{{font-size:12px;color:#888;text-transform:uppercase}}.card .value{{font-size:24px;font-weight:700;color:#00d4ff}}.footer{{margin-top:20px;color:#555;font-size:12px}}</style></head>
-<body><h1>PnL Report — Live Test (Parquet Simulation)</h1><div class="summary">
-<div class="card"><div class="label">Starting Equity</div><div class="value">100.00 USD</div></div>
-<div class="card"><div class="label">Final Equity</div><div class="value">{:.2}</div></div>
-<div class="card"><div class="label">Total Trades</div><div class="value">{}</div></div>
-<div class="card"><div class="label">Total Return</div><div class="value">{:.2}</div></div>
-<div class="card"><div class="label">Sortino Ratio</div><div class="value">{:.3}</div></div></div></body></html>"#,
-        final_equity, total_trades, final_equity - 100.0, sortino
+    let stats = Arc::new(Mutex::new(RunStats {
+        symbol: ticker_lower.clone(),
+        capital_usd: capital,
+        ..Default::default()
+    }));
+    let paused = Arc::new(AtomicBool::new(false));
+    let stop = Arc::new(AtomicBool::new(false));
+    let capital_cents = Arc::new(AtomicU64::new((capital * 100.0) as u64));
+
+    println!(
+        "[live-test] ticker={} feed={} db={} persist={} seed_bars={} loop={} window={:?}..{:?} limit={:?}",
+        ticker_lower, feed, db_path, persist, seed_bars, loop_feed, start_ms, end_ms, limit
     );
-    let out_path = format!("build/pnl_report_live_test.html");
-    match std::fs::write(&out_path, &html) {
-        Ok(_) => println!("  → written to {}", out_path),
-        Err(e) => eprintln!("[report] failed to write {}: {}", out_path, e),
+
+    let cfg = ExecutionConfig {
+        ticker: ticker_lower.clone(),
+        exchange: ExchangeKind::Parquet,
+        mode: ExecutionMode::Paper, // the engine simulates fills; no real orders
+        db_path: db_path.clone(),
+        seed_bars,
+        persist,
+    };
+    let ctx = LoopContext {
+        exchange: create_replay_exchange(
+            &feed,
+            start_ms,
+            end_ms,
+            limit,
+            loop_feed,
+            Some(Arc::clone(&stop)),
+        ),
+        stats: Arc::clone(&stats),
+        paused,
+        stop: Arc::clone(&stop),
+        capital_usd_cents: capital_cents,
+    };
+
+    // Run the identical loop as live-trade. The ReplayExchange flips `stop`
+    // when the feed is exhausted, so the loop drains and `finish()` writes the
+    // HTML report — unless Ctrl-C arrives first, which we honour by signalling
+    // stop and letting the loop flush RocksDB cleanly.
+    let run = run_execution_loop(cfg, ctx);
+    tokio::pin!(run);
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {
+            println!("\nCtrl-C received — draining replay loop and closing RocksDB...");
+            stop.store(true, Ordering::SeqCst);
+            (&mut run).await;
+        }
+        _ = &mut run => {}
+    }
+
+    let s = stats.lock().unwrap();
+    println!(
+        "=== final: equity={:.2} trades={} (W:{}/L:{}) total_r={:.2} ===",
+        s.equity, s.n_trades, s.n_wins, s.n_losses, s.total_r
+    );
+    if let Some(err) = &s.last_error {
+        println!("last error: {err}");
+    }
+    if persist {
+        println!(
+            "[live-test] report -> build/pnl_report_{}.html",
+            ticker_lower
+        );
     }
 }

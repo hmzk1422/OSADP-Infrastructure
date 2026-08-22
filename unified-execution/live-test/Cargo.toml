@@ -5,3 +5,5 @@ edition = "2024"
 
 [dependencies]
 engine = { path = "../engine" }
+live-trade = { path = "../live-trade" }
+tokio = { version = "1", features = ["full"] }

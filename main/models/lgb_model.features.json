@@ -38,7 +38,7 @@
     "sma_14"
   ],
   "trained_rows": 16921,
-  "trained_at_utc": "2026-08-18T09:51:22.507739+00:00",
+  "trained_at_utc": "2026-08-22T05:51:31.019789+00:00",
   "label_counts": {
     "LOSS": 15085,
     "WIN": 1836

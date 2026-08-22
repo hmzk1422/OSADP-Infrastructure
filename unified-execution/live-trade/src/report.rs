@@ -120,10 +120,11 @@ fn build_equity_curve(snaps: &[PnLSnapshot]) -> String {
     if snaps.is_empty() {
         return String::new();
     }
-    let (min_eq, max_eq) = snaps.iter().fold(
-        (f64::INFINITY, f64::NEG_INFINITY),
-        |(lo, hi), s| (lo.min(s.equity), hi.max(s.equity)),
-    );
+    let (min_eq, max_eq) = snaps
+        .iter()
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), s| {
+            (lo.min(s.equity), hi.max(s.equity))
+        });
     let range = (max_eq - min_eq).max(1e-9);
     let w: f64 = 800.0;
     let h: f64 = 200.0;

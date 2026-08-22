@@ -12,19 +12,16 @@
 //! POST. Reference: https://bybit-exchange.github.io/docs/v5/
 
 use super::{
-    header_map, hmac_sha256, now_ms, symbols, Balance, Exchange, ExchangeError,
-    ExchangeKind, MarketBookTop, MarketEvent, MarketTrade, OrderRequest,
-    OrderResponse, OrderType, TradeSide,
+    Balance, Exchange, ExchangeError, ExchangeKind, MarketBookTop, MarketEvent, MarketTrade,
+    OrderRequest, OrderResponse, OrderType, TradeSide, header_map, hmac_sha256, now_ms, symbols,
 };
 use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
 use serde_json::json;
 use std::time::Duration;
 use tokio::net::TcpStream;
-use tokio::time::{interval, Interval};
-use tokio_tungstenite::{
-    connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream,
-};
+use tokio::time::{Interval, interval};
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async, tungstenite::Message};
 
 const PUBLIC_WS_URL: &str = "wss://ws.bybit.com/v5/public";
 const REST_URL: &str = "https://api.bybit.com/v5";
@@ -112,8 +109,7 @@ impl Exchange for BybitExchange {
             if let Message::Text(text) = &msg {
                 let v: serde_json::Value = serde_json::from_str(text)?;
                 let is_ack = v.get("success").and_then(|x| x.as_bool()).unwrap_or(false)
-                    && v
-                        .get("request")
+                    && v.get("request")
                         .and_then(|r| r.get("op"))
                         .and_then(|o| o.as_str())
                         == Some("subscribe");
@@ -316,11 +312,19 @@ impl Exchange for BybitExchange {
             .and_then(|c| c.as_array())
         {
             for c in coins {
-                let currency = c.get("coin").and_then(|x| x.as_str()).unwrap_or("").to_string();
+                let currency = c
+                    .get("coin")
+                    .and_then(|x| x.as_str())
+                    .unwrap_or("")
+                    .to_string();
                 let total = parse_f64(c.get("total"));
                 let available = parse_f64(c.get("walletBalance"));
                 if !currency.is_empty() {
-                    out.push(Balance { currency, total, available });
+                    out.push(Balance {
+                        currency,
+                        total,
+                        available,
+                    });
                 }
             }
         }
@@ -372,7 +376,7 @@ fn parse_frame(text: &str) -> Result<Option<Vec<MarketEvent>>, ExchangeError> {
             None => {}
         }
         Ok(if out.is_empty() { None } else { Some(out) })
-        } else if topic.starts_with("orderbook.1") {
+    } else if topic.starts_with("orderbook.1") {
         let ts = v.get("ts").and_then(|x| x.as_i64()).unwrap_or_else(now_ms);
         match parse_book_top(data, ts) {
             Ok(Some(b)) => Ok(Some(vec![MarketEvent::BookTop(b)])),
@@ -430,14 +434,20 @@ fn parse_book_top(
         Some(o) => o,
         None => return Ok(None),
     };
-    let bid = o.get("b").and_then(|a| a.get(0)).and_then(|x| x.as_object());
-    let ask = o.get("a").and_then(|a| a.get(0)).and_then(|x| x.as_object());
+    let bid = o
+        .get("b")
+        .and_then(|a| a.get(0))
+        .and_then(|x| x.as_object());
+    let ask = o
+        .get("a")
+        .and_then(|a| a.get(0))
+        .and_then(|x| x.as_object());
     if let (Some(b), Some(a)) = (bid, ask) {
         let bp = parse_f64(b.get("p")).max(0.0);
         let ap = parse_f64(a.get("p")).max(0.0);
         if bp > 0.0 && ap > 0.0 {
             return Ok(Some(MarketBookTop {
-                                timestamp: ts,
+                timestamp: ts,
                 bid_price: bp,
                 bid_amount: parse_f64(b.get("s")),
                 ask_price: ap,
@@ -478,7 +488,11 @@ mod tests {
     fn ignore_control_frames() {
         let ack = r#"{"success":true,"ret_msg":"","conn_id":"abc","request":{"op":"subscribe","args":["publicTrade.BTCUSDT"]}}"#;
         assert!(parse_frame(ack).unwrap().is_none());
-        assert!(parse_frame(r#"{"success":true,"ret_msg":"pong"}"#).unwrap().is_none());
+        assert!(
+            parse_frame(r#"{"success":true,"ret_msg":"pong"}"#)
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]

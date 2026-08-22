@@ -165,11 +165,10 @@ impl LightGbm {
         })
     }
 
-
     /// Load from a `.txt` model file on disk.
     pub fn from_path(path: impl AsRef<Path>) -> Result<Self, String> {
-        let text = std::fs::read_to_string(path)
-            .map_err(|e| format!("failed to read model: {e}"))?;
+        let text =
+            std::fs::read_to_string(path).map_err(|e| format!("failed to read model: {e}"))?;
         Self::from_str(&text)
     }
 
@@ -214,7 +213,6 @@ impl LightGbm {
         1.0 / (1.0 + (-raw).exp())
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -261,7 +259,6 @@ shrinkage=1
         assert!((m.predict_raw(&[0.0]) - 0.1).abs() < 1e-12);
     }
 
-
     /// Resolve a file by walking up from CWD (tests inherit the package dir).
     fn find_upwards(paths: &[&str]) -> Option<std::path::PathBuf> {
         let cwd = std::env::current_dir().ok()?;
@@ -298,10 +295,9 @@ shrinkage=1
             }
         };
         let model = LightGbm::from_path(&model_path).expect("load real model");
-        let cases: serde_json::Value = serde_json::from_str(
-            &std::fs::read_to_string(&cases_path).expect("read cases"),
-        )
-        .expect("parse cases");
+        let cases: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&cases_path).expect("read cases"))
+                .expect("parse cases");
         let feats = cases["features"].as_array().expect("features");
         let raw_expected = cases["raw_score"].as_array().expect("raw_score");
         let prob_expected = cases["prob"].as_array().expect("prob");
@@ -361,7 +357,9 @@ shrinkage=1
                 leaf_mismatches += 1;
             }
         }
-        assert_eq!(leaf_mismatches, 0, "leaf path mismatches: {leaf_mismatches}");
+        assert_eq!(
+            leaf_mismatches, 0,
+            "leaf path mismatches: {leaf_mismatches}"
+        );
     }
 }
-

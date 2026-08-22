@@ -1,4 +1,4 @@
-﻿//! Venue-agnostic strategy execution loop.
+//! Venue-agnostic strategy execution loop.
 //!
 //! Connects an [`Exchange`] implementation, feeds normalized market events into
 //! the `engine` strategy, persists state to RocksDB and -- in `Live` mode --
@@ -12,13 +12,13 @@
 
 use crate::db::{ClosedTrade, DbWriter, PnLSnapshot};
 use crate::exchange::{
-    symbols, Exchange, ExchangeKind, MarketEvent, OrderRequest, OrderType, TradeSide,
+    Exchange, ExchangeKind, MarketEvent, OrderRequest, OrderType, TradeSide, symbols,
 };
 use crate::model;
 use engine::{EngineEvent, MomentumStrategy, StrategyConfig};
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::collections::VecDeque;
 
 /// Rolling minimum of `raw_skew` over a trailing window. Since `raw_skew =
 /// now - exchange_ts` mixes clock offset and network/exchange transit delay
@@ -138,7 +138,7 @@ pub struct RunStats {
     pub loop_cadence_ms: f64,
     /// Pure processing time of the last event batch (ms).
     pub batch_process_ms: f64,
-        /// Wall-clock delta (local - exchange) on the newest event; the raw NTP
+    /// Wall-clock delta (local - exchange) on the newest event; the raw NTP
     /// skew, unchanged — mixes clock offset and transit delay, kept for
     /// backward compatibility and as the input to skew_floor_ms.
     /// Rolling minimum of clock_skew_ms over the trailing window (see
@@ -159,7 +159,8 @@ pub struct LoopContext {
     pub stop: Arc<AtomicBool>,
     /// Allocated capital in USD cents (read for position sizing).
     pub capital_usd_cents: Arc<AtomicU64>,
-}/// Run the strategy loop for one ticker until `ctx.stop` is set.
+}
+/// Run the strategy loop for one ticker until `ctx.stop` is set.
 ///
 /// Reconnects with backoff on stream errors, warms feature rings from
 /// historical closes, loads the research model if present, and emits a final
@@ -169,6 +170,7 @@ pub async fn run_execution_loop(cfg: ExecutionConfig, mut ctx: LoopContext) {
     let native_symbol = match cfg.exchange {
         ExchangeKind::Bybit => symbols::bybit(&ticker),
         ExchangeKind::Bitfinex => symbols::bitfinex(&ticker),
+        ExchangeKind::Parquet => ticker.to_ascii_uppercase(),
     };
 
     // -- shared-state housekeeping -----------------------------------------
@@ -200,7 +202,10 @@ pub async fn run_execution_loop(cfg: ExecutionConfig, mut ctx: LoopContext) {
         match DbWriter::connect(&cfg.db_path).await {
             Ok(db) => Some(Arc::new(db)),
             Err(e) => {
-                eprintln!("[db] failed to open {}: {e} ??? running without persistence", cfg.db_path);
+                eprintln!(
+                    "[db] failed to open {}: {e} ??? running without persistence",
+                    cfg.db_path
+                );
                 None
             }
         }
@@ -219,21 +224,28 @@ pub async fn run_execution_loop(cfg: ExecutionConfig, mut ctx: LoopContext) {
     match ctx.exchange.historical_closes(&ticker, cfg.seed_bars).await {
         Ok(closes) if !closes.is_empty() => {
             strategy.seed_macro_closes(&closes);
-            println!("[seed] warmed {} macro closes from {}", closes.len(), cfg.exchange);
+            println!(
+                "[seed] warmed {} macro closes from {}",
+                closes.len(),
+                cfg.exchange
+            );
         }
         Ok(_) => eprintln!("[seed] no historical closes available ??? features will warm live"),
         Err(e) => eprintln!("[seed] historical fetch failed ({e}) ??? features will warm live"),
     }
 
     // -- restore equity from the last persisted snapshot ---------------------
-        let last_exit_ms = AtomicI64::new(i64::MIN);
+    let last_exit_ms = AtomicI64::new(i64::MIN);
     let mut skew_floor = SkewFloor::new(120); // 2-minute trailing window
     if let Some(db) = &db {
         if let Ok(snaps) = db.iter_pnl_snapshots(&ticker) {
             if let Some(last) = snaps.last() {
                 strategy.restore(last.equity, last.last_exit_ms);
                 last_exit_ms.store(last.last_exit_ms, Ordering::SeqCst);
-                println!("[restore] equity={:.2} USD n_trades={}", last.equity, last.n_trades);
+                println!(
+                    "[restore] equity={:.2} USD n_trades={}",
+                    last.equity, last.n_trades
+                );
             }
         }
     }
@@ -282,14 +294,15 @@ pub async fn run_execution_loop(cfg: ExecutionConfig, mut ctx: LoopContext) {
         // Per-batch diagnostics. No per-event lock: tally locally and publish
         // once on the stats refresh below.
         let mut batch_events: u64 = 0;
-        let mut batch_last_ts: Option<i64> = None;      // any event — drives stal
+        let mut batch_last_ts: Option<i64> = None; // any event — drives stal
         let mut batch_last_trade_ts: Option<i64> = None; // trades only — drives sk
         let batch_started = feed_recv;
 
         for event in events {
-            if ctx.stop.load(Ordering::SeqCst) {
-                break;
-            }
+            // A stop may be raised by the exchange while it returns its final
+            // batch (EOF/limit), or by Ctrl-C while a batch is in flight. The
+            // batch has already been delivered, so drain every event before
+            // the outer loop observes stop and finishes.
             if ctx.paused.load(Ordering::SeqCst) {
                 // Paused: keep persisting raw market data but stop feeding the
                 // strategy so no new entries/exits are generated.
@@ -307,24 +320,37 @@ pub async fn run_execution_loop(cfg: ExecutionConfig, mut ctx: LoopContext) {
                     let is_buy = t.side == TradeSide::Buy;
                     let engine_events = strategy.on_trade(t.timestamp, t.price, t.amount, is_buy);
                     handle_engine_events(
-                        &cfg, &ctx, &mut strategy, &db, &last_exit_ms, &native_symbol,
+                        &cfg,
+                        &ctx,
+                        &mut strategy,
+                        &db,
+                        &last_exit_ms,
+                        &native_symbol,
                         engine_events,
                     )
                     .await;
                     batch_events += 1;
                     batch_last_ts = Some(t.timestamp);
-                    batch_last_trade_ts = Some(t.timestamp);   // new
-
+                    batch_last_trade_ts = Some(t.timestamp); // new
                 }
                 MarketEvent::BookTop(b) => {
                     if let Some(db) = &db {
                         db.record_orderbook_top(&ticker, b.clone());
                     }
                     let engine_events = strategy.on_orderbook(
-                        b.timestamp, b.bid_price, b.bid_amount, b.ask_price, b.ask_amount,
+                        b.timestamp,
+                        b.bid_price,
+                        b.bid_amount,
+                        b.ask_price,
+                        b.ask_amount,
                     );
                     handle_engine_events(
-                        &cfg, &ctx, &mut strategy, &db, &last_exit_ms, &native_symbol,
+                        &cfg,
+                        &ctx,
+                        &mut strategy,
+                        &db,
+                        &last_exit_ms,
+                        &native_symbol,
                         engine_events,
                     )
                     .await;
@@ -365,7 +391,8 @@ pub async fn run_execution_loop(cfg: ExecutionConfig, mut ctx: LoopContext) {
     }
 
     finish(&cfg, ctx, &db).await;
-}/// Persist a market event (used while paused so the raw feed is never lost).
+}
+/// Persist a market event (used while paused so the raw feed is never lost).
 fn persist_event(db: &DbWriter, ticker: &str, event: &MarketEvent) {
     match event {
         MarketEvent::Trade(t) => db.record_trade(ticker, t.clone()),
@@ -438,7 +465,13 @@ async fn handle_engine_events(
             EngineEvent::Entered(r) => {
                 println!(
                     "[entry] {} {} qty={:.4} @ {:.2} stop={:.2} target={:.2} (rsi2={:.1}, win={:.2})",
-                    cfg.ticker, r.side.as_str(), r.qty, r.entry_price, r.stop, r.target, r.rsi_2,
+                    cfg.ticker,
+                    r.side.as_str(),
+                    r.qty,
+                    r.entry_price,
+                    r.stop,
+                    r.target,
+                    r.rsi_2,
                     r.win_prob
                 );
                 if cfg.mode == ExecutionMode::Live {
@@ -466,8 +499,13 @@ async fn handle_engine_events(
                 last_exit_ms.store(rec.exit_ms, Ordering::SeqCst);
                 println!(
                     "[exit] {} reason={} @ {:.2} r={:+.2} net={:+.2} equity={:.2} ({:.0}s)",
-                    cfg.ticker, rec.reason, rec.exit_price, rec.r_multiple, rec.net_usd,
-                    rec.equity_after, rec.duration_s
+                    cfg.ticker,
+                    rec.reason,
+                    rec.exit_price,
+                    rec.r_multiple,
+                    rec.net_usd,
+                    rec.equity_after,
+                    rec.duration_s
                 );
                 if cfg.mode == ExecutionMode::Live {
                     route_exit(ctx.exchange.as_ref(), native_symbol, &rec).await;
@@ -545,7 +583,11 @@ async fn route_entry(exchange: &dyn Exchange, symbol: &str, r: &engine::EntryRec
         Ok(resp) => println!(
             "[order] submitted {} side={} status={}",
             resp.exchange_order_id,
-            if side == TradeSide::Buy { "buy" } else { "sell" },
+            if side == TradeSide::Buy {
+                "buy"
+            } else {
+                "sell"
+            },
             resp.status
         ),
         Err(e) => eprintln!("[order] FAILED to place entry order: {e}"),

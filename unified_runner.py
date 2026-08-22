@@ -41,6 +41,9 @@ CLI
     python unified_runner.py live-trade --tickers btcusdt ethusdt solusdt \
         --exchange bitfinex --mode paper --capital 5000
     python unified_runner.py live-test --ticker btcusdt --release
+    python unified_runner.py live-test --ticker btcusdt --limit 200000 --no-db
+    python unified_runner.py live-test --ticker btcusdt --start-ms 1709344800000 \
+        --end-ms 1709431200000 --release
     python unified_runner.py doctor [--require-native]
 """
 
@@ -371,15 +374,242 @@ def cmd_live_trade(args: argparse.Namespace) -> int:
     logger.info("done — database flushed and closed cleanly")
     return 0
 
+def _build_live_test_feed(
+    ticker: str,
+    *,
+    feed_dir: Path,
+    out_path: Path,
+    start_ms: Optional[int] = None,
+    end_ms: Optional[int] = None,
+    limit: Optional[int] = None,
+) -> Optional[str]:
+    """Convert the research parquet/csv trades + orderbook into the
+    timestamp-ordered replay stream consumed by the Rust `live-test` binary.
+
+    The trades and orderbook are loaded (parquet preferred, csv fallback),
+    merged into one event table, sorted by (timestamp, ordinal) — so at equal
+    milliseconds trades come before book tops, deterministically — and written
+    one event per line::
+
+        #TICKER btcusdt
+        T <ts_ms> <price> <amount> <buy|sell> <id>
+        B <ts_ms> <bid_px> <bid_amt> <ask_px> <ask_amt>
+
+    Returns ``None`` on success, otherwise an error message string.
+    """
+        # This builder MUST stay memory-bounded: BTCUSDT's research parquet is 223M
+    # trades, and `pl.read_parquet` on the whole frame is exactly what OOM-crashed
+    # at ~3.5 GB. Instead each source is streamed in column-projected chunks
+    # (parquet via pyarrow `iter_batches`, CSV via pandas `chunksize`) and the two
+    # timestamp-ordered streams are merged on the fly — the same chunked-feed idea
+    # `ml_state_optimized` uses, but the merge is into ONE continuous stream with
+    # no per-chunk re-initialisation. That means the live engine's indicators stay
+    # warm across every chunk boundary: nothing is duplicated, ordering is global,
+    # and unlike research's per-chunk *feature recompute* no warm-up buffer (or
+    # recursive-feature drift such as VPIN) is introduced.
+    try:
+        import pyarrow.parquet as pq  # streaming, column-projected parquet read
+        import pandas as pd
+    except ImportError as exc:  # pragma: no cover
+        return f"pyarrow + pandas are required to build the replay feed: {exc}"
+
+    sym = ticker.strip().upper()
+    tq, tc = feed_dir / f"{sym}_trades.parquet", feed_dir / f"{sym}_trades.csv"
+    bq, bc = feed_dir / f"{sym}_orderbook.parquet", feed_dir / f"{sym}_orderbook.csv"
+    trades_src = tq if tq.exists() else (tc if tc.exists() else None)
+    book_src = bq if bq.exists() else (bc if bc.exists() else None)
+    if trades_src is None:
+        return f"trades feed not found for {sym} (tried {tq} and {tc})"
+    if book_src is None:
+        logger.warning("orderbook feed missing for %s — replaying trades only", sym)
+
+    CHUNK_ROWS = 500_000
+    FLUSH_EVERY = 100_000
+    BOOK_IN_MEM_LIMIT = 5_000_000
+    TRADE_COLS = ["timestamp", "price", "amount", "side", "id"]
+    BOOK_COLS = ["timestamp", "bid_price", "bid_amount", "ask_price", "ask_amount"]
+
+    def _is_parquet(src):
+        return src.suffix == ".parquet"
+
+    def _iter_chunks(src, cols):
+        """Yield `cols` (projected) as timestamp-ordered pandas chunks, windowed
+        to [start_ms, end_ms]. Each chunk holds ~CHUNK_ROWS rows, so peak memory
+        is a single row group / CSV chunk -- never the whole file."""
+        if _is_parquet(src):
+            for batch in pq.ParquetFile(src).iter_batches(
+                batch_size=CHUNK_ROWS, columns=cols
+            ):
+                df = batch.to_pandas()
+                if start_ms is not None:
+                    df = df[df["timestamp"] >= start_ms]
+                if end_ms is not None:
+                    df = df[df["timestamp"] <= end_ms]
+                if not df.empty:
+                    yield df
+        else:
+            for chunk in pd.read_csv(src, chunksize=CHUNK_ROWS):
+                if any(c not in chunk.columns for c in cols):
+                    return
+                chunk = chunk[cols].copy()
+                chunk["timestamp"] = chunk["timestamp"].astype("int64")
+                if start_ms is not None:
+                    chunk = chunk[chunk["timestamp"] >= start_ms]
+                if end_ms is not None:
+                    chunk = chunk[chunk["timestamp"] <= end_ms]
+                if not chunk.empty:
+                    yield chunk
+
+    def _format_lines(df, kind):
+        """Vectorized one-event-per-line strings (each with trailing "\n"), so
+        the merge writes straight through with `"".join` -- no per-row Python."""
+        ts = df["timestamp"].astype("int64").astype(str)
+        if kind == "T":
+            s = ("T " + ts + " " + df["price"].astype(str) + " "
+                 + df["amount"].astype(str) + " " + df["side"].astype(str) + " "
+                 + df["id"].astype(str) + "\n")
+        else:
+            s = ("B " + ts + " " + df["bid_price"].astype(str) + " "
+                 + df["bid_amount"].astype(str) + " " + df["ask_price"].astype(str) + " "
+                 + df["ask_amount"].astype(str) + "\n")
+        return s.tolist()
+        # The orderbook is sparse (~1/s) vs trades (thousands/s), so buffer the
+    # orderbook once and stream trades -- bounding RAM to the orderbook side
+    # plus one trades chunk. Same chunked-feed idea as `ml_state_optimized`,
+    # but a single continuous merge means the engine's indicators never reset
+    # (no warm-up buffer, no recursive-feature drift like VPIN).
+    book = []  # (ts_ms, line), ascending
+    n_ob = 0
+    if book_src is not None:
+        if _is_parquet(book_src):
+            try:
+                meta = pq.ParquetFile(book_src).metadata
+                n_bk = getattr(meta, "num_rows", None)
+                if n_bk is None:  # older pyarrow exposes row_groups only
+                    n_bk = sum(rg.num_rows for rg in meta.row_groups)
+            except Exception:
+                n_bk = None
+            if n_bk is not None and n_bk > BOOK_IN_MEM_LIMIT:
+                return (
+                    f"orderbook feed for {sym} ({n_bk} rows) is too large to hold "
+                    "in memory for the merge; pass --start-ms/--end-ms/--limit to bound it"
+                )
+        for df in _iter_chunks(book_src, BOOK_COLS):
+            ts_list = df["timestamp"].astype("int64").tolist()
+            for t, ln in zip(ts_list, _format_lines(df, "B")):
+                book.append((t, ln))
+        book.sort(key=lambda x: x[0])  # cheap defensive sort (book is sparse)
+        n_ob = len(book)
+        # book_src == None is already warned about in the detection block above
+
+    # --- streaming two-pointer merge (trades win ties at equal ms) ----------
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    written = 0
+    n_tr = 0
+    bi = 0
+    buf = []
+    last_tr_ts = None  # monotonicity guard for the streamed trades feed
+
+    def _drain():
+        if len(buf) >= FLUSH_EVERY:
+            out.write("".join(buf))
+            buf.clear()
+
+    with open(out_path, "w", encoding="utf-8") as out:
+        out.write(f"#TICKER {ticker.strip().lower()}\n")
+        stop = False
+        for df in _iter_chunks(trades_src, TRADE_COLS):
+            ts_list = df["timestamp"].astype("int64").tolist()
+            t_lines = _format_lines(df, "T")
+            for t, ln in zip(ts_list, t_lines):
+                if last_tr_ts is not None and t < last_tr_ts:
+                    return (
+                        f"trades feed for {sym} is not sorted by timestamp "
+                        f"(saw ts={t} after ts={last_tr_ts}); sort the feed or "
+                        "restrict with --start-ms/--end-ms"
+                    )
+                last_tr_ts = t
+                # Strict `<` => trades win ties at equal ms (matches _ord order).
+                while bi < len(book) and book[bi][0] < t:
+                    buf.append(book[bi][1]); written += 1; bi += 1
+                    _drain()
+                    if limit is not None and written >= limit:
+                        stop = True; break
+                if stop:
+                    break
+                buf.append(ln); written += 1; n_tr += 1
+                _drain()
+                if limit is not None and written >= limit:
+                    stop = True; break
+            _drain()
+            if stop:
+                break
+        # Remaining book tops (all >= the last trade's timestamp).
+        if not stop:
+            while bi < len(book):
+                buf.append(book[bi][1]); written += 1; bi += 1
+                _drain()
+                if limit is not None and written >= limit:
+                    break
+        if buf:
+            out.write("".join(buf))
+            buf.clear()
+
+    logger.info("replay feed written: %s (%d events, %d trades, %d book tops)",
+                out_path, written, n_tr, n_ob)
+    return None
+
+
 def cmd_live_test(args: argparse.Namespace) -> int:
-    """Replay historical data through the Rust `live-test` binary (paper trading)."""
+    """Build the parquet replay feed (unless --feed is given) and replay it
+    through the Rust `live-test` binary — the same execution loop as live
+    trading, fed from historical data instead of a live WebSocket."""
     if shutil.which("cargo") is None:
         print("cargo not found on PATH", file=sys.stderr)
         return 1
+
+    # 1. Produce (or reuse) the replay stream from the research parquet files.
+    if args.feed:
+        feed_path = Path(args.feed)
+        if not feed_path.exists():
+            print(f"live-test feed not found: {feed_path}", file=sys.stderr)
+            return 1
+    else:
+        feed_dir = REPO_ROOT / args.feed_dir
+        feed_path = REPO_ROOT / "build" / f"live_test_feed_{args.ticker.lower()}.replay"
+        err = _build_live_test_feed(
+            args.ticker,
+            feed_dir=feed_dir,
+            out_path=feed_path,
+            start_ms=args.start_ms,
+            end_ms=args.end_ms,
+            limit=args.limit,
+        )
+        if err is not None:
+            print(f"ERROR: {err}", file=sys.stderr)
+            return 1
+
+    # 2. Kick off the replay through the identical live-trade execution loop.
     cmd = ["cargo", "run", "-p", LIVE_TEST_BIN]
     if args.release:
         cmd.append("--release")
-    cmd += ["--", args.ticker]
+    cmd += ["--", args.ticker.lower(), "--feed", str(feed_path)]
+    if args.capital is not None:
+        cmd += ["--capital", str(args.capital)]
+    if args.no_db:
+        cmd += ["--no-db"]
+    if args.db:
+        cmd += ["--db", args.db]
+    if args.seed:
+        cmd += ["--seed", str(args.seed)]
+    if args.loop:
+        cmd += ["--loop"]
+    if args.start_ms is not None:
+        cmd += ["--start-ms", str(args.start_ms)]
+    if args.end_ms is not None:
+        cmd += ["--end-ms", str(args.end_ms)]
+    if args.limit is not None:
+        cmd += ["--limit", str(args.limit)]
     logger.info("running historical replay: %s", " ".join(cmd))
     return subprocess.call(cmd)
 
@@ -460,10 +690,51 @@ def build_parser() -> argparse.ArgumentParser:
     p_trade.set_defaults(func=cmd_live_trade)
 
     p_test = sub.add_parser(
-        "live-test", help="replay historical data through the Rust engine (paper trading)"
+        "live-test",
+        help="replay historical parquet data through the Rust engine (paper trading)",
     )
     p_test.add_argument(
         "--ticker", default=DEFAULT_TICKERS[0], help="symbol to replay, e.g. btcusdt"
+    )
+    p_test.add_argument(
+        "--feed-dir", default="research/csv",
+        help="directory with {TICKER}_trades / _{TICKER}_orderbook parquet (or csv) feeds",
+    )
+    p_test.add_argument(
+        "--feed", default=None,
+        help="use an existing replay stream file instead of building one from parquet",
+    )
+    p_test.add_argument(
+        "--capital", type=float, default=None,
+        help="capital (USD) for position sizing (default: 10000)",
+    )
+    p_test.add_argument(
+        "--no-db", action="store_true",
+        help="do not persist to RocksDB (skips the HTML report; default DB wiped per run)",
+    )
+    p_test.add_argument(
+        "--db", default=None,
+        help="explicit RocksDB path (default: build/live_test_{ticker}.rocksdb, wiped per run)",
+    )
+    p_test.add_argument(
+        "--seed", type=int, default=0,
+        help="composite closes used to warm feature rings (0 = warm live from the feed)",
+    )
+    p_test.add_argument(
+        "--start-ms", type=int, default=None,
+        help="only replay events with timestamp >= MS (uses for huge multi-day feeds)",
+    )
+    p_test.add_argument(
+        "--end-ms", type=int, default=None,
+        help="only replay events with timestamp <= MS",
+    )
+    p_test.add_argument(
+        "--limit", type=int, default=None,
+        help="cap the replay to the first N events (in timestamp order)",
+    )
+    p_test.add_argument(
+        "--loop", action="store_true",
+        help="loop the feed forever (continuous sim) instead of stopping at end-of-data",
     )
     p_test.add_argument(
         "--release", action="store_true", help="build the replay binary in release mode"
