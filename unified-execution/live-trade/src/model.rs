@@ -6,6 +6,7 @@ use engine::lgbm::LightGbm;
 
 /// Candidate model paths, checked from the working directory upward.
 const MODEL_PATH_CANDIDATES: &[&str] = &["main/models/lgb_model.txt", "models/lgb_model.txt"];
+const EXPECTED_FEATURE_COUNT: usize = 15;
 
 /// Walk up from the current directory looking for any of `paths`.
 pub fn find_model_path(paths: &[&str]) -> Option<std::path::PathBuf> {
@@ -37,6 +38,15 @@ pub fn load_model() -> Option<LightGbm> {
     };
     match LightGbm::from_str(&text) {
         Ok(mdl) => {
+            if mdl.num_features() != EXPECTED_FEATURE_COUNT {
+                eprintln!(
+                    "[model] rejected {}: expected {} features, found {} — running with proxy logit only",
+                    path.display(),
+                    EXPECTED_FEATURE_COUNT,
+                    mdl.num_features()
+                );
+                return None;
+            }
             println!(
                 "[model] loaded {} ({} trees, {} features)",
                 path.display(),
@@ -46,7 +56,10 @@ pub fn load_model() -> Option<LightGbm> {
             Some(mdl)
         }
         Err(e) => {
-            eprintln!("[model] failed to parse {}: {e} — running with proxy logit only", path.display());
+            eprintln!(
+                "[model] failed to parse {}: {e} — running with proxy logit only",
+                path.display()
+            );
             None
         }
     }

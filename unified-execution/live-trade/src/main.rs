@@ -1,4 +1,4 @@
-﻿//! live-trade CLI binary.
+//! live-trade CLI binary.
 //!
 //! Thin wrapper over [`live_trade::execution`]: parses ticker / exchange /
 //! mode / capital and runs the strategy loop until Ctrl+C.
@@ -6,9 +6,9 @@
 //!     cargo run -p live-trade -- btcusdt --exchange bitfinex --mode paper
 //!     cargo run -p live-trade -- ethusdt --exchange bybit --mode paper --capital 2000
 
-use live_trade::exchange::{create_exchange, ExchangeKind};
+use live_trade::exchange::{ExchangeKind, create_exchange};
 use live_trade::execution::{
-    run_execution_loop, ExecutionConfig, ExecutionMode, LoopContext, RunStats,
+    ExecutionConfig, ExecutionMode, LoopContext, RunStats, run_execution_loop,
 };
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};

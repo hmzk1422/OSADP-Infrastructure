@@ -88,3 +88,44 @@ These 3 variables are used to determined the viability of our strategy in live e
 - Staleness (stal): Trades received from the market. If the market receives trades >1000ms it signifies this market isn't a viable option as data source as it might be an illiquid market with very few participants.
 - Latency (lat): How fast our executor process information accepted.
 - Skew (SK): Time it takes for algorithm to receive transmission from exchange
+
+# live-test — Historical Parquet Replay Through the Live-Trade Loop
+Reference: live-test replay runner
+
+The goal: run the **exact** live-trading code path (same `run_execution_loop`,
+same micro/macro bar aggregation, same entry/exit gates, same RocksDB + HTML
+report) against historical data — so a replay of the same parquet that fed the
+research backtest should reproduce the same trades. If the outputs diverge, the
+strategy/engine implementation is the suspect.
+
+- **Why not read parquet in Rust?** `Cargo.lock` ships no parquet/arrow crate and
+  Rust only reads plain text today. Parquet is read in Python (pyarrow/polars,
+  already the research stack), so the design is a hybrid:
+  - `unified_runner.py live-test` reads `research/csv/{TICKER}_trades.parquet` +
+    `{TICKER}_orderbook.parquet`, merges both streams, sorts by
+    `(timestamp, ordinal)` (trades before book tops at equal ms — deterministic)
+    and writes one event-per-line replay stream to
+    `build/live_test_feed_{ticker}.replay`.
+  - `unified-execution/live-trade/src/exchange/parquet.rs` (`ReplayExchange`)
+    parses that stream into `MarketEvent`s and serves them back in
+    `REPLAY_BATCH`-sized batches — the replay equivalent of a WebSocket frame.
+  - `unified-execution/live-test/src/main.rs` builds a `LoopContext` with the
+    replay exchange and calls the identical `live_trade::execution::run_execution_loop`.
+- **Stream format**: `#TICKER btcusdt`, optional `#CLOSES a,b,c` (feature warmup),
+  `T <ts> <price> <amount> <buy|sell> <id>`, `B <ts> <bid_px> <bid_amt> <ask_px> <ask_amt>`.
+- **End-of-data**: when the feed is exhausted the exchange flips the shared `stop`
+  AtomicBool, the loop drains, `finish()` writes `build/pnl_report_{ticker}.html`,
+  then the process exits cleanly. `--loop` rewinds instead (continuous sim).
+- **Window / scale**: BTCUSDT alone is 223M trades / ~155 days (~multi-GB), so
+  `--start-ms / --end-ms / --limit` bound the replay. The default RocksDB store
+  (`build/live_test_{ticker}.rocksdb`) is wiped per run so re-runs can't restore
+  stale equity or duplicate trades (explicit `--db` is kept, live-trade semantics).
+- Model parity: the loop loads `main/models/lgb_model.txt` exactly like
+  live-trade, so `P(WIN)` comes from the real LightGBM when the research export
+  is present (proxy logit otherwise).
+
+Run it:
+```
+python unified_runner.py live-test --ticker btcusdt --limit 500000 --release
+python unified_runner.py live-test --ticker btcusdt --start-ms 1709344800000 --end-ms 1709431200000
+```

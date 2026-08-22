@@ -17,17 +17,15 @@
 //! buy and a negative AMOUNT is a sell.
 
 use super::{
-    header_map, hmac_sha384, now_ms, symbols, Balance, Exchange, ExchangeError, ExchangeKind,
-    MarketBookTop, MarketEvent, MarketTrade, OrderRequest, OrderResponse, OrderType, TradeSide,
+    Balance, Exchange, ExchangeError, ExchangeKind, MarketBookTop, MarketEvent, MarketTrade,
+    OrderRequest, OrderResponse, OrderType, TradeSide, header_map, hmac_sha384, now_ms, symbols,
 };
 use futures_util::{SinkExt, StreamExt};
 use serde_json::json;
 use std::time::Duration;
 use tokio::net::TcpStream;
-use tokio::time::{interval, Interval};
-use tokio_tungstenite::{
-    connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream,
-};
+use tokio::time::{Interval, interval};
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async, tungstenite::Message};
 
 const PUBLIC_WS_URL: &str = "wss://api-pub.bitfinex.com/ws/2";
 const PUBLIC_REST_URL: &str = "https://api-pub.bitfinex.com/v2";
@@ -83,7 +81,7 @@ impl Exchange for BitfinexExchange {
         ExchangeKind::Bitfinex
     }
 
-        async fn connect(&mut self, ticker: &str) -> Result<(), ExchangeError> {
+    async fn connect(&mut self, ticker: &str) -> Result<(), ExchangeError> {
         self.symbol = symbols::bitfinex(ticker);
 
         let (mut ws, _resp) = connect_async(PUBLIC_WS_URL).await?;
@@ -175,9 +173,7 @@ impl Exchange for BitfinexExchange {
     async fn historical_closes(&self, ticker: &str, bars: u32) -> Result<Vec<f64>, ExchangeError> {
         let symbol = symbols::bitfinex(ticker);
         // Candle rows are [MTS, OPEN, CLOSE, HIGH, LOW, VOLUME]; sort=1 = oldest first.
-        let url = format!(
-            "{PUBLIC_REST_URL}/candles/trade:5m:{symbol}/hist?limit={bars}&sort=1"
-        );
+        let url = format!("{PUBLIC_REST_URL}/candles/trade:5m:{symbol}/hist?limit={bars}&sort=1");
         let rows: Vec<Vec<serde_json::Value>> = reqwest::get(&url).await?.json().await?;
         Ok(rows
             .iter()
@@ -254,9 +250,9 @@ impl Exchange for BitfinexExchange {
     async fn cancel_order(&self, order_id: &str) -> Result<(), ExchangeError> {
         let (key, secret) = self.credentials()?;
         let endpoint = "auth/w/order/cancel";
-        let order_id_int: i64 = order_id.parse().map_err(|_| {
-            ExchangeError::OrderRejected(format!("invalid order id {order_id:?}"))
-        })?;
+        let order_id_int: i64 = order_id
+            .parse()
+            .map_err(|_| ExchangeError::OrderRejected(format!("invalid order id {order_id:?}")))?;
         let body = json!({ "id": order_id_int });
         let body_str = serde_json::to_string(&body)?;
         let headers = self.signed_headers(endpoint, key, secret, &body_str);
@@ -423,7 +419,11 @@ fn parse_trade(row: &serde_json::Value) -> Result<MarketTrade, ExchangeError> {
         timestamp,
         price,
         amount: signed_amount.abs(),
-        side: if signed_amount > 0.0 { TradeSide::Buy } else { TradeSide::Sell },
+        side: if signed_amount > 0.0 {
+            TradeSide::Buy
+        } else {
+            TradeSide::Sell
+        },
         id,
     })
 }
@@ -460,7 +460,9 @@ fn parse_book_msg(
         return Ok(None);
     }
     let chan = arr[0].as_i64().unwrap_or(-1);
-    let Some(expected) = expected_chan else { return Ok(None) };
+    let Some(expected) = expected_chan else {
+        return Ok(None);
+    };
     if chan != expected {
         return Ok(None); // trades channel frame, or not yet subscribed
     }
@@ -499,9 +501,17 @@ fn apply_book_row(
     let amount = a[2].as_f64().unwrap_or(0.0);
 
     if amount > 0.0 {
-        *last_bid = if count == 0 { None } else { Some((price, amount)) };
+        *last_bid = if count == 0 {
+            None
+        } else {
+            Some((price, amount))
+        };
     } else if amount < 0.0 {
-        *last_ask = if count == 0 { None } else { Some((price, amount.abs())) };
+        *last_ask = if count == 0 {
+            None
+        } else {
+            Some((price, amount.abs()))
+        };
     }
 }
 
@@ -572,19 +582,23 @@ mod tests {
     #[test]
     fn ignores_heartbeats_and_foreign_channels() {
         assert!(parse_trade_msg(r#"[7,"hb"]"#, Some(7)).unwrap().is_none());
-        assert!(parse_trade_msg(r#"[8,"te",[1,1000,0.1,100.0]]"#, Some(7))
-            .unwrap()
-            .is_none());
+        assert!(
+            parse_trade_msg(r#"[8,"te",[1,1000,0.1,100.0]]"#, Some(7))
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
     fn control_frames_are_ignored_or_raise() {
-        assert!(parse_trade_msg(
-            r#"{"event":"subscribed","channel":"trades","chanId":7}"#,
-            Some(7)
-        )
-        .unwrap()
-        .is_none());
+        assert!(
+            parse_trade_msg(
+                r#"{"event":"subscribed","channel":"trades","chanId":7}"#,
+                Some(7)
+            )
+            .unwrap()
+            .is_none()
+        );
         assert!(parse_trade_msg(r#"{"event":"error","msg":"bad"}"#, Some(7)).is_err());
     }
 
@@ -596,4 +610,3 @@ mod tests {
         assert_eq!(sig.len(), 96);
     }
 }
-

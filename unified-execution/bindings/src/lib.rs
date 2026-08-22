@@ -14,9 +14,9 @@
 
 #![cfg(feature = "python")]
 
-use live_trade::exchange::{create_exchange, ExchangeKind};
+use live_trade::exchange::{ExchangeKind, create_exchange};
 use live_trade::execution::{
-    run_execution_loop, ExecutionConfig, ExecutionMode, LoopContext, RunStats,
+    ExecutionConfig, ExecutionMode, LoopContext, RunStats, run_execution_loop,
 };
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
@@ -81,7 +81,7 @@ impl Strategy {
         let ticker = ticker.to_ascii_lowercase();
         let db_path = db_path.unwrap_or_else(|| "./data/marketdata.rocksdb".to_string());
         Ok(Self {
-                        stats: Arc::new(Mutex::new(RunStats {
+            stats: Arc::new(Mutex::new(RunStats {
                 capital_usd: capital,
                 symbol: ticker.clone(),
                 equity: capital,
@@ -175,9 +175,7 @@ impl Strategy {
                     .await
                 });
             })
-            .map_err(|e| {
-                PyRuntimeError::new_err(format!("failed to spawn runner thread: {e}"))
-            })?;
+            .map_err(|e| PyRuntimeError::new_err(format!("failed to spawn runner thread: {e}")))?;
 
         *self.handle.lock().unwrap() = Some(handle);
         Ok(())
@@ -235,37 +233,37 @@ impl Strategy {
             .lock()
             .map_err(|_| PyRuntimeError::new_err("stats lock poisoned"))?;
         let json = serde_json::json!({
-            "symbol": s.symbol,
-            "exchange": self.exchange.as_str(),
-            "mode": match self.mode {
-                ExecutionMode::Paper => "paper",
-                ExecutionMode::Live => "live",
-            },
-            "running": s.running,
-            "paused": s.paused,
-            "stop_requested": s.stop_requested,
-            "capital_usd": s.capital_usd,
-            "equity": s.equity,
-            "n_trades": s.n_trades,
-            "n_wins": s.n_wins,
-            "n_losses": s.n_losses,
-            "total_r": s.total_r,
-            "mid": s.mid,
-            "last_event": s.last_event,
-            "last_error": s.last_error,
-            "events_seen": s.events_seen,
-            "last_event_ts_ms": s.last_event_ts_ms,
-            "last_event_latency_ms": s.last_event_latency_ms,
-            "clock_skew_ms": s.clock_skew_ms,
-            "feed_staleness_ms": s.last_event_instant
-                .map(|t| t.elapsed().as_secs_f64() * 1000.0)
-                .unwrap_or(0.0),
-            "loop_liveness_ms": s.last_feed_wakeup
-                .map(|t| t.elapsed().as_secs_f64() * 1000.0)
-                .unwrap_or(0.0),
-            "loop_cadence_ms": s.loop_cadence_ms,
-            "batch_process_ms": s.batch_process_ms,
-                });
+        "symbol": s.symbol,
+        "exchange": self.exchange.as_str(),
+        "mode": match self.mode {
+            ExecutionMode::Paper => "paper",
+            ExecutionMode::Live => "live",
+        },
+        "running": s.running,
+        "paused": s.paused,
+        "stop_requested": s.stop_requested,
+        "capital_usd": s.capital_usd,
+        "equity": s.equity,
+        "n_trades": s.n_trades,
+        "n_wins": s.n_wins,
+        "n_losses": s.n_losses,
+        "total_r": s.total_r,
+        "mid": s.mid,
+        "last_event": s.last_event,
+        "last_error": s.last_error,
+        "events_seen": s.events_seen,
+        "last_event_ts_ms": s.last_event_ts_ms,
+        "last_event_latency_ms": s.last_event_latency_ms,
+        "clock_skew_ms": s.clock_skew_ms,
+        "feed_staleness_ms": s.last_event_instant
+            .map(|t| t.elapsed().as_secs_f64() * 1000.0)
+            .unwrap_or(0.0),
+        "loop_liveness_ms": s.last_feed_wakeup
+            .map(|t| t.elapsed().as_secs_f64() * 1000.0)
+            .unwrap_or(0.0),
+        "loop_cadence_ms": s.loop_cadence_ms,
+        "batch_process_ms": s.batch_process_ms,
+            });
         Ok(json.to_string())
     }
 

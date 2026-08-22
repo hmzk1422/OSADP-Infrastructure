@@ -19,7 +19,7 @@
 //! each other.
 
 use crate::exchange::{MarketBookTop, MarketTrade};
-use rocksdb::{ColumnFamilyDescriptor, Direction, IteratorMode, Options, DB};
+use rocksdb::{ColumnFamilyDescriptor, DB, Direction, IteratorMode, Options};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -128,18 +128,14 @@ impl DbWriter {
     ) -> Result<DB, DbError> {
         if Self::try_fix_current(path) {
             eprintln!("[db] repaired CURRENT pointer at {path} — reopening");
-            if let Ok(db) = DB::open_cf_descriptors(
-                db_opts,
-                path,
-                Self::column_family_descriptors(),
-            ) {
+            if let Ok(db) =
+                DB::open_cf_descriptors(db_opts, path, Self::column_family_descriptors())
+            {
                 return Ok(db);
             }
         }
 
-        eprintln!(
-            "[db] open failed ({first_err}) — attempting one-shot RocksDB repair at {path}"
-        );
+        eprintln!("[db] open failed ({first_err}) — attempting one-shot RocksDB repair at {path}");
         match DB::repair(db_opts, path) {
             Ok(()) => {
                 eprintln!("[db] repair OK — reopening {path}");
@@ -283,11 +279,7 @@ impl DbWriter {
         Ok(())
     }
 
-    fn try_record_orderbook_top(
-        &self,
-        symbol: &str,
-        top: &MarketBookTop,
-    ) -> Result<(), DbError> {
+    fn try_record_orderbook_top(&self, symbol: &str, top: &MarketBookTop) -> Result<(), DbError> {
         let cf = self.cf(CF_ORDERBOOK)?;
         let key = Self::orderbook_key(symbol, top.timestamp, self.next_seq());
         let value = serde_json::to_vec(top)?;
@@ -321,7 +313,7 @@ impl DbWriter {
         key
     }
 
-                fn orderbook_key(symbol: &str, ts: i64, seq: u64) -> Vec<u8> {
+    fn orderbook_key(symbol: &str, ts: i64, seq: u64) -> Vec<u8> {
         let mut key = Self::symbol_prefix(symbol);
         key.extend_from_slice(&ts.to_be_bytes());
         key.push(0x00);
@@ -334,14 +326,20 @@ impl DbWriter {
     /// Persist an equity snapshot. Fire-and-forget (errors logged, not propagated).
     pub fn record_pnl_snapshot(&self, symbol: &str, snap: &PnLSnapshot) {
         if let Err(e) = self.try_record_pnl_snapshot(symbol, snap) {
-            eprintln!("[db] failed to write pnl snapshot {symbol} @ {}: {e}", snap.ts_ms);
+            eprintln!(
+                "[db] failed to write pnl snapshot {symbol} @ {}: {e}",
+                snap.ts_ms
+            );
         }
     }
 
     /// Persist a closed-trade record. Fire-and-forget.
     pub fn record_closed_trade(&self, symbol: &str, trade: &ClosedTrade) {
         if let Err(e) = self.try_record_closed_trade(symbol, trade) {
-            eprintln!("[db] failed to write closed trade {symbol} @ {}: {e}", trade.exit_ms);
+            eprintln!(
+                "[db] failed to write closed trade {symbol} @ {}: {e}",
+                trade.exit_ms
+            );
         }
     }
 
@@ -464,12 +462,8 @@ mod tests {
 
     /// Build a healthy store with one row, flushed + closed cleanly.
     fn seed_healthy_store(path: &str) {
-        let db = DB::open_cf_descriptors(
-            &test_opts(),
-            path,
-            DbWriter::column_family_descriptors(),
-        )
-        .expect("initial open");
+        let db = DB::open_cf_descriptors(&test_opts(), path, DbWriter::column_family_descriptors())
+            .expect("initial open");
         let cf = db.cf_handle(CF_TRADES).expect("trades cf exists");
         db.put_cf(cf, b"k1", b"v1").expect("put");
         db.flush().expect("flush");
@@ -498,7 +492,11 @@ mod tests {
         let db = DbWriter::open(path).expect("open after CURRENT fix");
         let cf = db.cf_handle(CF_TRADES).expect("trades cf survived");
         let got = db.get_cf(cf, b"k1").expect("read after recovery");
-        assert_eq!(got.as_deref(), Some(&b"v1"[..]), "pre-corruption data must survive");
+        assert_eq!(
+            got.as_deref(),
+            Some(&b"v1"[..]),
+            "pre-corruption data must survive"
+        );
 
         drop(db);
         let _ = std::fs::remove_dir_all(&dir);
