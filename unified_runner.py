@@ -589,11 +589,42 @@ def cmd_live_test(args: argparse.Namespace) -> int:
             print(f"ERROR: {err}", file=sys.stderr)
             return 1
 
-    # 2. Kick off the replay through the identical live-trade execution loop.
+    # 2. Materialize strategy config (single source: main/config.py) unless the
+    # caller passed an explicit --config, then hand it to the engine.
+    config_path = args.config or str(REPO_ROOT / "build" / "live_test_config.json")
+    if not (REPO_ROOT / "main" / "config.py").exists():
+        raise RuntimeError("main/config.py not found — required for --config export")
+    import importlib.util as _ilu
+    _spec = _ilu.spec_from_file_location("_main_config", REPO_ROOT / "main" / "config.py")
+    _mod = _ilu.module_from_spec(_spec)
+    _spec.loader.exec_module(_mod)
+    _mod.export_strategy_config(config_path)
+    logger.info("exported strategy config -> %s", config_path)
+
+    # Walk-forward parity mode: when --wf-dir is given, flip the two research-
+    # universe gates in the exported config so live-test (a) scores each second
+    # with the fold model whose OOS test window covers it and (b) restricts
+    # entries to one volume>0 candidate per composite bar -- exactly the
+    # research trade universe.
+    if getattr(args, "wf_dir", None):
+        import json as _json
+
+        with open(config_path, "r", encoding="utf-8") as fh:
+            _cfg_json = _json.load(fh)
+        _cfg_json["require_fold_coverage"] = True
+        _cfg_json["one_candidate_per_bar"] = True
+        with open(config_path, "w", encoding="utf-8") as fh:
+            _json.dump(_cfg_json, fh, indent=2)
+        logger.info(
+            "walk-forward parity gates ON (fold models from %s)", args.wf_dir
+        )
+
+    # 3. Kick off the replay through the identical live-trade execution loop.
     cmd = ["cargo", "run", "-p", LIVE_TEST_BIN]
     if args.release:
         cmd.append("--release")
     cmd += ["--", args.ticker.lower(), "--feed", str(feed_path)]
+    cmd += ["--config", config_path]
     if args.capital is not None:
         cmd += ["--capital", str(args.capital)]
     if args.no_db:
@@ -610,6 +641,8 @@ def cmd_live_test(args: argparse.Namespace) -> int:
         cmd += ["--end-ms", str(args.end_ms)]
     if args.limit is not None:
         cmd += ["--limit", str(args.limit)]
+    if getattr(args, "wf_dir", None):
+        cmd += ["--wf-dir", str(args.wf_dir)]
     logger.info("running historical replay: %s", " ".join(cmd))
     return subprocess.call(cmd)
 
@@ -738,6 +771,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_test.add_argument(
         "--release", action="store_true", help="build the replay binary in release mode"
+    )
+    p_test.add_argument(
+        "--config", default=None,
+        help="path to a StrategyConfig JSON (default: build/live_test_config.json "
+             "exported from main/config.py)",
+    )
+    p_test.add_argument(
+        "--wf-dir", default=None,
+        help="walk-forward fold-model dir (build/walkforward_models). When set, "
+             "live-test scores each second with the fold model whose OOS test "
+             "window covers it and restricts entries to research's trade "
+             "universe (one volume>0 candidate per composite bar) so the "
+             "replay reproduces the walk-forward backtest.",
     )
     p_test.set_defaults(func=cmd_live_test)
 

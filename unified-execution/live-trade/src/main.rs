@@ -15,8 +15,7 @@ use std::sync::{Arc, Mutex};
 
 fn usage<T>() -> T {
     eprintln!(
-        "usage: live-trade [ticker] [--exchange bybit|bitfinex] [--mode paper|live] \
-         [--capital USD] [--db PATH] [--no-db] [--seed N]"
+        "usage: live-trade [ticker] [--exchange bybit|bitfinex] [--mode paper|live] [--capital USD] [--db PATH] [--no-db] [--seed N] [--config PATH]"
     );
     std::process::exit(2);
 }
@@ -30,6 +29,7 @@ async fn main() {
     let mut db_path = "./data/marketdata.rocksdb".to_string();
     let mut persist = true;
     let mut seed_bars = 150u32;
+    let mut config_path: Option<String> = None;
 
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -62,6 +62,7 @@ async fn main() {
                     .parse()
                     .unwrap_or_else(|_| usage())
             }
+            "--config" => config_path = Some(args.next().unwrap_or_else(usage)),
             "--help" | "-h" => usage(),
             other if other.starts_with("--") => usage(),
             other => ticker = other.to_ascii_lowercase(),
@@ -75,7 +76,12 @@ async fn main() {
     }));
     let paused = Arc::new(AtomicBool::new(false));
     let stop = Arc::new(AtomicBool::new(false));
-    let capital_cents = Arc::new(AtomicU64::new((capital * 100.0) as u64));
+        let capital_cents = Arc::new(AtomicU64::new((capital * 100.0) as u64));
+
+    let strategy_config = config_path
+        .as_deref()
+        .map(std::path::Path::new)
+        .and_then(live_trade::config::load_strategy_config);
 
     let cfg = ExecutionConfig {
         ticker: ticker.clone(),
@@ -84,6 +90,8 @@ async fn main() {
         db_path,
         seed_bars,
         persist,
+        strategy_config,
+        walkforward_dir: None,
     };
     let ctx = LoopContext {
         exchange: create_exchange(exchange),

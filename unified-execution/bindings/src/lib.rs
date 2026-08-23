@@ -14,10 +14,12 @@
 
 #![cfg(feature = "python")]
 
+use live_trade::config as strategy_config_loader;
 use live_trade::exchange::{ExchangeKind, create_exchange};
 use live_trade::execution::{
     ExecutionConfig, ExecutionMode, LoopContext, RunStats, run_execution_loop,
 };
+use live_trade::StrategyConfig;
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -56,18 +58,20 @@ pub struct Strategy {
     capital_usd_cents: Arc<AtomicU64>,
     started: Arc<AtomicBool>,
     handle: Arc<Mutex<Option<std::thread::JoinHandle<()>>>>,
+    strategy_config: Option<StrategyConfig>,
 }
 
 #[pymethods]
 impl Strategy {
     #[new]
-    #[pyo3(signature = (ticker, exchange="bitfinex", mode="paper", capital=10_000.0, db_path=None))]
+        #[pyo3(signature = (ticker, exchange="bitfinex", mode="paper", capital=10_000.0, db_path=None, config_path=None))]
     fn new(
         ticker: String,
         exchange: &str,
         mode: &str,
         capital: f64,
         db_path: Option<String>,
+    config_path: Option<String>,
     ) -> PyResult<Self> {
         let kind = ExchangeKind::parse(exchange).ok_or_else(|| {
             PyValueError::new_err(format!(
@@ -80,6 +84,10 @@ impl Strategy {
         }
         let ticker = ticker.to_ascii_lowercase();
         let db_path = db_path.unwrap_or_else(|| "./data/marketdata.rocksdb".to_string());
+    let strategy_config = config_path
+        .as_deref()
+        .map(std::path::Path::new)
+        .and_then(strategy_config_loader::load_strategy_config);
         Ok(Self {
             stats: Arc::new(Mutex::new(RunStats {
                 capital_usd: capital,
@@ -96,6 +104,7 @@ impl Strategy {
             capital_usd_cents: Arc::new(AtomicU64::new((capital * 100.0) as u64)),
             started: Arc::new(AtomicBool::new(false)),
             handle: Arc::new(Mutex::new(None)),
+        strategy_config,
         })
     }
 
@@ -132,6 +141,7 @@ impl Strategy {
         let paused = Arc::clone(&self.paused);
         let stop = Arc::clone(&self.stop);
         let capital = Arc::clone(&self.capital_usd_cents);
+        let strategy_config = self.strategy_config.clone();
 
         let handle = std::thread::Builder::new()
             .name(format!("strategy-{ticker}"))
@@ -163,6 +173,8 @@ impl Strategy {
                             db_path,
                             seed_bars: 150,
                             persist: true,
+                            strategy_config,
+                            walkforward_dir: None,
                         },
                         LoopContext {
                             exchange: create_exchange(exchange_kind),

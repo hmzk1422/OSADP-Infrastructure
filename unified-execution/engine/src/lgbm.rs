@@ -21,6 +21,7 @@
 use std::path::Path;
 
 /// One decision tree (internal + leaf nodes in the LightGBM compact layout).
+#[derive(Debug, Clone)]
 struct LgbTree {
     #[allow(dead_code)] // kept for structural validation
     num_leaves: usize,
@@ -32,6 +33,7 @@ struct LgbTree {
 }
 
 /// A parsed LightGBM binary-classification model.
+#[derive(Debug, Clone)]
 pub struct LightGbm {
     num_features: usize,
     trees: Vec<LgbTree>,

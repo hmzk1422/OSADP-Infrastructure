@@ -81,6 +81,15 @@ pub struct ExecutionConfig {
     pub seed_bars: u32,
     /// Persist market data + PnL to RocksDB.
     pub persist: bool,
+    /// Optional strategy-parameter override (single source of truth: the
+    /// `build/live_test_config.json` exported by `unified_runner.py` from
+    /// `main/config.py`). When `None` the engine falls back to its built-in
+    /// `Default`, which mirrors `main/config.py`.
+    pub strategy_config: Option<StrategyConfig>,
+    /// Optional walk-forward fold-model dir (`build/walkforward_models`).
+    /// When set, each 1 s row is scored with the fold model whose OOS test
+    /// window covers it (live-legal equivalent of periodic retrain+deploy).
+    pub walkforward_dir: Option<String>,
 }
 
 /// Cheap shared snapshot of loop state (read by CLI / PyO3 `status()`).
@@ -188,14 +197,26 @@ pub async fn run_execution_loop(cfg: ExecutionConfig, mut ctx: LoopContext) {
     }
 
     let capital_usd = ctx.capital_usd_cents.load(Ordering::Relaxed) as f64 / 100.0;
-    let mut strategy = MomentumStrategy::new(
-        &ticker,
-        StrategyConfig {
-            max_position_usd: capital_usd,
-            starting_equity: capital_usd,
-            ..StrategyConfig::default()
-        },
-    );
+    // Start from the file-driven strategy config (single source of truth), then
+    // pin position sizing/equity to THIS loop's actual capital.
+    let mut strategy_cfg = cfg.strategy_config.clone().unwrap_or_default();
+    strategy_cfg.max_position_usd = capital_usd;
+    strategy_cfg.starting_equity = capital_usd;
+    let mut strategy = MomentumStrategy::new(&ticker, strategy_cfg);
+
+    // Walk-forward parity mode (--wf-dir): score each second with the fold
+    // model whose OOS test window covers it, mirroring research's walk-forward
+    // evaluation. Retrain-and-deploy is what a live desk actually does, so
+    // this remains fully implementable in production.
+    if let Some(wf_dir) = &cfg.walkforward_dir {
+        match crate::config::load_fold_catalog(std::path::Path::new(wf_dir)) {
+            Ok(models) => {
+                println!("[wf] loaded {} fold model(s) from {}", models.len(), wf_dir);
+                strategy.set_fold_models(models);
+            }
+            Err(e) => println!("[wf] WARNING: fold catalog unavailable: {e}"),
+        }
+    }
 
     // -- persistence --------------------------------------------------------
     let db = if cfg.persist {

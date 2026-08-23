@@ -33,7 +33,7 @@ def ensure_dir(path: str) -> str:
     os.makedirs(path, exist_ok=True)
     return path
 
-SYMBOL_HIST = "SOLUSDT"
+SYMBOL_HIST = "BTCUSDT"
 BAR_FREQ = f"{TIMEFRAME_BARRIER}s"
 USE_ORDERFLOW_FEATURES = True
 EXPORT_PRODUCTION_MODEL = True
