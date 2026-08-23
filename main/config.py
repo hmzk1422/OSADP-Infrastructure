@@ -207,3 +207,85 @@ LOCKOUT_SECONDS = 1000
 # Useful for isolating whether slippage vs. barrier sizing (BARRIER_MULTIPLIER,
 # MIN_BARRIER_PCT) is driving the R-curve decay.
 ENABLE_SLIPPAGE = False
+
+# Fallback slippage (bps) applied when live order-book depth lacks a quote on
+# the far side at fill time. Mirrors engine SLIPPAGE_BPS_FALLBACK.
+SLIPPAGE_BPS_FALLBACK = 0.75
+
+
+# ---------------------------------------------------------------------------
+# Strategy-config export — single source of truth for the Rust engine /
+# live-test replay. `unified_runner.py` calls `export_strategy_config(...)` to
+# materialize `build/live_test_config.json`, then passes `--config` to the
+# `live-test`/`live-trade` binaries so the live engine is provably running the
+# same parameters as `main/config.py` (validated by the engine's
+# `consts_match_main_config` unit test). Only keys present in StrategyConfig
+# are emitted.
+# ---------------------------------------------------------------------------
+import json as _json
+
+#: Mirrors `engine::StrategyConfig` field names (snake_case).
+_STRATEGY_CONFIG_KEYS = (
+    "micro_barrier_secs",
+    "timeframe_barrier_secs",
+    "lookahead_seconds",
+    "barrier_multiplier",
+    "rr_ratio",
+    "rsi_filter_threshold",
+    "enable_rsi_accel_filter",
+    "trade_direction_is_long",
+    "confidence_threshold",
+    "lockout_seconds",
+    "max_position_usd",
+    "min_order_size",
+    "fee_bps",
+    "enable_slippage",
+    "slippage_bps_fallback",
+    "min_barrier_pct",
+    "max_barrier_pct",
+    "use_orderflow_features",
+    "hysteresis_buffer",
+    "require_fold_coverage",
+    "one_candidate_per_bar",
+)
+
+
+def strategy_config_dict() -> dict:
+    """Build a JSON-ready mapping of StrategyConfig fields from this module."""
+    d = {
+        "micro_barrier_secs": 1,  # research micro bar = 1 s
+        "timeframe_barrier_secs": TIMEFRAME_BARRIER,
+        "lookahead_seconds": LOOKAHEAD_SECONDS,
+        "barrier_multiplier": BARRIER_MULTIPLIER,
+        "rr_ratio": RR_RATIO,
+        "rsi_filter_threshold": RSI_FILTER_THRESHOLD,
+        "enable_rsi_accel_filter": ENABLE_RSI_ACCEL_FILTER,
+        "trade_direction_is_long": TRADE_DIRECTION == "long",
+        "confidence_threshold": CONFIDENCE_THRESHOLD,
+        "lockout_seconds": LOCKOUT_SECONDS,
+        "max_position_usd": MAX_POSITION_USD,
+        "min_order_size": MIN_ORDER_SIZE,
+        "fee_bps": FEE_BPS,
+        "enable_slippage": ENABLE_SLIPPAGE,
+        "slippage_bps_fallback": SLIPPAGE_BPS_FALLBACK,
+        "min_barrier_pct": MIN_BARRIER_PCT,
+        "max_barrier_pct": MAX_BARRIER_PCT,
+        "hysteresis_buffer": HYSTERESIS_BUFFER,
+    }
+    # Orderflow block is always computed/used with the research model.
+    d["use_orderflow_features"] = True
+    # Walk-forward parity gates: off for normal live trading; unified_runner's
+    # `live-test --wf-dir` flips them on in the exported JSON copy.
+    d["require_fold_coverage"] = False
+    d["one_candidate_per_bar"] = False
+    return d
+
+
+def export_strategy_config(path: str) -> str:
+    """Write StrategyConfig JSON (single source of truth) and return its path."""
+    import os as _os
+    _os.makedirs(_os.path.dirname(_os.path.abspath(path)) or ".", exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        _json.dump(strategy_config_dict(), f, indent=2, sort_keys=True)
+        f.write("\n")
+    return path

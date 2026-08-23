@@ -37,11 +37,11 @@
     "rsi_2",
     "sma_14"
   ],
-  "trained_rows": 16921,
-  "trained_at_utc": "2026-08-22T05:51:31.019789+00:00",
+  "trained_rows": 14564,
+  "trained_at_utc": "2026-08-23T06:27:55.999385+00:00",
   "label_counts": {
-    "LOSS": 15085,
-    "WIN": 1836
+    "LOSS": 12841,
+    "WIN": 1723
   },
   "rr_ratio": 10,
   "lookahead_seconds": 6000,

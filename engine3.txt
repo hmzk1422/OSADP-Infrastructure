@@ -1,0 +1,192 @@
+﻿ 171|     /// MA(5) velocity on composite-bar closes.
+ 172|     pub ma_slope_5: f64,
+ 173|     /// MA acceleration ΓÇö d┬▓ derivative of composite-bar closes.
+ 174|     pub ma_accel: f64,
+ 175|     /// DeepLOB spread in bps, z-scored (window = DEEPLOB_Z_WINDOW).
+ 176|     pub spread_bps_z: f64,
+ 177|     /// RSI(2) z-score ├ù MA slope interaction.
+ 178|     pub rsi_x_ma: f64,
+ 179|     /// Std of composite-bar-to-bar returns (barrier sizing only, not an ML feature).
+ 180|     pub bar_vol_std: f64,
+ 181|     /// Latest MA(5) value ΓÇö used only by the model-free P(WIN) stand-in.
+ 182|     pub ma5_last: f64,
+ 183|     /// price_roc_3 on the 300 s COMPOSITE close series (`pct_change(3)`),
+ 184|     /// matching research `compute_price_features` (feature_builder.py:336).
+ 185|     /// The model was trained against this macro ROC, NOT a 1 s micro ROC, so
+ 186|     /// the live engine must feed the same quantity (see "research/live drift").
+ 187|     pub price_roc_3: f64,
+ 188| 
+ 189|     // --- orderflow features (ml_state_optimized.py feature block) ---
+ 190|     pub ofi_z: f64,
+ 191|     pub cvd_delta_z: f64,
+ 192|     pub cvd_slope_z: f64,
+ 193|     pub absorption_z: f64,
+ 194|     pub tick_autocorr: f64,
+ 195|     pub inst_ratio: f64,
+ 196|     pub delta_divergence_z: f64,
+ 197|     pub depth_imbalance_z: f64,
+ 198| }
+ 199| 
+ 200| /// Feature snapshot assembled at every closed 1-second (micro) bar ΓÇö the full
+ 201| /// 15-feature vector = micro `price_roc_3` + forward-filled macro features
+ 202| /// plus the orderflow block (mirrors `LiveFeatureEngine.compute_1s_feature_vector`).
+ 203| #[derive(Debug, Clone, Copy, Default, PartialEq)]
+ 204| pub struct Feature {
+ 205|     pub ts: i64, // bar close timestamp (ms)
+ 206|     pub close: f64,
+ 207|     pub n_bars: usize,
+ 208|     pub spread_bps: f64,
+ 209|     pub spread_bps_z: f64,
+ 210|     pub ma_slope_5: f64,
+ 211|     pub rsi_x_ma: f64,
+ 212|     pub ma_accel: f64,
+ 213|     pub price_roc_3: f64,
+ 214|     pub rsi_2: f64,
+ 215|     pub sma_14: f64,
+ 216|     pub bar_vol_std: f64,
+ 217|     /// Model-free P(WIN) ΓëÑ 0.50 gate (LightGBM stand-in). See module docs.
+ 218|     pub win_prob: f64,
+ 219| }
+ 220| 
+ 221| /// Trade direction of an open/closed position.
+ 222| #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+ 223| pub enum Side {
+ 224|     Long,
+ 225|     Short,
+ 226| }
+ 227| 
+ 228| impl Side {
+ 229|     pub fn as_str(&self) -> &'static str {
+ 230|         match self {
+ 231|             Side::Long => "long",
+ 232|             Side::Short => "short",
+ 233|         }
+ 234|     }
+ 235| }
+ 236| 
+ 237| /// Live position state (mirrors `PositionTracker`).
+ 238| #[derive(Debug, Clone)]
+ 239| pub struct Position {
+ 240|     pub side: Side,
+ 241|     pub entry_ms: i64,
+ 242|     pub entry_mid: f64,
+ 243|     pub entry_price: f64,
+ 244|     pub qty: f64,
+ 245|     pub notional: f64,
+ 246|     pub barrier_pct: f64,
+ 247|     pub stop: f64,
+ 248|     pub target: f64,
+ 249|     pub hi: f64,
+ 250|     pub lo: f64,
+ 251| }
+ 252| 
+ 253| /// Event emitted at order entry (mirrors `PositionTracker.enter_*` receipt).
+ 254| #[derive(Debug, Clone)]
+ 255| pub struct EntryReceipt {
+ 256|     pub ts: i64,
+ 257|     pub side: Side,
+ 258|     pub entry_mid: f64,
+ 259|     pub entry_price: f64,
+ 260|     pub qty: f64,
+ 261|     pub notional: f64,
+ 262|     pub barrier_pct: f64,
+ 263|     pub stop: f64,
+ 264|     pub target: f64,
+ 265|     pub rsi_2: f64,
+ 266|     pub win_prob: f64,
+ 267| }
+ 268| 
+ 269| /// Closed-trade record; `reason` Γêè {stop_loss, take_profit, timeout}.
+ 270| #[derive(Debug, Clone)]
+ 681|         }
+ 682| 
+ 683|         // Exits are evaluated on 1-second bar closes only (see the rollover
+ 684|         // loop above) to match research's triple-barrier-on-1s-close semantics.
+ 685|         events
+ 686|     }
+ 687| 
+ 688|     fn start_micro(&mut self, idx: i64, price: f64) {
+ 689|         self.micro_idx = Some(idx);
+ 690|         self.micro_high = price;
+ 691|         self.micro_low = price;
+ 692|         self.micro_close = price;
+ 693|     }
+ 694| 
+ 695|     fn start_macro(&mut self, idx: i64, price: f64) {
+ 696|         self.macro_idx = Some(idx);
+ 697|         self.macro_high = price;
+ 698|         self.macro_low = price;
+ 699|         self.macro_close = price;
+ 700|     }
+ 701| 
+ 702|     /// Finalize the completed 1-second (micro) bar: assemble the 15-feature
+ 703|     /// vector ΓÇö micro `price_roc_3` (fresh every second) + macro/regime and
+ 704|     /// orderflow features forward-filled from the last TIMEFRAME_BARRIER
+ 705|     /// rollover (mirrors `LiveFeatureEngine.compute_1s_feature_vector`).
+ 706|     fn finish_micro(&mut self, close: f64, close_ms: i64) -> Feature {
+ 707|         self.last_bar_close_ms = close_ms;
+ 708| 
+ 709|         // Micro price rate-of-change is deliberately NOT computed here on 1 s
+ 710|         // closes: the research state space computes `price_roc_3` on the 300 s
+ 711|         // COMPOSITE close series (`feature_builder.py: close.pct_change(3)`)
+ 712|         // and broadcasts it to every 1 s row. `m.price_roc_3` carries that
+ 713|         // macro ROC (computed in `compute_macro_features`). The model was
+ 714|         // trained on the macro ROC ΓÇö feeding a 1 s ROC is a research/live
+ 715|         // divergence that shifts the single most important model input.
+ 716|         self.micro_closes.push_back(close);
+ 717|         if self.micro_closes.len() > MAX_MICRO_CLOSES {
+ 718|             self.micro_closes.pop_front();
+ 719|         }
+ 720| 
+ 721|         // Capture this (just-closed) 1-second bar's surviving tick sign into the
+ 722|         // composite-bar autocorrelation series, then reset (features.py
+ 723|         // compute_1s_feature_vector appends `_second_last_tick_sign` and resets).
+ 724|         if self.orderflow_enabled() {
+ 725|             self.bar_tick_signs.push(self.second_last_tick_sign);
+ 726|             self.second_last_tick_sign = 0;
+ 727|         }
+ 728| 
+ 729|         let m = self.macro_features.unwrap_or_default();
+ 730| 
+ 731|         // --- Real model P(WIN) over the full 15-feature vector, in the exact
+ 732|         // order produced by ml_state_optimized.py / recorded in
+ 733|         // lgb_model.features.json: 7 base + 8 orderflow. Falls back to the
+ 734|         // deterministic logit proxy only when no model is loaded (so the
+ 735|         // engine is still usable offline / without an export). ---
+ 736|         let features: [f64; 15] = [
+ 737|             m.spread_bps_z,
+ 738|             m.ma_slope_5,
+ 739|             m.rsi_x_ma,
+ 740|             m.ma_accel,
+ 741|             m.price_roc_3,
+ 742|             m.rsi_2,
+ 743|             m.sma_14,
+ 744|             m.ofi_z,
+ 745|             m.cvd_delta_z,
+ 746|             m.cvd_slope_z,
+ 747|             m.absorption_z,
+ 748|             m.tick_autocorr,
+ 749|             m.inst_ratio,
+ 750|             m.delta_divergence_z,
+ 751|             m.depth_imbalance_z,
+ 752|         ];
+ 753|         let win_prob = match self.model.as_ref() {
+ 754|             Some(mdl) => mdl.predict_proba(&features),
+ 755|             None => self.proxy_win_prob(&m, m.price_roc_3, close),
+ 756|         };
+ 757| 
+ 758|         let feat = Feature {
+ 759|             ts: close_ms,
+ 760|             close,
+ 761|             n_bars: self.micro_closes.len(),
+ 762|             spread_bps: self.last_spread_bps,
+ 763|             spread_bps_z: m.spread_bps_z,
+ 764|             ma_slope_5: m.ma_slope_5,
+ 765|             rsi_x_ma: m.rsi_x_ma,
+ 766|             ma_accel: m.ma_accel,
+ 767|             price_roc_3: m.price_roc_3,
+ 768|             rsi_2: m.rsi_2,
+ 769|             sma_14: m.sma_14,
+ 770|             bar_vol_std: m.bar_vol_std,
+ 771|             win_prob,
+ 772|         };

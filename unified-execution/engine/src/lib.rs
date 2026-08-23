@@ -67,9 +67,9 @@ pub const BARRIER_MULTIPLIER: f64 = 0.3;
 pub const USE_ORDERFLOW_FEATURES: bool = true;
 pub const RR_RATIO: f64 = 10.0;
 pub const RSI_FILTER_THRESHOLD: f64 = 30.0;
-pub const ENABLE_RSI_ACCEL_FILTER: bool = true;
+pub const ENABLE_RSI_ACCEL_FILTER: bool = false; // config ENABLE_RSI_ACCEL_FILTER = False -> single-zone long-only
 pub const TRADE_DIRECTION_IS_LONG: bool = true; // config TRADE_DIRECTION = "long"
-pub const CONFIDENCE_THRESHOLD: f64 = 0.2;
+pub const CONFIDENCE_THRESHOLD: f64 = 0.5; // config CONFIDENCE_THRESHOLD = 0.5 (was 0.2 before research-parity fix)
 pub const LOCKOUT_SECONDS: i64 = 1000;
 pub const MAX_POSITION_USD: f64 = 100.0;
 pub const MIN_ORDER_SIZE: f64 = 0.001;
@@ -88,7 +88,7 @@ pub const MA_SLOPE_WINDOW: usize = 5;
 pub const PRICE_ROC_WINDOW_3: usize = 3;
 pub const DEEPLOB_Z_WINDOW: usize = 10;
 pub const RSI_Z_WINDOW: usize = 20;
-pub const BARRIER_VOL_WINDOW: usize = 20; // BARRIER_VOL_BAR_WINDOW (main/config.py) — rolling(20), ddof=0
+    pub const BARRIER_VOL_WINDOW: usize = 20; // BARRIER_VOL_BAR_WINDOW (main/config.py: 20) — research feature_builder.py rolling_std(20, ddof=0)
 pub const ORDERFLOW_Z_WINDOW: usize = 10; // rolling z window for orderflow features
 pub const RETAIL_THRESHOLD: f64 = 0.05; // trade-size cutoff retail vs institutional
 
@@ -129,6 +129,15 @@ pub struct StrategyConfig {
     /// signal detector re-arms only when P(WIN) drops below
     /// `confidence_threshold - hysteresis_buffer`.
     pub hysteresis_buffer: f64,
+    /// Walk-forward parity gates (live-test replay). When
+    /// `require_fold_coverage` is set, rows outside every exported fold's OOS
+    /// test window score P(WIN) = -1 (never tradable), matching research
+    /// where such rows are simply never evaluated. When
+    /// `one_candidate_per_bar` is set, entries come only from the LAST
+    /// volume>0 1 s row of each composite bar -- the research universe
+    /// (`volume > 0` filter runs BEFORE `deduplicate_to_bar`, keep-last).
+    pub require_fold_coverage: bool,
+    pub one_candidate_per_bar: bool,
     pub starting_equity: f64,
 }
 
@@ -154,6 +163,8 @@ impl Default for StrategyConfig {
             max_barrier_pct: MAX_BARRIER_PCT,
             use_orderflow_features: USE_ORDERFLOW_FEATURES,
             hysteresis_buffer: HYSTERESIS_BUFFER,
+            require_fold_coverage: false,
+            one_candidate_per_bar: false,
             starting_equity: 10_000.0,
         }
     }
@@ -162,6 +173,21 @@ impl Default for StrategyConfig {
 /// Composite (TIMEFRAME_BARRIER = 300 s) macro features — the regime filter.
 /// Recomputed once per 300 s boundary and forward-filled to every 1 s micro bar
 /// (matches `LiveFeatureEngine._compute_macro_features` + `.ffill()`).
+/// One exported walk-forward fold model plus its out-of-sample test window
+/// (`build/walkforward_models/catalog.json`, written by
+/// `research/ml_state_optimized.py` STEP 6a). Scoring time t with the fold
+/// covering t reproduces walk-forward evaluation in a live-legal way: in real
+/// trading you periodically retrain and deploy the freshly fitted model --
+/// exactly what each fold represents.
+#[derive(Debug, Clone)]
+pub struct FoldModel {
+    pub fold: u32,
+    /// Inclusive OOS test-window bounds (ms epoch), from the catalog.
+    pub test_start_ms: i64,
+    pub test_end_ms: i64,
+    pub model: crate::lgbm::LightGbm,
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 pub struct MacroFeatures {
     /// RSI(2) on composite-bar closes — the hunting-zone regime filter.
@@ -180,8 +206,13 @@ pub struct MacroFeatures {
     pub bar_vol_std: f64,
     /// Latest MA(5) value — used only by the model-free P(WIN) stand-in.
     pub ma5_last: f64,
+    /// price_roc_3 on the 300 s COMPOSITE close series (`pct_change(3)`),
+    /// matching research `compute_price_features` (feature_builder.py:336).
+    /// The model was trained against this macro ROC, NOT a 1 s micro ROC, so
+    /// the live engine must feed the same quantity (see "research/live drift").
+    pub price_roc_3: f64,
 
-    // --- orderflow features (ml_state_optimized.py orderflow block) ---
+    // --- orderflow features (ml_state_optimized.py feature block) ---
     pub ofi_z: f64,
     pub cvd_delta_z: f64,
     pub cvd_slope_z: f64,
@@ -211,6 +242,9 @@ pub struct Feature {
     pub bar_vol_std: f64,
     /// Model-free P(WIN) ≥ 0.50 gate (LightGBM stand-in). See module docs.
     pub win_prob: f64,
+    /// Traded base-asset volume of this 1 s bar (research `volume` column;
+    /// zero-volume rows sit outside the research trade universe).
+    pub volume: f64,
 }
 
 /// Trade direction of an open/closed position.
@@ -317,7 +351,8 @@ pub struct MomentumStrategy {
     micro_high: f64,
     micro_low: f64,
     micro_close: f64,
-    micro_closes: VecDeque<f64>, // completed 1 s closes → price_roc_3 (micro)
+    micro_closes: VecDeque<f64>,
+    micro_volume: f64,           // traded volume of the in-progress 1 s bar // completed 1 s closes → price_roc_3 (micro)
 
     // --- macro (TIMEFRAME_BARRIER / regime) aggregation state ---
     macro_idx: Option<i64>,
@@ -331,6 +366,11 @@ pub struct MomentumStrategy {
 
     // --- research LightGBM model → real P(WIN); None = fallback logit proxy ---
     model: Option<crate::lgbm::LightGbm>,
+    /// Walk-forward fold models (live-test replay parity). When non-empty,
+    /// every 1 s row is scored by the fold whose OOS test window covers it;
+    /// rows outside every window score -1.0 (untradable) -- mirroring
+    /// research's fold-local out-of-sample evaluation.
+    fold_models: Vec<FoldModel>,
 
     // --- orderflow accumulation (mirrors features.py, reset per composite bar) ---
     ofi_prev_bid_price: Option<f64>,
@@ -358,9 +398,6 @@ pub struct MomentumStrategy {
     last_bid_amount: f64,
     last_ask_amount: f64,
 
-    // --- hysteresis-debounced signal detector (executor.py `_update_signal_state`) ---
-    signal_armed: bool,
-
     // --- market state ---
     mid: f64,
     last_spread_bps: f64,
@@ -368,9 +405,17 @@ pub struct MomentumStrategy {
     // --- feature / accounting state ---
     last_features: Option<Feature>,
     last_bar_close_ms: i64,
+    /// Newest volume>0 feature row of the current composite bar (used by the
+    /// one-candidate-per-bar research-universe gate; entered at rollover).
+    candidate: Option<Feature>,
 
     position: Option<Position>,
     last_exit_ms: i64,
+    /// Next re-entry allowed timestamp (ms). Research lockout: a trade taken
+    /// at entry time T with actual duration D blocks re-entry until
+    /// T + D + 1 s — i.e. exactly `exit_ms + 1000`. Mirrors research
+    /// `next_available_time = actual_global_time + (bars_to_exit + 1)`.
+    next_available_entry_ms: i64,
     equity: f64,
     n_trades: u64,
     n_wins: u64,
@@ -390,6 +435,7 @@ impl MomentumStrategy {
             micro_low: f64::INFINITY,
             micro_close: 0.0,
             micro_closes: VecDeque::with_capacity(MAX_MICRO_CLOSES),
+            micro_volume: 0.0,
             macro_idx: None,
             macro_high: 0.0,
             macro_low: f64::INFINITY,
@@ -403,6 +449,7 @@ impl MomentumStrategy {
                 ..Default::default()
             }),
             model: None,
+            fold_models: Vec::new(),
             ofi_prev_bid_price: None,
             ofi_prev_bid_amount: 0.0,
             ofi_prev_ask_price: None,
@@ -427,13 +474,14 @@ impl MomentumStrategy {
             depth_imbalance_buffer: VecDeque::with_capacity(MAX_Z_HIST),
             last_bid_amount: 0.0,
             last_ask_amount: 0.0,
-            signal_armed: true, // executor.py __init__: self._signal_armed = True
             mid: 0.0,
             last_spread_bps: 0.0,
             last_features: None,
             last_bar_close_ms: 0,
+            candidate: None,
             position: None,
             last_exit_ms: i64::MIN,
+            next_available_entry_ms: i64::MIN,
             equity: starting_equity,
             n_trades: 0,
             n_wins: 0,
@@ -522,26 +570,36 @@ impl MomentumStrategy {
             }
             self.last_trade_price = Some(price);
         }
+        if !self.orderflow_enabled() {
+            // Keep the fill-price reference (research `execution_price`) even
+            // when orderflow accumulators are off — `evaluate_entry` uses it.
+            self.last_trade_price = Some(price);
+        }
         self.push_price(ts, price, Some((amount, is_buy)))
     }
 
     /// Feed a level-1 orderbook snapshot. Quotes update midpoint/spread and
-    /// orderflow state, but do not create trade-derived bars or exits.
+    /// orderflow state, and the composite (macro) bar's OHLC — research
+    /// `_build_price_bars` is built from the orderbook MID, so RSI/MA/vol and
+    /// price_roc_3 track mid, not last-trade price. Does not create
+    /// trade-derived micro bars or exits.
     pub fn on_orderbook(
         &mut self,
-        _ts: i64,
+        ts: i64,
         bid: f64,
         _bid_amt: f64,
         ask: f64,
         _ask_amt: f64,
     ) -> Vec<EngineEvent> {
+        let mut events: Vec<EngineEvent> = Vec::new();
         let mid = 0.5 * (bid + ask);
         if mid > 0.0 {
             self.mid = mid;
             self.last_spread_bps = (ask - bid) / mid * 10_000.0;
-            // spread_bps is sampled once per composite (macro) bar into the
-            // `spreads` series inside compute_macro_features (matches
-            // features.py `_compute_macro_features`).
+            // Composite (macro) bars are built from the orderbook MID, exactly
+            // like research `_build_price_bars(df_orderbook)`. A rollover here
+            // can emit a deferred candidate entry (one-candidate-per-bar mode).
+            events.extend(self.push_macro_price(ts, mid));
         }
         if self.orderflow_enabled() {
             // OFI (Cont et al.) — needs the PREVIOUS tick, computed BEFORE
@@ -580,21 +638,61 @@ impl MomentumStrategy {
             self.last_bid_amount = _bid_amt;
             self.last_ask_amount = _ask_amt;
         }
-        Vec::new()
+        events
     }
 
     // ---- core bar/price pipeline -----------------------------------------
 
+    /// Advance the composite (TIMEFRAME_BARRIER) bar with a price tick from
+    /// either a trade print or an orderbook mid. On the first event of a new
+    /// composite bar the macro/regime features are recomputed once and then
+    /// forward-filled to every subsequent micro bar until the next rollover
+    /// (matches research `df_micro.join(df_macro).ffill()`).
+    fn push_macro_price(&mut self, ts: i64, price: f64) -> Vec<EngineEvent> {
+        let macro_ms = self.cfg.timeframe_barrier_secs * 1000;
+        let macro_idx = ts / macro_ms;
+        match self.macro_idx {
+            None => {
+                self.start_macro(macro_idx, price);
+                Vec::new()
+            }
+            Some(cur) if macro_idx != cur => {
+                self.compute_macro_features();
+                // Research trade universe: ONE entry candidate per composite
+                // bar -- its LAST volume>0 1-second row (the `volume > 0`
+                // filter runs BEFORE `deduplicate_to_bar`, which keeps the
+                // last row per bucket). The candidate is stashed in
+                // `finish_micro`; enter from it now, at its own bar-close
+                // time and price, exactly like the research loop.
+                let mut events = Vec::new();
+                if self.cfg.one_candidate_per_bar {
+                    if let Some(cand) = self.candidate.take() {
+                        let fill = cand.close;
+                        self.try_enter(cand, fill, &mut events);
+                    }
+                }
+                self.start_macro(macro_idx, price);
+                events
+            }
+            Some(_) => {
+                if self.macro_idx == Some(macro_idx) {
+                    self.macro_high = self.macro_high.max(price);
+                    self.macro_low = self.macro_low.min(price);
+                    self.macro_close = price;
+                }
+                Vec::new()
+            }
+        }
+    }
+
     fn push_price(&mut self, ts: i64, price: f64, trade: Option<(f64, bool)>) -> Vec<EngineEvent> {
         let micro_ms = self.cfg.micro_barrier_secs * 1000;
-        let macro_ms = self.cfg.timeframe_barrier_secs * 1000;
         let micro_idx = ts / micro_ms;
-        let macro_idx = ts / macro_ms;
         let mut events = Vec::new();
 
         // 1. Micro (1 s) bar rollover → finalize the completed 1 s bar with the
-        //    full feature vector (micro `price_roc_3` + forward-filled macro)
-        //    and evaluate a fresh entry from it. The model runs on every 1 s row.
+        //    full feature vector (micro grid + forward-filled macro) and
+        //    evaluate a fresh entry from it. The model runs on every 1 s row.
         match self.micro_idx {
             None => self.start_micro(micro_idx, price),
             Some(cur) if micro_idx > cur => {
@@ -603,16 +701,22 @@ impl MomentumStrategy {
                 // sparse feed cannot change model cadence or timeout timing.
                 let mut idx = cur;
                 while idx < micro_idx {
-                    let feat = self.finish_micro(self.micro_close, idx * micro_ms);
+                    let bar_close = self.micro_close;
+                    let bar_ms = idx * micro_ms;
+                    let feat = self.finish_micro(bar_close, bar_ms);
                     events.push(EngineEvent::BarClosed(feat));
-                    self.evaluate_entry(&mut events);
 
-                    let next_idx = idx + 1;
-                    if next_idx * micro_ms % macro_ms == 0 {
-                        self.compute_macro_features();
-                        self.start_macro(next_idx, self.micro_close);
+                    // Research `_sequential_triple_barrier` checks barrier
+                    // crossings against the 1-SECOND BAR CLOSE series only
+                    // (sliding_window_view of 1s closes) — never on an
+                    // intra-second wick. Evaluate exits on the same grid.
+                    if let Some(rec) = self.check_exit(bar_ms, bar_close) {
+                        events.push(EngineEvent::Exited(rec));
                     }
-                    self.start_micro(next_idx, self.micro_close);
+
+                    self.evaluate_entry(&mut events);
+                    let next_idx = idx + 1;
+                    self.start_micro(next_idx, bar_close);
                     idx = next_idx;
                 }
             }
@@ -620,39 +724,28 @@ impl MomentumStrategy {
             Some(_) => {}
         }
 
-        // 2. Macro (regime) rollover → recompute the 300 s composite features
-        //    ONCE. They are forward-filled to subsequent 1 s bars until the
-        //    next boundary (matches research df_micro.join(df_macro).ffill()).
-        match self.macro_idx {
-            None => self.start_macro(macro_idx, price),
-            Some(cur) if macro_idx != cur => {
-                self.compute_macro_features();
-                self.start_macro(macro_idx, price);
-            }
-            Some(_) => {}
-        }
+        // 2. Macro (regime) rollover + OHLC — driven by price events from
+        //    EITHER source (trade print or orderbook mid). The first event of
+        //    a new 300 s bar recomputes the composite features ONCE from the
+        //    just-closed bar and forward-fills them to subsequent 1 s bars.
+        events.extend(self.push_macro_price(ts, price));
 
-        // 3. Update the in-progress micro + macro bar OHLC.
+        // 3. Update the in-progress micro bar OHLC (macro handled above).
         if self.micro_idx == Some(micro_idx) {
             self.micro_high = self.micro_high.max(price);
             self.micro_low = self.micro_low.min(price);
             self.micro_close = price;
         }
-        if self.macro_idx == Some(macro_idx) {
-            self.macro_high = self.macro_high.max(price);
-            self.macro_low = self.macro_low.min(price);
-            self.macro_close = price;
-        }
 
-        if trade.is_some() {
+        if let Some((amount, _)) = trade {
             self.mid = price; // last-trade fallback mirrors live last price feed
+            if self.micro_idx == Some(micro_idx) {
+                self.micro_volume += amount; // research `volume` per 1 s row
+            }
         }
 
-        // Exit monitoring on every print (barrier crosses + timeout).
-        if let Some(rec) = self.check_exit(ts, price) {
-            events.push(EngineEvent::Exited(rec));
-        }
-
+        // Exits are evaluated on 1-second bar closes only (see the rollover
+        // loop above) to match research's triple-barrier-on-1s-close semantics.
         events
     }
 
@@ -661,6 +754,7 @@ impl MomentumStrategy {
         self.micro_high = price;
         self.micro_low = price;
         self.micro_close = price;
+        self.micro_volume = 0.0;
     }
 
     fn start_macro(&mut self, idx: i64, price: f64) {
@@ -677,21 +771,13 @@ impl MomentumStrategy {
     fn finish_micro(&mut self, close: f64, close_ms: i64) -> Feature {
         self.last_bar_close_ms = close_ms;
 
-        // Micro price rate-of-change on 1 s closes — features.py:
-        // `(close - vals[-3]) / vals[-3]` i.e. pct_change(3). `micro_closes`
-        // holds bars completed BEFORE this one, so index `n - 3` is exactly
-        // three 1 s bars back.
-        let n = self.micro_closes.len();
-        let price_roc_3 = if n >= PRICE_ROC_WINDOW_3 + 1 {
-            let prev = self.micro_closes[n - PRICE_ROC_WINDOW_3];
-            if prev.abs() > EPS {
-                (close - prev) / prev
-            } else {
-                0.0
-            }
-        } else {
-            0.0
-        };
+        // Micro price rate-of-change is deliberately NOT computed here on 1 s
+        // closes: the research state space computes `price_roc_3` on the 300 s
+        // COMPOSITE close series (`feature_builder.py: close.pct_change(3)`)
+        // and broadcasts it to every 1 s row. `m.price_roc_3` carries that
+        // macro ROC (computed in `compute_macro_features`). The model was
+        // trained on the macro ROC — feeding a 1 s ROC is a research/live
+        // divergence that shifts the single most important model input.
         self.micro_closes.push_back(close);
         if self.micro_closes.len() > MAX_MICRO_CLOSES {
             self.micro_closes.pop_front();
@@ -712,13 +798,12 @@ impl MomentumStrategy {
         // lgb_model.features.json: 7 base + 8 orderflow. Falls back to the
         // deterministic logit proxy only when no model is loaded (so the
         // engine is still usable offline / without an export). ---
-        let price_roc_3_opt = price_roc_3; // (computed above)
         let features: [f64; 15] = [
             m.spread_bps_z,
             m.ma_slope_5,
             m.rsi_x_ma,
             m.ma_accel,
-            price_roc_3_opt,
+            m.price_roc_3,
             m.rsi_2,
             m.sma_14,
             m.ofi_z,
@@ -730,9 +815,25 @@ impl MomentumStrategy {
             m.delta_divergence_z,
             m.depth_imbalance_z,
         ];
-        let win_prob = match self.model.as_ref() {
-            Some(mdl) => mdl.predict_proba(&features),
-            None => self.proxy_win_prob(&m, price_roc_3_opt, close),
+        // Walk-forward parity: when fold models are loaded, the row MUST be
+        // scored by the fold whose OOS test window covers it (research never
+        // evaluates a row with any other fold's model). Rows outside every
+        // window score -1.0, which can never pass the entry threshold --
+        // matching research, where such rows are simply never evaluated.
+        let win_prob = if !self.fold_models.is_empty() {
+            match self
+                .fold_models
+                .iter()
+                .find(|f| close_ms >= f.test_start_ms && close_ms <= f.test_end_ms)
+            {
+                Some(f) => f.model.predict_proba(&features),
+                None => -1.0,
+            }
+        } else {
+            match self.model.as_ref() {
+                Some(mdl) => mdl.predict_proba(&features),
+                None => self.proxy_win_prob(&m, m.price_roc_3, close),
+            }
         };
 
         let feat = Feature {
@@ -744,13 +845,21 @@ impl MomentumStrategy {
             ma_slope_5: m.ma_slope_5,
             rsi_x_ma: m.rsi_x_ma,
             ma_accel: m.ma_accel,
-            price_roc_3,
+            price_roc_3: m.price_roc_3,
             rsi_2: m.rsi_2,
             sma_14: m.sma_14,
             bar_vol_std: m.bar_vol_std,
             win_prob,
+            volume: self.micro_volume,
         };
         self.last_features = Some(feat);
+        // One-entry-candidate-per-composite-bar mode: remember the newest
+        // volume>0 row of this composite bar; the macro rollover enters from
+        // the last one (research `volume>0` filter -> `deduplicate_to_bar`
+        // keep-last).
+        if self.cfg.one_candidate_per_bar && self.micro_volume > 0.0 {
+            self.candidate = Some(feat);
+        }
         feat
     }
 
@@ -758,14 +867,39 @@ impl MomentumStrategy {
         if self.position.is_some() {
             return;
         }
-        if self.last_bar_close_ms.saturating_sub(self.last_exit_ms)
-            < self.cfg.lockout_seconds * 1000
-        {
-            return;
-        }
         let Some(feat) = self.last_features else {
             return;
         };
+
+        // Research fills at `execution_price` = the LAST TRADE PRICE (the
+        // state-space grid's unshifted micro-bar price). The engine's `mid`
+        // mixes book mid with last-trade price; prefer the pure trade-print
+        // fill to match the trained entry basis.
+        let fill_price = self
+            .last_trade_price
+            .filter(|p| *p > 0.0)
+            .or_else(|| if self.mid > 0.0 { Some(self.mid) } else { None })
+            .unwrap_or(feat.close);
+        self.try_enter(feat, fill_price, events);
+    }
+
+    /// Shared entry pipeline: lockout -> barrier-size filter -> hunting zone
+    /// -> pure P(WIN) threshold. Research `find_debounced_signals` is a PURE
+    /// threshold (`np.where(y_proba >= t)`) with NO hysteresis state; the
+    /// per-trade-duration lockout alone governs trade spacing. A negative
+    /// `win_prob` means "no walk-forward fold covers this time" (research
+    /// never evaluates such rows) and can never pass the threshold.
+    fn try_enter(&mut self, feat: Feature, fill_price: f64, events: &mut Vec<EngineEvent>) {
+        if self.position.is_some() {
+            return;
+        }
+        // Research-style lockout: re-entry blocked until
+        // entry_time + actual_duration + 1 s (== exit_ms + 1000 for barrier
+        // exits; entry + LOOKAHEAD for timeouts). LOCKOUT_SECONDS is used as
+        // an on/off flag only -- exactly like the research loop.
+        if self.cfg.lockout_seconds > 0 && feat.ts < self.next_available_entry_ms {
+            return;
+        }
 
         // Vol filter mirrors `_passes_vol_filter` (MIN/MAX_BARRIER_PCT).
         let bp = self.barrier_pct();
@@ -778,28 +912,11 @@ impl MomentumStrategy {
             return;
         }
 
-        // Hysteresis-debounced signal detector — executor `_update_signal_state`.
-        // ONLY runs while in the hunting zone (matches research
-        // find_debounced_signals, which scans only RSI(2)<threshold rows). This
-        // is the gap that let live fire ~0 trades: previously the detector never
-        // existed, so a P(WIN)≥0.5 crossing never translated into an armed state.
-        let p_win = feat.win_prob;
-        let lower = (self.cfg.confidence_threshold - self.cfg.hysteresis_buffer).max(0.0);
-        if !self.signal_armed && p_win < lower {
-            self.signal_armed = true; // re-arm: P(WIN) exited the firing band
-        }
-        if !self.signal_armed {
-            return; // DEBOUNCED — detector disarmed from the last fill
+        if feat.win_prob + 1e-12 < self.cfg.confidence_threshold {
+            return; // LOW_CONFIDENCE (also rejects the -1 no-fold sentinel)
         }
 
-        // Model gate: research fires when P(WIN) >= CONFIDENCE_THRESHOLD.
-        if p_win + 1e-12 < self.cfg.confidence_threshold {
-            return; // LOW_CONFIDENCE — armed but below the gate
-        }
-
-        let fill_mid = if self.mid > 0.0 { self.mid } else { feat.close };
-        self.enter_position(feat.ts, side, fill_mid, bp);
-        self.signal_armed = false; // _disarm_signal — fired
+        self.enter_position(feat.ts, side, fill_price, bp);
 
         let p = self.position.as_ref().expect("position just opened");
         events.push(EngineEvent::Entered(EntryReceipt {
@@ -901,38 +1018,36 @@ impl MomentumStrategy {
 
     // ---- exit monitoring (mirrors PositionTracker.check_exit) --------------
 
-    fn check_exit(&mut self, ts: i64, price: f64) -> Option<TradeRecord> {
+    /// Exit detection mirrors research `_sequential_triple_barrier`: it is
+    /// called once per 1-SECOND bar close with the bar's CLOSE price, and a
+    /// barrier only counts as hit when that close reaches it — never on an
+    /// intra-second wick (the research state space has no sub-second data).
+    /// Target-first → win, stop-first → loss, else the lookahead timeout at
+    /// `entry + LOOKAHEAD_SECONDS`.
+    fn check_exit(&mut self, ts: i64, close: f64) -> Option<TradeRecord> {
         let decision = match &mut self.position {
             Some(p) => {
-                p.hi = p.hi.max(price);
-                p.lo = p.lo.min(price);
+                let timed_out = ts - p.entry_ms >= self.cfg.lookahead_seconds * 1000;
                 let hit_stop = match p.side {
-                    Side::Long => p.lo <= p.stop,
-                    Side::Short => p.hi >= p.stop,
+                    Side::Long => close <= p.stop,
+                    Side::Short => close >= p.stop,
                 };
                 let hit_tp = match p.side {
-                    Side::Long => p.hi >= p.target,
-                    Side::Short => p.lo <= p.target,
+                    Side::Long => close >= p.target,
+                    Side::Short => close <= p.target,
                 };
-                let timed_out = ts - p.entry_ms >= self.cfg.lookahead_seconds * 1000;
 
-                if !(hit_stop || hit_tp) && !timed_out {
-                    None
-                } else if hit_stop && hit_tp {
-                    // First touch wins — closer barrier first.
-                    let d_stop = (p.stop - p.entry_price).abs();
-                    let d_tp = (p.target - p.entry_price).abs();
-                    if d_tp <= d_stop {
-                        Some(("take_profit", p.target))
-                    } else {
-                        Some(("stop_loss", p.stop))
-                    }
+                if timed_out {
+                    Some(("timeout", close))
+                } else if hit_tp {
+                    // First barrier the 1s close reaches wins (a single close
+                    // cannot cross both opposite-side barriers, so stop-vs-target
+                    // ordering is unambiguous; target-first = research win_mask).
+                    Some(("take_profit", p.target))
                 } else if hit_stop {
                     Some(("stop_loss", p.stop))
-                } else if hit_tp {
-                    Some(("take_profit", p.target))
                 } else {
-                    Some(("timeout", price))
+                    None
                 }
             }
             None => return None,
@@ -953,7 +1068,6 @@ impl MomentumStrategy {
             .position
             .take()
             .expect("close_position with no open position");
-        self.signal_armed = true;
         let is_timeout = reason == "timeout";
 
         let slip_bps = if self.cfg.enable_slippage {
@@ -983,15 +1097,24 @@ impl MomentumStrategy {
         } else {
             0.001 * self.cfg.barrier_multiplier
         };
-        let base_r = match p.side {
-            Side::Long => (theoretical_exit - p.entry_price) / p.entry_price / bp,
-            Side::Short => (p.entry_price - theoretical_exit) / p.entry_price / bp,
+
+        // Research (ml_state_optimized STEP 5) scores barrier exits as a
+        // hardcoded +RR_RATIO win / -1.0 loss (the actual exit overshoot is
+        // ignored) and timeouts as the real side-adjusted return / bp. This is
+        // exactly what the walk-forward reports as R — replicate it here.
+        let side_sign = match p.side {
+            Side::Long => 1.0,
+            Side::Short => -1.0,
         };
-        // Barrier exits clip to [-1.0, +RR_RATIO]; timeouts are unclipped.
         let base_r = if is_timeout {
-            base_r
+            (theoretical_exit - p.entry_price) / p.entry_price * side_sign / bp
         } else {
-            base_r.clamp(-1.0, self.cfg.rr_ratio)
+            let favourable = (theoretical_exit - p.entry_price) * side_sign > 0.0;
+            if favourable {
+                self.cfg.rr_ratio
+            } else {
+                -1.0
+            }
         };
         let slip_penalty = (slip_bps / 10_000.0) / bp;
         let fee_in_r = (fees / p.notional) / bp;
@@ -1006,6 +1129,15 @@ impl MomentumStrategy {
         }
         self.total_r += r_multiple;
         self.last_exit_ms = ts;
+        // Research lockout: `next_available_time = entry + (bars_to_exit + 1)s`.
+        // Barrier exits: bars_to_exit = seconds held → next = exit_ms + 1s.
+        // Timeouts: bars_to_exit = LOOKAHEAD - 1 → next = entry + LOOKAHEAD
+        // (research sets the timeout offset to `lookahead - 1`).
+        self.next_available_entry_ms = if is_timeout {
+            p.entry_ms + self.cfg.lookahead_seconds * 1000
+        } else {
+            ts + 1000
+        };
 
         let rec = TradeRecord {
             entry_ms: p.entry_ms,
@@ -1039,6 +1171,14 @@ impl MomentumStrategy {
     /// feature-manifest check in `executor.py` (`_one_sec_tick`).
     pub fn set_model(&mut self, model: crate::lgbm::LightGbm) {
         self.model = Some(model);
+    }
+
+    /// Install walk-forward fold models (see [`FoldModel`]). When non-empty
+    /// they take precedence over any single production model: each 1 s row is
+    /// scored by the fold covering its timestamp, and rows outside every
+    /// fold's test window score -1.0 (research never evaluates them).
+    pub fn set_fold_models(&mut self, models: Vec<FoldModel>) {
+        self.fold_models = models;
     }
 
     /// True if a real LightGBM model is installed and will be scored on the
@@ -1133,6 +1273,19 @@ impl MomentumStrategy {
         let closes: Vec<f64> = self.macro_closes.iter().copied().collect();
         let n = closes.len();
         let diffs: Vec<f64> = closes.windows(2).map(|w| w[1] - w[0]).collect();
+
+        // price_roc_3 — research `compute_price_features` (feature_builder.py):
+        // `close.pct_change(3)` on the COMPOSITE (BAR_FREQ) close series. The
+        // model was trained against this macro ROC; the live 1 s micro bars
+        // inherit it via the forward-filled `MacroFeatures`, exactly like the
+        // state space's asof broadcast.
+        let mut price_roc_3 = 0.0;
+        if closes.len() >= PRICE_ROC_WINDOW_3 + 1 {
+            let prev = closes[closes.len() - 1 - PRICE_ROC_WINDOW_3];
+            if prev.abs() > EPS {
+                price_roc_3 = (close - prev) / prev;
+            }
+        }
 
         // Wilder RSI(2) / RSI(14) on composite-bar close diffs (get_wilders_rsi).
         let rsi2 = if diffs.len() >= RSI_2_WINDOW + 1 && !diffs.is_empty() {
@@ -1306,6 +1459,7 @@ impl MomentumStrategy {
             rsi_x_ma,
             bar_vol_std,
             ma5_last,
+            price_roc_3,
             ofi_z,
             cvd_delta_z,
             cvd_slope_z,
@@ -1440,6 +1594,26 @@ fn push_roll_z(buf: &mut VecDeque<f64>, value: f64, window: usize) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The engine consts must mirror `main/config.py` (single source of
+    /// truth). If this fails, live-test/backtest parity is broken by design.
+    #[test]
+    fn consts_match_main_config() {
+        assert!(!ENABLE_RSI_ACCEL_FILTER, "config ENABLE_RSI_ACCEL_FILTER = False");
+        assert!(TRADE_DIRECTION_IS_LONG, "config TRADE_DIRECTION = 'long'");
+        assert_eq!(CONFIDENCE_THRESHOLD, 0.5, "config CONFIDENCE_THRESHOLD");
+        assert_eq!(LOOKAHEAD_SECONDS, 6000, "config LOOKAHEAD_SECONDS");
+        assert_eq!(TIMEFRAME_BARRIER_SECS, 300, "config TIMEFRAME_BARRIER");
+        assert_eq!(BARRIER_MULTIPLIER, 0.3, "config BARRIER_MULTIPLIER");
+        assert_eq!(RR_RATIO, 10.0, "config RR_RATIO");
+        assert_eq!(RSI_FILTER_THRESHOLD, 30.0, "config RSI_FILTER_THRESHOLD");
+        assert_eq!(LOCKOUT_SECONDS, 1000, "config LOCKOUT_SECONDS (on/off only)");
+        assert_eq!(MIN_BARRIER_PCT, 0.0, "config MIN_BARRIER_PCT");
+        assert_eq!(MAX_BARRIER_PCT, 0.05, "config MAX_BARRIER_PCT");
+        assert_eq!(FEE_BPS, 0.1, "config FEE_BPS");
+        assert_eq!(BARRIER_VOL_WINDOW, 20, "config BARRIER_VOL_BAR_WINDOW = 20 (research feature_builder rolling_std)");
+    }
+
 
     /// RSI sanity: constant uptrend → RSI(14) near 100, downtrend → 0.
     #[test]
@@ -1576,7 +1750,6 @@ mod tests {
             ts += micro_ms;
         }
         assert!(exited, "position never hit its target");
-        assert!(s.signal_armed, "signal must re-arm after exit");
         assert_eq!(s.closed_trades().len(), 1);
         assert!(s.snapshot().n_trades == 1);
     }

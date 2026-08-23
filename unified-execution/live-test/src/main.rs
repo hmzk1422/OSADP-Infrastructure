@@ -23,8 +23,7 @@ use std::sync::{Arc, Mutex};
 
 fn usage<T>() -> T {
     eprintln!(
-        "usage: live-test [ticker] [--feed PATH] [--capital USD] [--db PATH] [--no-db]\
-         [--seed BARS] [--loop] [--start-ms MS] [--end-ms MS] [--limit N]"
+        "usage: live-test [ticker] [--feed PATH] [--capital USD] [--db PATH] [--no-db] [--seed BARS] [--loop] [--start-ms MS] [--end-ms MS] [--limit N] [--config PATH] [--wf-dir DIR]"
     );
     std::process::exit(2);
 }
@@ -41,6 +40,8 @@ async fn main() {
     let mut start_ms: Option<i64> = None;
     let mut end_ms: Option<i64> = None;
     let mut limit: Option<usize> = None;
+    let mut config_path: Option<String> = None;
+    let mut wf_dir: Option<String> = None;
 
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -62,6 +63,8 @@ async fn main() {
                     .parse()
                     .unwrap_or_else(|_| usage())
             }
+            "--config" => config_path = Some(args.next().unwrap_or_else(usage)),
+            "--wf-dir" => wf_dir = Some(args.next().unwrap_or_else(usage)),
             "--loop" => loop_feed = true,
             "--start-ms" => {
                 start_ms = Some(
@@ -116,9 +119,29 @@ async fn main() {
     let stop = Arc::new(AtomicBool::new(false));
     let capital_cents = Arc::new(AtomicU64::new((capital * 100.0) as u64));
 
+    // Strategy parameters exported by unified_runner.py from main/config.py —
+    // the single source of truth for live-test / research parity.
+        let strategy_config = config_path
+        .as_deref()
+        .map(std::path::Path::new)
+        .and_then(live_trade::config::load_strategy_config);
+    if let Some(path) = &config_path {
+        match &strategy_config {
+            Some(cfg) => println!(
+                "[config] loaded {path} (zone_gen={} conf={} lockout={} rr={} dir_long={})",
+                cfg.enable_rsi_accel_filter,
+                cfg.confidence_threshold,
+                cfg.lockout_seconds,
+                cfg.rr_ratio,
+                cfg.trade_direction_is_long
+            ),
+            None => println!("[config] WARNING: could not parse {path} — using engine defaults"),
+        }
+    }
+
     println!(
-        "[live-test] ticker={} feed={} db={} persist={} seed_bars={} loop={} window={:?}..{:?} limit={:?}",
-        ticker_lower, feed, db_path, persist, seed_bars, loop_feed, start_ms, end_ms, limit
+        "[live-test] ticker={} feed={} db={} persist={} seed_bars={} loop={} window={:?}..{:?} limit={:?} wf_dir={:?}",
+        ticker_lower, feed, db_path, persist, seed_bars, loop_feed, start_ms, end_ms, limit, wf_dir
     );
 
     let cfg = ExecutionConfig {
@@ -128,6 +151,8 @@ async fn main() {
         db_path: db_path.clone(),
         seed_bars,
         persist,
+        strategy_config,
+        walkforward_dir: wf_dir,
     };
     let ctx = LoopContext {
         exchange: create_replay_exchange(

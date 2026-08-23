@@ -322,7 +322,7 @@ def add_barrier_labels(df: pl.DataFrame, lookahead_seconds: int = LOOKAHEAD_SECO
 # ============================================================================
 def purged_chronological_splits(datetimes: np.ndarray, n_samples: int, block_size: int,
                                  horizon_seconds: int, embargo_seconds: int = 0,
-                                 allow_overlap: bool = True):
+                                 allow_overlap: bool = False):
     n = len(datetimes)
     horizon = np.timedelta64(horizon_seconds, "s")
     embargo = np.timedelta64(embargo_seconds, "s")
@@ -984,6 +984,18 @@ if __name__ == "__main__":
     fold_shap_values = []
     fold_pfi_values = []
 
+    # ------------------------------------------------------------------
+    # STEP 6a - Walk-forward fold-model export (live/research parity).
+    # Each fold's fitted booster + its OOS test window are written to
+    # build/walkforward_models/ so live-test can score time t with EXACTLY
+    # the model this walk-forward used at t. This is the live-legal
+    # equivalent of periodic retrain-and-deploy: fold k's model represents
+    # "the production model as of window k".
+    # ------------------------------------------------------------------
+    wf_dir = os.path.join(BUILD_DIR, "walkforward_models")
+    ensure_dir(wf_dir)
+    wf_catalog = {"models": []}
+
     for fold, (train_idx, test_idx, n_purged) in enumerate(splitter, start=1):
         X_train, X_test = X[train_idx], X[test_idx]
         y_train, y_test = y[train_idx], y[test_idx]
@@ -998,6 +1010,25 @@ if __name__ == "__main__":
             class_weight='balanced', random_state=42, n_jobs=1, verbose=-1,
         )
         clf.fit(X_train, y_train)
+
+        # --- Export this fold's model + OOS test window (see STEP 6a) ---
+        try:
+            mdl_path = os.path.join(wf_dir, f"fold_{fold:03d}.txt")
+            clf.booster_.save_model(mdl_path)
+            ms0 = int(datetimes[test_idx[0]].astype("datetime64[s]").astype(np.int64)) * 1000
+            ms1 = int(datetimes[test_idx[-1]].astype("datetime64[s]").astype(np.int64)) * 1000
+            wf_catalog["models"].append({
+                "fold": int(fold),
+                "model": os.path.basename(mdl_path),
+                "test_start_ms": ms0,
+                "test_end_ms": ms1,
+                "train_rows": int(len(train_idx)),
+                "test_rows": int(len(test_idx)),
+            })
+            with open(os.path.join(wf_dir, "catalog.json"), "w", encoding="utf-8") as fh:
+                json.dump(wf_catalog, fh, indent=2)
+        except Exception as _wf_err:
+            print(f"Fold {fold:02d} | WF model export failed: {_wf_err}")
 
         # --- SHAP --- (feature_names passed explicitly since X is a plain
         # numpy array here, not a named DataFrame)
