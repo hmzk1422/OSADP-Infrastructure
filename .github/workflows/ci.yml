@@ -114,6 +114,14 @@ jobs:
               export BINDGEN_EXTRA_CLANG_ARGS="--target=aarch64-unknown-linux-gnu --sysroot=$SYSROOT -I/usr/aarch64-unknown-linux-gnu/include"
               echo "BINDGEN_EXTRA_CLANG_ARGS=$BINDGEN_EXTRA_CLANG_ARGS"
             fi
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@v6
+        with:
+          name: wheels-${{ matrix.platform.label }}
+          path: dist
+          if-no-files-found: error
+
   docker:
     name: Build and Push Docker Image
     needs: wheels
