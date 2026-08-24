@@ -66,29 +66,61 @@ jobs:
           - { label: linux-x86_64,  os: ubuntu-24.04, target: x86_64,  manylinux: auto }
           - { label: linux-aarch64, os: ubuntu-24.04, target: aarch64, manylinux: auto }
           - { label: windows-x86_64, os: windows-2025, target: x86_64,  manylinux: "" }
+  docker:
+    name: Build and Push Docker Image
+    needs: wheels
+    runs-on: ubuntu-24.04
+    if: github.ref == 'refs/heads/main' # Only push on main branch merges
+    permissions:
+      contents: read
+      packages: write # Allows pushing to GHCR
     steps:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Set up Python
-        uses: actions/setup-python@v6
+      - name: Download Linux x86_64 wheel
+        uses: actions/download-artifact@v6
         with:
-          python-version: "3.11"
-          architecture: x64
-
-      - name: Build wheels
-        uses: PyO3/maturin-action@v1
-        with:
-          target: ${{ matrix.platform.target }}
-          args: --release --out dist --find-interpreter
-          sccache: true
-          manylinux: ${{ matrix.platform.manylinux }}
-
-      - name: Upload wheels
-        uses: actions/upload-artifact@v6
-        with:
-          name: wheels-${{ matrix.platform.label }}
+          name: wheels-linux-x86_64
           path: dist
+
+      - name: Download Linux aarch64 wheel
+        uses: actions/download-artifact@v6
+        with:
+          name: wheels-linux-aarch64
+          path: dist
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up QEMU (for ARM emulation)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Handles lowercasing repository names and tag formatting safely
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=raw,value=latest
+
+      - name: Build and Push Multi-Arch Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
 
   smoke:
     name: Smoke test (unified_runner)

@@ -78,3 +78,15 @@ Each of the following documentation referred here.
 - [Documentation on System Architecture](./DEVLOG.md)
 - [Research on Edge](./arxiv_link)
 
+
+# Docker setup
+```
+# Pull your newly built image
+docker pull ghcr.io/yourusername/your-repo-name:latest
+
+# Run a backtest interactively
+docker run --rm -it ghcr.io/yourusername/your-repo-name:latest backtest
+
+# Run the live trader in the background
+docker run -d --name live-bot ghcr.io/yourusername/your-repo-name:latest live-trade
+```
