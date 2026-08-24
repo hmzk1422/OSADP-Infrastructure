@@ -43,6 +43,9 @@ cd intraday-momentum-composite
 
 # environment check (validates native module end-to-end):
 python3 unified_runner.py doctor --require-native
+# → cargo / maturin lines print as informational `[info]` on wheel-only
+#   installs (they're build-time tools, not needed to run the wheel).
+#   `OK.` + exit code 0 means the native module and repo are healthy.
 
 # paper-trade over Bitfinex (Bybit requires VPN in most regions):
 python3 unified_runner.py live-trade --tickers btcusd --exchange bitfinex --mode paper

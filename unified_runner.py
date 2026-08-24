@@ -657,8 +657,17 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         print(f"[{'OK' if cond else 'FAIL'}] {label}")
         return cond
 
-    _check("cargo available", shutil.which("cargo") is not None)
-    _check("maturin available", shutil.which("maturin") is not None)
+    # cargo/maturin are BUILD-TIME tools — needed to compile the wheel, not to
+    # run/install it. They are informational here so `doctor` stays green on
+    # wheel-only deployments (CI smoke, Termux proot, Oracle/Linux edge, RPi).
+    if shutil.which("cargo") is not None:
+        print("[OK] cargo available")
+    else:
+        print("[info] cargo not available (build-time only; not needed to run the wheel)")
+    if shutil.which("maturin") is not None:
+        print("[OK] maturin available")
+    else:
+        print("[info] maturin not available (build-time only; not needed to run the wheel)")
     _check("research backtest script", RESEARCH_BACKTEST.exists())
 
     native = load_native_module()
