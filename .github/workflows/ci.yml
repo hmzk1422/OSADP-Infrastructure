@@ -6,10 +6,13 @@
 #   * Windows (x86_64)          — local development machines
 #
 # Jobs:
-#   rust    — compile + unit-test the entire Rust workspace on Linux & Windows
-#   wheels  — build native wheels with maturin-action, upload as artifacts
-#   smoke   — install the Linux wheel, validate the unified_runner CLI
-#   release — publish wheels to PyPI on version tags (trusted publishing)
+#   rust        — compile + unit-test the entire Rust workspace on Linux & Windows
+#   wheels      — build native wheels with maturin-action, upload as artifacts
+#   docker      — build/push multi-arch runtime image to GHCR (Oracle/edge servers;
+#                 NOT for Android/Termux — see docs/TERMUX.md)
+#   smoke       — install the Linux wheel, validate the unified_runner CLI
+#   smoke-arm64 — validate the aarch64 wheel under QEMU (Termux-proot / RPi path)
+#   release     — publish wheels to PyPI on version tags (trusted publishing)
 #
 # NOTE: the `wheels` job compiles `unified-execution/engine` into a Python
 # module. The crate must expose a PyO3 `#[pymodule]` (see pyproject.toml);
@@ -66,6 +69,30 @@ jobs:
           - { label: linux-x86_64,  os: ubuntu-24.04, target: x86_64,  manylinux: auto }
           - { label: linux-aarch64, os: ubuntu-24.04, target: aarch64, manylinux: auto }
           - { label: windows-x86_64, os: windows-2025, target: x86_64,  manylinux: "" }
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          architecture: x64
+
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.platform.target }}
+          args: --release --out dist --find-interpreter
+          sccache: true
+          manylinux: ${{ matrix.platform.manylinux }}
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@v6
+        with:
+          name: wheels-${{ matrix.platform.label }}
+          path: dist
+
   docker:
     name: Build and Push Docker Image
     needs: wheels
@@ -150,6 +177,34 @@ jobs:
         run: |
           python unified_runner.py --help
           python unified_runner.py doctor --require-native
+
+  # Validates the exact artifact Termux-proot / Raspberry-Pi users install:
+  # glibc linux/arm64 + pip wheel. Runs the runner under QEMU emulation.
+  smoke-arm64:
+    name: Smoke test (linux-aarch64 under QEMU)
+    needs: wheels
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Download Linux aarch64 wheel
+        uses: actions/download-artifact@v6
+        with:
+          name: wheels-linux-aarch64
+          path: dist
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Validate wheel on emulated arm64
+        run: |
+          docker run --rm --platform linux/arm64 \
+            -v "$PWD":/work -w /work python:3.11-slim bash -exc '
+              pip install --no-cache-dir dist/*.whl
+              python unified_runner.py --help
+              python unified_runner.py doctor --require-native
+            '
 
   release:
     name: Publish to PyPI

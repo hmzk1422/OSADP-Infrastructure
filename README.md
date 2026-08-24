@@ -89,4 +89,34 @@ docker run --rm -it ghcr.io/yourusername/your-repo-name:latest backtest
 
 # Run the live trader in the background
 docker run -d --name live-bot ghcr.io/yourusername/your-repo-name:latest live-trade
+
+docker run -d \
+  --name live-trader \
+  --restart unless-stopped \
+  -v $(pwd)/config.json:/app/config.json \
+  ghcr.io/yourusername/your-repo-name:latest live-trade
+
+docker run --rm -it \
+  -v $(pwd)/config.json:/app/config.json \
+  ghcr.io/yourusername/your-repo-name:latest backtest
+
+# Stream live execution logs in real-time
+docker logs -f live-trader
+
+# Check resource utilization (CPU/Memory usage on your Oracle ARM instance)
+docker stats live-trader
+
+# Stop or restart the bot
+docker stop live-trader
+docker start live-trader
+```
+# Phone Setup
+```javascript
+pkg install proot-distro && proot-distro install ubuntu   # glibc only!
+proot-distro login ubuntu
+apt install python3 python3-pip
+pip install <linux-aarch64 wheel>                          # self-contained:
+                                                           # rustls TLS + bundled RocksDB
+python3 unified_runner.py doctor --require-native
+python3 unified_runner.py live-trade --tickers btcusd --exchange bitfinex --mode paper
 ```
