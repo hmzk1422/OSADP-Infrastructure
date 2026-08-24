@@ -66,12 +66,22 @@ jobs:
       fail-fast: false
       matrix:
         platform:
-          - { label: linux-x86_64,  os: ubuntu-24.04, target: x86_64,  manylinux: auto }
-          - { label: linux-aarch64, os: ubuntu-24.04, target: aarch64, manylinux: auto }
+          - { label: linux-x86_64,  os: ubuntu-24.04, target: x86_64,  manylinux: 2_28 }
+          - { label: linux-aarch64, os: ubuntu-24.04, target: aarch64, manylinux: 2_28 }
           - { label: windows-x86_64, os: windows-2025, target: x86_64,  manylinux: "" }
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+
+      # Only for local `act` runs: act executes the job inside a container, so
+      # maturin-action skips its own manylinux image and builds on the "host"
+      # (the job container), which ships without a Rust toolchain. On real
+      # GitHub runners this step is skipped — maturin-action handles Rust there.
+      - name: Install Rust (local act runs only)
+        if: env.ACT
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform.target }}
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -86,13 +96,12 @@ jobs:
           args: --release --out dist --find-interpreter
           sccache: true
           manylinux: ${{ matrix.platform.manylinux }}
-
-      - name: Upload wheels
-        uses: actions/upload-artifact@v6
-        with:
-          name: wheels-${{ matrix.platform.label }}
-          path: dist
-
+          before-script-linux: |
+            if command -v yum &> /dev/null; then
+              yum install -y clang-devel llvm-devel
+            elif command -v apt-get &> /dev/null; then
+              apt-get update && apt-get install -y libclang-dev
+            fi
   docker:
     name: Build and Push Docker Image
     needs: wheels
