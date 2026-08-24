@@ -66,8 +66,8 @@ jobs:
       fail-fast: false
       matrix:
         platform:
-          - { label: linux-x86_64,  os: ubuntu-24.04, target: x86_64,  manylinux: 2_28 }
-          - { label: linux-aarch64, os: ubuntu-24.04, target: aarch64, manylinux: 2_28 }
+          - { label: linux-x86_64,  os: ubuntu-24.04, target: x86_64,  manylinux: "2_28" }
+          - { label: linux-aarch64, os: ubuntu-24.04, target: aarch64, manylinux: "2_28" }
           - { label: windows-x86_64, os: windows-2025, target: x86_64,  manylinux: "" }
     steps:
       - name: Checkout
@@ -96,11 +96,23 @@ jobs:
           args: --release --out dist --find-interpreter
           sccache: true
           manylinux: ${{ matrix.platform.manylinux }}
+          # Runs INSIDE the maturin-action container before maturin/cargo.
           before-script-linux: |
+            # 1) libclang for bindgen (librocksdb-sys regenerates bindings)
             if command -v yum &> /dev/null; then
               yum install -y clang-devel llvm-devel
             elif command -v apt-get &> /dev/null; then
               apt-get update && apt-get install -y libclang-dev
+            fi
+            # 2) librocksdb-sys 0.16 always runs bindgen, which otherwise
+            #    parses RocksDB's c.h against HOST glibc headers and dies on
+            #    'bits/libc-header-start.h not found' when cross-compiling.
+            #    Point clang at the cross sysroot instead.
+            if [ -d /usr/aarch64-unknown-linux-gnu ]; then
+              SYSROOT=/usr/aarch64-unknown-linux-gnu
+              [ -d "$SYSROOT/aarch64-unknown-linux-gnu/sysroot" ] && SYSROOT="$SYSROOT/aarch64-unknown-linux-gnu/sysroot"
+              export BINDGEN_EXTRA_CLANG_ARGS="--target=aarch64-unknown-linux-gnu --sysroot=$SYSROOT -I/usr/aarch64-unknown-linux-gnu/include"
+              echo "BINDGEN_EXTRA_CLANG_ARGS=$BINDGEN_EXTRA_CLANG_ARGS"
             fi
   docker:
     name: Build and Push Docker Image
