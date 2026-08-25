@@ -45,3 +45,6 @@ main/logs/
 dist/
 _filelist.txt
 filelist.txt
+
+# ── RocksDB ─────────────────────────────────────────────────────────────────
+data/

@@ -12,7 +12,7 @@
 //! POST. Reference: https://bybit-exchange.github.io/docs/v5/
 
 use super::{
-    Balance, Exchange, ExchangeError, ExchangeKind, MarketBookTop, MarketEvent, MarketTrade,
+    Balance, Broker, ExchangeError, ExchangeKind, Feed, MarketBookTop, MarketEvent, MarketTrade,
     OrderRequest, OrderResponse, OrderType, TradeSide, header_map, hmac_sha256, now_ms, symbols,
 };
 use futures_util::{SinkExt, StreamExt};
@@ -85,7 +85,7 @@ impl BybitExchange {
 }
 
 #[async_trait::async_trait]
-impl Exchange for BybitExchange {
+impl Feed for BybitExchange {
     fn kind(&self) -> ExchangeKind {
         ExchangeKind::Bybit
     }
@@ -192,6 +192,18 @@ impl Exchange for BybitExchange {
         // Bybit returns newest-first; return oldest-first for seed warming.
         closes.reverse();
         Ok(closes)
+    }
+
+    async fn close(&mut self) -> Result<(), ExchangeError> {
+        self.ws = None;
+        Ok(())
+    }
+}
+
+#[async_trait::async_trait]
+impl Broker for BybitExchange {
+    fn kind(&self) -> ExchangeKind {
+        ExchangeKind::Bybit
     }
 
     async fn place_order(&self, req: &OrderRequest) -> Result<OrderResponse, ExchangeError> {

@@ -14,7 +14,7 @@
 //!     cargo run -p live-test -- ethusdt --feed build/live_test_feed_ethusdt.replay \
 //!         --capital 2000 --seed 150
 
-use live_trade::exchange::{ExchangeKind, create_replay_exchange};
+use live_trade::exchange::{ExchangeKind, create_broker, create_replay_feed};
 use live_trade::execution::{
     ExecutionConfig, ExecutionMode, LoopContext, RunStats, run_execution_loop,
 };
@@ -146,7 +146,8 @@ async fn main() {
 
     let cfg = ExecutionConfig {
         ticker: ticker_lower.clone(),
-        exchange: ExchangeKind::Parquet,
+        feed: ExchangeKind::Parquet,
+        broker: ExchangeKind::Parquet, // paper replay: no real order routing
         mode: ExecutionMode::Paper, // the engine simulates fills; no real orders
         db_path: db_path.clone(),
         seed_bars,
@@ -155,7 +156,7 @@ async fn main() {
         walkforward_dir: wf_dir,
     };
     let ctx = LoopContext {
-        exchange: create_replay_exchange(
+        feed: create_replay_feed(
             &feed,
             start_ms,
             end_ms,
@@ -163,6 +164,7 @@ async fn main() {
             loop_feed,
             Some(Arc::clone(&stop)),
         ),
+        broker: create_broker(ExchangeKind::Parquet),
         stats: Arc::clone(&stats),
         paused,
         stop: Arc::clone(&stop),

@@ -40,6 +40,10 @@ CLI
     python unified_runner.py backtest
     python unified_runner.py live-trade --tickers btcusdt ethusdt solusdt \
         --exchange bitfinex --mode paper --capital 5000
+    # Stream Binance/Bitfinex/Bybit orderflow while executing on Bitfinex:
+    python unified_runner.py live-trade --exchange bitfinex --feed binance --mode live
+    # Serve a live browser page of trades executed (+equity/wins/losses):
+    python unified_runner.py live-trade --exchange bitfinex --feed bybit --dashboard
     python unified_runner.py live-test --ticker btcusdt --release
     python unified_runner.py live-test --ticker btcusdt --limit 200000 --no-db
     python unified_runner.py live-test --ticker btcusdt --start-ms 1709344800000 \
@@ -78,6 +82,7 @@ DEFAULT_TICKERS = ("btcusdt",)
 DEFAULT_EXCHANGE = "bitfinex"
 DEFAULT_CAPITAL_USD = 10_000.0
 SUPPORTED_EXCHANGES = ("bybit", "bitfinex")
+SUPPORTED_FEEDS = ("bybit", "bitfinex", "binance")
 SUPPORTED_MODES = ("paper", "live")
 
 logger = logging.getLogger("unified_runner")
@@ -130,6 +135,8 @@ class Strategy:
         mode: str = "paper",
         capital: float = DEFAULT_CAPITAL_USD,
         db_path: Optional[str] = None,
+        feed: Optional[str] = None,
+        config_path: Optional[str] = None,
     ) -> None:
         native = load_native_module()
         if native is None:
@@ -141,18 +148,32 @@ class Strategy:
             raise ValueError(f"unknown exchange {exchange!r} (expected {SUPPORTED_EXCHANGES})")
         if mode not in SUPPORTED_MODES:
             raise ValueError(f"unknown mode {mode!r} (expected {SUPPORTED_MODES})")
+        if feed is not None and feed not in SUPPORTED_FEEDS:
+            raise ValueError(f"unknown feed {feed!r} (expected {SUPPORTED_FEEDS})")
         if capital <= 0:
             raise ValueError("capital must be > 0")
         self.ticker = ticker.lower()
         self._exchange = exchange
+        # Feed venue defaults to the execution venue unless explicitly given.
+        self._feed = feed or exchange
         self._mode = mode
         self._rust = native.Strategy(
-            ticker, exchange=exchange, mode=mode, capital=capital, db_path=db_path
+            ticker,
+            exchange=exchange,
+            mode=mode,
+            capital=capital,
+            db_path=db_path,
+            config_path=config_path,
+            feed=self._feed,
         )
 
     @property
     def exchange(self) -> str:
         return self._exchange
+
+    @property
+    def feed(self) -> str:
+        return self._feed
 
     @property
     def mode(self) -> str:
@@ -239,12 +260,20 @@ class Portfolio:
         mode: str = "paper",
         capital: float = DEFAULT_CAPITAL_USD,
         db_path: Optional[str] = None,
+        feed: Optional[str] = None,
+        config_path: Optional[str] = None,
     ) -> Strategy:
         key = ticker.lower()
         if key in self._strategies:
             raise ValueError(f"strategy for {key!r} already added")
         s = Strategy(
-            ticker, exchange=exchange, mode=mode, capital=capital, db_path=db_path
+            ticker,
+            exchange=exchange,
+            mode=mode,
+            capital=capital,
+            db_path=db_path,
+            feed=feed,
+            config_path=config_path,
         )
         self._strategies[key] = s
         return s
@@ -296,6 +325,22 @@ def cmd_live_trade(args: argparse.Namespace) -> int:
         print("       Run `maturin develop --release` from the repo root, then retry.", file=sys.stderr)
         return 1
 
+    # Materialize the strategy config (single source of truth: main/config.py)
+    # and hand it to every strategy, so live-trade runs the exact parameters
+    # research/live-test use — e.g. a CONFIDENCE_THRESHOLD edit in
+    # main/config.py applies on the next launch WITHOUT a Rust rebuild.
+    if not (REPO_ROOT / "main" / "config.py").exists():
+        print("ERROR: main/config.py not found — required for config export", file=sys.stderr)
+        return 1
+    import importlib.util as _ilu
+
+    _spec = _ilu.spec_from_file_location("_main_config", REPO_ROOT / "main" / "config.py")
+    _mod = _ilu.module_from_spec(_spec)
+    _spec.loader.exec_module(_mod)
+    trade_config_path = str(REPO_ROOT / "build" / "live_trade_config.json")
+    _mod.export_strategy_config(trade_config_path)
+    logger.info("exported strategy config -> %s", trade_config_path)
+
     pf = Portfolio()
     state = {"stopped": False}
 
@@ -327,10 +372,31 @@ def cmd_live_trade(args: argparse.Namespace) -> int:
 
     for ticker in args.tickers:
         try:
-            pf.add(ticker, exchange=args.exchange, mode=args.mode, capital=args.capital)
+            pf.add(
+                ticker,
+                exchange=args.exchange,
+                feed=args.feed,
+                mode=args.mode,
+                capital=args.capital,
+                config_path=trade_config_path,
+            )
         except ValueError as exc:
             print(f"ERROR: {exc}", file=sys.stderr)
             return 1
+
+    # Optional live trade-count dashboard (idea: a browser page showing how
+    # many trades the executor has executed in real time). Zero overhead when
+    # disabled — no server thread is spawned.
+    dashboard = None
+    if getattr(args, "dashboard", False):
+        try:
+            from main.live_dashboard import LiveDashboard
+
+            dashboard = LiveDashboard()
+            dashboard.start()
+        except Exception as exc:  # noqa: BLE001 — dashboard is optional
+            logger.warning("live dashboard failed to start: %s", exc)
+            dashboard = None
 
     signal.signal(signal.SIGINT, _shutdown)
     try:
@@ -358,19 +424,34 @@ def cmd_live_trade(args: argparse.Namespace) -> int:
                 stal = st.get("feed_staleness_ms")
                 lat = st.get("last_event_latency_ms")
                 sk = st.get("clock_skew_ms")
+                # Gate telemetry from the newest closed 1-second bar:
+                # rsi_2 drives the hunting zone (<30 for long-only), win_prob
+                # is the model P(WIN) vs the confidence gate (>= 0.5).
+                rsi = st.get("rsi_2")
+                pwin = st.get("win_prob")
+                gate = st.get("gate") or ""
                 logger.info(
-                    "  %-10s %s  eq=%9.2f tr=%d r=%+.2f mid=%s stal=%7.1fms lat=%6.2fms sk=%+8.1fms",
+                    "  %-10s %s  eq=%9.2f tr=%d r=%+.2f mid=%s "
+                    "rsi=%5.1f p_win=%.2f gate=%s stal=%7.1fms lat=%6.2fms sk=%+8.1fms",
                     ticker, stamp,
                     st["equity"], st["n_trades"], st["total_r"], mid,
+                    rsi if isinstance(rsi, (int, float)) else -1.0,
+                    pwin if isinstance(pwin, (int, float)) else 0.0,
+                    gate,
                     stal if isinstance(stal, (int, float)) else -1.0,
                     lat if isinstance(lat, (int, float)) else -1.0,
                     sk if isinstance(sk, (int, float)) else 0.0,
                 )
+                if dashboard is not None:
+                    # Push the latest snapshot so the browser page updates live.
+                    dashboard.update(ticker, st)
     except KeyboardInterrupt:
         pass
     finally:
         logger.info("stopping strategies ...")
         _stop_all()
+        if dashboard is not None:
+            dashboard.stop()
     logger.info("done — database flushed and closed cleanly")
     return 0
 
@@ -721,6 +802,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="symbols to run concurrently, e.g. btcusdt ethusdt solusdt",
     )
     p_trade.add_argument("--exchange", default=DEFAULT_EXCHANGE, choices=SUPPORTED_EXCHANGES)
+    p_trade.add_argument(
+        "--feed", default=None, choices=SUPPORTED_FEEDS,
+        help="market-data feed venue (orderflow source); defaults to --exchange. "
+        "e.g. --exchange bitfinex --feed binance streams Binance tape while "
+        "executing on Bitfinex",
+    )
+    p_trade.add_argument(
+        "--dashboard", action="store_true",
+        help="serve a live HTML page (http://localhost:8001) showing trades "
+        "executed, equity, wins/losses and feed freshness per ticker",
+    )
     p_trade.add_argument(
         "--mode", default="paper", choices=SUPPORTED_MODES,
         help="execution mode: paper (dry-run) or live (real orders)",

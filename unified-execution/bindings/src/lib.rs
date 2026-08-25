@@ -15,7 +15,7 @@
 #![cfg(feature = "python")]
 
 use live_trade::config as strategy_config_loader;
-use live_trade::exchange::{ExchangeKind, create_exchange};
+use live_trade::exchange::{ExchangeKind, create_broker, create_feed};
 use live_trade::execution::{
     ExecutionConfig, ExecutionMode, LoopContext, RunStats, run_execution_loop,
 };
@@ -45,11 +45,21 @@ fn parse_mode(s: &str) -> PyResult<ExecutionMode> {
 /// s.resume()
 /// s.status()           # -> JSON string
 /// s.stop()             # graceful shutdown + HTML report
+///
+/// # Read orderflow from one venue, execute on another:
+/// s2 = engine.Strategy("btcusdt", exchange="bitfinex", feed="binance",
+///                      mode="paper", capital=1000.0)
 /// ```
+/// The `feed` parameter (bybit | bitfinex | binance) supplies market data; it
+/// defaults to `exchange`. Only `exchange` receives real orders (`Live` mode).
 #[pyclass(module = "engine", name = "Strategy")]
 pub struct Strategy {
     ticker: String,
+    /// Order-routing venue (the `exchange` the strategy executes on).
     exchange: ExchangeKind,
+    /// Market-data feed venue (can differ from `exchange` to read orderflow
+    /// where the capital does not live).
+    feed: ExchangeKind,
     mode: ExecutionMode,
     db_path: String,
     stats: Arc<Mutex<RunStats>>,
@@ -64,20 +74,31 @@ pub struct Strategy {
 #[pymethods]
 impl Strategy {
     #[new]
-        #[pyo3(signature = (ticker, exchange="bitfinex", mode="paper", capital=10_000.0, db_path=None, config_path=None))]
+        #[pyo3(signature = (ticker, exchange="bitfinex", mode="paper", capital=10_000.0, db_path=None, config_path=None, feed=None))]
     fn new(
         ticker: String,
         exchange: &str,
         mode: &str,
         capital: f64,
         db_path: Option<String>,
-    config_path: Option<String>,
+        config_path: Option<String>,
+        feed: Option<String>,
     ) -> PyResult<Self> {
         let kind = ExchangeKind::parse(exchange).ok_or_else(|| {
             PyValueError::new_err(format!(
-                "unknown exchange {exchange:?} (expected 'bybit' or 'bitfinex')"
+                "unknown exchange {exchange:?} (expected 'bybit', 'bitfinex' or 'binance')"
             ))
         })?;
+        // Feed venue defaults to the execution venue unless explicitly given,
+        // so existing callers keep streaming from where they execute.
+        let feed_kind = match feed {
+            Some(f) => ExchangeKind::parse(&f).ok_or_else(|| {
+                PyValueError::new_err(format!(
+                    "unknown feed {f:?} (expected 'bybit', 'bitfinex' or 'binance')"
+                ))
+            })?,
+            None => kind,
+        };
         let mode = parse_mode(mode)?;
         if capital <= 0.0 {
             return Err(PyValueError::new_err("capital must be > 0"));
@@ -97,6 +118,7 @@ impl Strategy {
             })),
             ticker,
             exchange: kind,
+            feed: feed_kind,
             mode,
             db_path,
             paused: Arc::new(AtomicBool::new(false)),
@@ -135,6 +157,7 @@ impl Strategy {
 
         let ticker = self.ticker.clone();
         let exchange_kind = self.exchange;
+        let feed_kind = self.feed;
         let mode = self.mode;
         let db_path = self.db_path.clone();
         let stats = Arc::clone(&self.stats);
@@ -168,7 +191,8 @@ impl Strategy {
                     run_execution_loop(
                         ExecutionConfig {
                             ticker: ticker.clone(),
-                            exchange: exchange_kind,
+                            feed: feed_kind,
+                            broker: exchange_kind,
                             mode,
                             db_path,
                             seed_bars: 150,
@@ -177,7 +201,8 @@ impl Strategy {
                             walkforward_dir: None,
                         },
                         LoopContext {
-                            exchange: create_exchange(exchange_kind),
+                            feed: create_feed(feed_kind),
+                            broker: create_broker(exchange_kind),
                             stats,
                             paused,
                             stop,
@@ -264,6 +289,9 @@ impl Strategy {
         "last_event": s.last_event,
         "last_error": s.last_error,
         "events_seen": s.events_seen,
+        "rsi_2": s.rsi_2,
+        "win_prob": s.win_prob,
+        "gate": s.gate,
         "last_event_ts_ms": s.last_event_ts_ms,
         "last_event_latency_ms": s.last_event_latency_ms,
         "clock_skew_ms": s.clock_skew_ms,

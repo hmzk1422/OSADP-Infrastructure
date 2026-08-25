@@ -411,6 +411,9 @@ pub struct MomentumStrategy {
 
     position: Option<Position>,
     last_exit_ms: i64,
+    /// Which entry gate rejected the most recent entry evaluation ("" = none /
+    /// passed). Purely observational live telemetry — see `entry_gate()`.
+    last_entry_block: &'static str,
     /// Next re-entry allowed timestamp (ms). Research lockout: a trade taken
     /// at entry time T with actual duration D blocks re-entry until
     /// T + D + 1 s — i.e. exactly `exit_ms + 1000`. Mirrors research
@@ -481,6 +484,7 @@ impl MomentumStrategy {
             candidate: None,
             position: None,
             last_exit_ms: i64::MIN,
+            last_entry_block: "",
             next_available_entry_ms: i64::MIN,
             equity: starting_equity,
             n_trades: 0,
@@ -515,6 +519,14 @@ impl MomentumStrategy {
 
     pub fn open_position(&self) -> Option<&Position> {
         self.position.as_ref()
+    }
+
+    /// Which entry gate rejected the most recent bar-close evaluation:
+    /// `"in_position"`, `"lockout"`, `"vol_filter"`, `"hunting_zone"`,
+    /// `"confidence"`, or `""` when nothing blocked (an entry fired or no
+    /// candidate was evaluated). Observational only — never gates behavior.
+    pub fn entry_gate(&self) -> &'static str {
+        self.last_entry_block
     }
 
     pub fn snapshot(&self) -> StrategySnapshot {
@@ -891,6 +903,7 @@ impl MomentumStrategy {
     /// never evaluates such rows) and can never pass the threshold.
     fn try_enter(&mut self, feat: Feature, fill_price: f64, events: &mut Vec<EngineEvent>) {
         if self.position.is_some() {
+            self.last_entry_block = "in_position";
             return;
         }
         // Research-style lockout: re-entry blocked until
@@ -898,24 +911,29 @@ impl MomentumStrategy {
         // exits; entry + LOOKAHEAD for timeouts). LOCKOUT_SECONDS is used as
         // an on/off flag only -- exactly like the research loop.
         if self.cfg.lockout_seconds > 0 && feat.ts < self.next_available_entry_ms {
+            self.last_entry_block = "lockout";
             return;
         }
 
         // Vol filter mirrors `_passes_vol_filter` (MIN/MAX_BARRIER_PCT).
         let bp = self.barrier_pct();
         if bp < self.cfg.min_barrier_pct || bp > self.cfg.max_barrier_pct {
+            self.last_entry_block = "vol_filter";
             return;
         }
 
         let (in_zone, side) = self.resolve_zone_side(&feat);
         if !in_zone {
+            self.last_entry_block = "hunting_zone";
             return;
         }
 
         if feat.win_prob + 1e-12 < self.cfg.confidence_threshold {
+            self.last_entry_block = "confidence";
             return; // LOW_CONFIDENCE (also rejects the -1 no-fold sentinel)
         }
 
+        self.last_entry_block = "";
         self.enter_position(feat.ts, side, fill_price, bp);
 
         let p = self.position.as_ref().expect("position just opened");

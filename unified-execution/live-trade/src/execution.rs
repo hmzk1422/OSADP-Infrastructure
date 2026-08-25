@@ -12,10 +12,10 @@
 
 use crate::db::{ClosedTrade, DbWriter, PnLSnapshot};
 use crate::exchange::{
-    Exchange, ExchangeKind, MarketEvent, OrderRequest, OrderType, TradeSide, symbols,
+    Broker, ExchangeKind, Feed, MarketEvent, OrderRequest, OrderType, TradeSide, symbols,
 };
 use crate::model;
-use engine::{EngineEvent, MomentumStrategy, StrategyConfig};
+use engine::{CONFIDENCE_THRESHOLD, EngineEvent, MomentumStrategy, StrategyConfig};
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -74,7 +74,10 @@ pub enum ExecutionMode {
 pub struct ExecutionConfig {
     /// Ticker in lowercase, e.g. "btcusdt".
     pub ticker: String,
-    pub exchange: ExchangeKind,
+    /// Venue that supplies the market-data feed (trades + top-of-book).
+    pub feed: ExchangeKind,
+    /// Venue orders are routed to (used in `Live` mode only).
+    pub broker: ExchangeKind,
     pub mode: ExecutionMode,
     pub db_path: String,
     /// Number of historical composite bars to warm feature rings with.
@@ -125,6 +128,14 @@ pub struct RunStats {
     pub n_losses: u64,
     pub total_r: f64,
     pub mid: f64,
+    /// Gate telemetry from the newest closed 1-second bar: RSI(2) (hunting
+    /// zone) and model P(WIN) (confidence gate). Surfaced in `status()` /
+    /// the CLI so operators can watch WHY entries do or don't fire live.
+    pub rsi_2: f64,
+    pub win_prob: f64,
+    /// Which entry gate rejected the newest bar-close evaluation ("" = none).
+    /// See `engine::MomentumStrategy::entry_gate`.
+    pub gate: String,
     pub last_event: String,
     pub last_error: Option<String>,
     /// Total market events (trades + book-top ticks) ingested by the loop.
@@ -162,7 +173,10 @@ pub struct RunStats {
 
 /// Shared handles the loop and its controlling caller both hold.
 pub struct LoopContext {
-    pub exchange: Box<dyn Exchange>,
+    /// Market-data source (trades + top-of-book + historical closes warm-up).
+    pub feed: Box<dyn Feed>,
+    /// Order-routing venue; a no-op broker in paper/replay modes.
+    pub broker: Box<dyn Broker>,
     pub stats: Arc<Mutex<RunStats>>,
     pub paused: Arc<AtomicBool>,
     pub stop: Arc<AtomicBool>,
@@ -176,9 +190,10 @@ pub struct LoopContext {
 /// HTML report on shutdown.
 pub async fn run_execution_loop(cfg: ExecutionConfig, mut ctx: LoopContext) {
     let ticker = cfg.ticker.to_ascii_lowercase();
-    let native_symbol = match cfg.exchange {
+    let native_symbol = match cfg.broker {
         ExchangeKind::Bybit => symbols::bybit(&ticker),
         ExchangeKind::Bitfinex => symbols::bitfinex(&ticker),
+        ExchangeKind::Binance => symbols::binance(&ticker),
         ExchangeKind::Parquet => ticker.to_ascii_uppercase(),
     };
 
@@ -191,7 +206,7 @@ pub async fn run_execution_loop(cfg: ExecutionConfig, mut ctx: LoopContext) {
     }
 
     // -- connect (with retry + backoff) ------------------------------------
-    if !connect_with_retry(&mut *ctx.exchange, &ticker, &ctx.stop, &ctx.stats).await {
+    if !connect_with_retry(&mut *ctx.feed, &ticker, &ctx.stop, &ctx.stats).await {
         finish(&cfg, ctx, &None).await;
         return;
     }
@@ -242,13 +257,13 @@ pub async fn run_execution_loop(cfg: ExecutionConfig, mut ctx: LoopContext) {
     }
 
     // -- warm feature rings from history -------------------------------------
-    match ctx.exchange.historical_closes(&ticker, cfg.seed_bars).await {
+    match ctx.feed.historical_closes(&ticker, cfg.seed_bars).await {
         Ok(closes) if !closes.is_empty() => {
             strategy.seed_macro_closes(&closes);
             println!(
                 "[seed] warmed {} macro closes from {}",
                 closes.len(),
-                cfg.exchange
+                cfg.feed
             );
         }
         Ok(_) => eprintln!("[seed] no historical closes available ??? features will warm live"),
@@ -258,6 +273,7 @@ pub async fn run_execution_loop(cfg: ExecutionConfig, mut ctx: LoopContext) {
     // -- restore equity from the last persisted snapshot ---------------------
     let last_exit_ms = AtomicI64::new(i64::MIN);
     let mut skew_floor = SkewFloor::new(120); // 2-minute trailing window
+    let mut bar_print = (f64::NAN, f64::NAN); // [bar] telemetry throttle state
     if let Some(db) = &db {
         if let Ok(snaps) = db.iter_pnl_snapshots(&ticker) {
             if let Some(last) = snaps.last() {
@@ -273,7 +289,7 @@ pub async fn run_execution_loop(cfg: ExecutionConfig, mut ctx: LoopContext) {
 
     println!(
         "=== {} loop [{}] mode={} symbol={} ===",
-        cfg.exchange,
+        cfg.feed,
         ticker,
         match cfg.mode {
             ExecutionMode::Paper => "paper",
@@ -283,13 +299,14 @@ pub async fn run_execution_loop(cfg: ExecutionConfig, mut ctx: LoopContext) {
     );
 
     // -- main feed loop -------------------------------------------------------
+    let mut last_report_wake = std::time::Instant::now();
     loop {
         if ctx.stop.load(Ordering::SeqCst) {
             break;
         }
         let iter_started = std::time::Instant::now();
 
-        let events = match ctx.exchange.next_events().await {
+        let events = match ctx.feed.next_events().await {
             Ok(events) => events,
             Err(e) => {
                 eprintln!("[{ticker}] stream error: {e} ??? reconnecting...");
@@ -297,7 +314,7 @@ pub async fn run_execution_loop(cfg: ExecutionConfig, mut ctx: LoopContext) {
                     s.last_error = Some(e.to_string());
                     s.last_feed_wakeup = Some(std::time::Instant::now());
                 }
-                if !connect_with_retry(&mut *ctx.exchange, &ticker, &ctx.stop, &ctx.stats).await {
+                if !connect_with_retry(&mut *ctx.feed, &ticker, &ctx.stop, &ctx.stats).await {
                     break;
                 }
                 continue;
@@ -347,6 +364,7 @@ pub async fn run_execution_loop(cfg: ExecutionConfig, mut ctx: LoopContext) {
                         &db,
                         &last_exit_ms,
                         &native_symbol,
+                        &mut bar_print,
                         engine_events,
                     )
                     .await;
@@ -372,6 +390,7 @@ pub async fn run_execution_loop(cfg: ExecutionConfig, mut ctx: LoopContext) {
                         &db,
                         &last_exit_ms,
                         &native_symbol,
+                        &mut bar_print,
                         engine_events,
                     )
                     .await;
@@ -409,6 +428,17 @@ pub async fn run_execution_loop(cfg: ExecutionConfig, mut ctx: LoopContext) {
             s.loop_cadence_ms = iter_started.elapsed().as_secs_f64() * 1000.0;
             s.batch_process_ms = batch_started.elapsed().as_secs_f64() * 1000.0;
         }
+
+        // Live report: republish the HTML snapshot on a timer so an open
+        // browser tab (the page meta-refreshes) shows entries/exits and the
+        // growing price tape as they happen — not only on shutdown.
+        if cfg.persist && last_report_wake.elapsed().as_secs() >= crate::report::REPORT_REFRESH_SECS
+        {
+            last_report_wake = std::time::Instant::now();
+            if let Some(db) = &db {
+                crate::report::generate_html_report(db, &cfg.ticker).await;
+            }
+        }
     }
 
     finish(&cfg, ctx, &db).await;
@@ -437,10 +467,39 @@ fn clock_skew_ms(exchange_ts_ms: i64) -> f64 {
     (now_ms - exchange_ts_ms) as f64
 }
 
+/// UTC calendar date from days since the Unix epoch (Howard Hinnant's
+/// civil_from_days). Only used for human-readable console timestamps — no
+/// chrono dependency needed for that.
+fn civil_from_days(z: i64) -> (i64, u32, u32) {
+    let z = z + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let m = (if mp < 10 { mp + 3 } else { mp - 9 }) as u32;
+    (if m <= 2 { y + 1 } else { y }, m, d)
+}
+
+/// Human-readable UTC timestamp for console telemetry: `2026-08-25 18:02:45Z`.
+fn format_utc(ts_ms: i64) -> String {
+    let secs = ts_ms.div_euclid(1000);
+    let (days, sod) = (secs.div_euclid(86_400), secs.rem_euclid(86_400));
+    let (y, mo, d) = civil_from_days(days);
+    format!(
+        "{y:04}-{mo:02}-{d:02} {:02}:{:02}:{:02}Z",
+        sod / 3600,
+        (sod % 3600) / 60,
+        sod % 60
+    )
+}
+
 /// Connect with retry + backoff until `stop` is set. Returns false if the
 /// caller should abort.
 async fn connect_with_retry(
-    exchange: &mut dyn Exchange,
+    feed: &mut dyn Feed,
     ticker: &str,
     stop: &AtomicBool,
     stats: &Arc<Mutex<RunStats>>,
@@ -449,7 +508,7 @@ async fn connect_with_retry(
         if stop.load(Ordering::SeqCst) {
             return false;
         }
-        match exchange.connect(ticker).await {
+        match feed.connect(ticker).await {
             Ok(()) => return true,
             Err(e) => {
                 eprintln!("[{ticker}] connect failed: {e} ??? retrying in 2s");
@@ -471,6 +530,7 @@ async fn handle_engine_events(
     db: &Option<Arc<DbWriter>>,
     last_exit_ms: &AtomicI64,
     native_symbol: &str,
+    bar_print: &mut (f64, f64), // (rsi_2, win_prob) of last printed [bar] line
     events: Vec<EngineEvent>,
 ) {
     for event in events {
@@ -480,6 +540,32 @@ async fn handle_engine_events(
                     s.last_event = format!(
                         "bar ts={} close={:.2} rsi2={:.1} win={:.2}",
                         f.ts, f.close, f.rsi_2, f.win_prob
+                    );
+                    s.rsi_2 = f.rsi_2;
+                    s.win_prob = f.win_prob;
+                    s.gate = strategy.entry_gate().to_string();
+                }
+                // Console gate telemetry. RSI(2)/P(WIN) are macro features
+                // recomputed once per composite-bar boundary, so printing only
+                // on a change yields one line per ~5 minutes instead of one
+                // per second — enough to watch the hunting zone / confidence
+                // gates approach an entry without drowning the console.
+                let conf_thr = cfg
+                    .strategy_config
+                    .as_ref()
+                    .map(|c| c.confidence_threshold)
+                    .unwrap_or(CONFIDENCE_THRESHOLD);
+                if (*bar_print).0 != f.rsi_2 || (*bar_print).1 != f.win_prob {
+                    *bar_print = (f.rsi_2, f.win_prob);
+                    println!(
+                        "[bar] {} {} close={:.2} rsi2={:.1} p_win={:.2}{}{}",
+                        cfg.ticker,
+                        format_utc(f.ts),
+                        f.close,
+                        f.rsi_2,
+                        f.win_prob,
+                        if f.rsi_2 < 30.0 { " [in-zone]" } else { "" },
+                        if f.win_prob + 1e-12 >= conf_thr { " [armed]" } else { "" },
                     );
                 }
             }
@@ -496,7 +582,7 @@ async fn handle_engine_events(
                     r.win_prob
                 );
                 if cfg.mode == ExecutionMode::Live {
-                    route_entry(ctx.exchange.as_ref(), native_symbol, &r).await;
+                    route_entry(ctx.broker.as_ref(), native_symbol, &r).await;
                 }
                 if let Some(db) = db {
                     let snap = strategy.snapshot();
@@ -529,7 +615,7 @@ async fn handle_engine_events(
                     rec.duration_s
                 );
                 if cfg.mode == ExecutionMode::Live {
-                    route_exit(ctx.exchange.as_ref(), native_symbol, &rec).await;
+                    route_exit(ctx.broker.as_ref(), native_symbol, &rec).await;
                 }
                 if let Some(db) = db {
                     let snap = strategy.snapshot();
@@ -580,14 +666,17 @@ async fn finish(cfg: &ExecutionConfig, mut ctx: LoopContext, db: &Option<Arc<DbW
             crate::report::generate_html_report(db, &cfg.ticker).await;
         }
     }
-    if let Err(e) = ctx.exchange.close().await {
-        eprintln!("[close] {e}");
+    if let Err(e) = ctx.feed.close().await {
+        eprintln!("[feed close] {e}");
+    }
+    if let Err(e) = ctx.broker.close().await {
+        eprintln!("[broker close] {e}");
     }
 }
 
 /// Route an engine entry to the exchange (Live mode): market order sized to
 /// the engine receipt quantity.
-async fn route_entry(exchange: &dyn Exchange, symbol: &str, r: &engine::EntryReceipt) {
+async fn route_entry(broker: &dyn Broker, symbol: &str, r: &engine::EntryReceipt) {
     let side = if r.side == engine::Side::Long {
         TradeSide::Buy
     } else {
@@ -600,7 +689,7 @@ async fn route_entry(exchange: &dyn Exchange, symbol: &str, r: &engine::EntryRec
         price: 0.0,
         amount: r.qty,
     };
-    match exchange.place_order(&req).await {
+    match broker.place_order(&req).await {
         Ok(resp) => println!(
             "[order] submitted {} side={} status={}",
             resp.exchange_order_id,
@@ -617,7 +706,7 @@ async fn route_entry(exchange: &dyn Exchange, symbol: &str, r: &engine::EntryRec
 
 /// Route an engine exit to the exchange (Live mode): close the position by
 /// trading back the recorded quantity on the opposite side.
-async fn route_exit(exchange: &dyn Exchange, symbol: &str, rec: &engine::TradeRecord) {
+async fn route_exit(broker: &dyn Broker, symbol: &str, rec: &engine::TradeRecord) {
     let side = if rec.side == engine::Side::Long {
         TradeSide::Sell
     } else {
@@ -630,7 +719,7 @@ async fn route_exit(exchange: &dyn Exchange, symbol: &str, rec: &engine::TradeRe
         price: 0.0,
         amount: rec.qty,
     };
-    match exchange.place_order(&req).await {
+    match broker.place_order(&req).await {
         Ok(resp) => println!(
             "[order] closed {} status={}",
             resp.exchange_order_id, resp.status
