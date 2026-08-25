@@ -9,6 +9,7 @@
 //! Implementations talk to the venues' **direct WebSocket / HTTP APIs** —
 //! no exchange SDK dependencies (only tokio, tokio-tungstenite, reqwest).
 
+pub mod binance;
 pub mod bitfinex;
 pub mod bybit;
 pub mod parquet;
@@ -23,10 +24,17 @@ use std::sync::atomic::AtomicBool;
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// The set of trading venues the execution layer can drive.
+///
+/// A venue may be used as a **feed** (public market data), a **broker**
+/// (order routing), or both. For example the strategy can stream orderflow
+/// from `Binance` (feed only) while routing orders to `Bitfinex` (broker).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExchangeKind {
     Bybit,
     Bitfinex,
+    /// Binance USD-M futures (currently feed-only: no order routing is
+    /// implemented in this layer).
+    Binance,
     /// Historical replay of a pre-converted parquet feed (`live-test`).
     /// Not a real venue: no orders are ever routed in this mode.
     Parquet,
@@ -37,6 +45,7 @@ impl ExchangeKind {
         match s.trim().to_ascii_lowercase().as_str() {
             "bybit" => Some(Self::Bybit),
             "bitfinex" => Some(Self::Bitfinex),
+            "binance" => Some(Self::Binance),
             "parquet" | "replay" => Some(Self::Parquet),
             _ => None,
         }
@@ -46,6 +55,7 @@ impl ExchangeKind {
         match self {
             Self::Bybit => "bybit",
             Self::Bitfinex => "bitfinex",
+            Self::Binance => "binance",
             Self::Parquet => "parquet",
         }
     }
@@ -182,15 +192,19 @@ impl From<serde_json::Error> for ExchangeError {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// The trait
+// Market-data feed trait
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// A trading venue: public market-data streams + private order routing.
+/// A market-data feed: public trade prints + top-of-book depth, normalized into
+/// [`MarketEvent`]s.
 ///
-/// Implementors keep all venue-specific wire formats internal and expose only
-/// the normalized [`MarketEvent`] / [`OrderRequest`] types above.
+/// Feeds are decoupled from order routing so the strategy can stream orderflow
+/// from a venue that is *not* where its capital lives (e.g. read Binance / Bybit
+/// tape while executing on Bitfinex). Implementors keep venue wire formats
+/// internal and expose only the normalized types.
 #[async_trait::async_trait]
-pub trait Exchange: Send + Sync {
+pub trait Feed: Send + Sync {
+    /// The venue this feed's data is sourced from.
     fn kind(&self) -> ExchangeKind;
 
     /// Connect the public market-data streams for `ticker` (lowercase, e.g.
@@ -203,6 +217,22 @@ pub trait Exchange: Send + Sync {
     /// Historical composite-bar closes (oldest first) used to warm the
     /// strategy's feature rings at startup.
     async fn historical_closes(&self, ticker: &str, bars: u32) -> Result<Vec<f64>, ExchangeError>;
+
+    /// Tear down connections (drop is enough in practice).
+    async fn close(&mut self) -> Result<(), ExchangeError>;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Order-routing broker trait
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Order-routing + wallet balance broker. Paper / dry-run mode never touches a
+/// broker (fills are simulated inside the engine); only `Live` mode routes real
+/// orders here.
+#[async_trait::async_trait]
+pub trait Broker: Send + Sync {
+    /// The venue orders are routed to.
+    fn kind(&self) -> ExchangeKind;
 
     /// Place an order.
     async fn place_order(&self, req: &OrderRequest) -> Result<OrderResponse, ExchangeError>;
@@ -217,14 +247,48 @@ pub trait Exchange: Send + Sync {
     async fn close(&mut self) -> Result<(), ExchangeError>;
 }
 
+/// A no-op [`Broker`] used by the paper / replay paths so the loop always has a
+/// routing handle. Any routing attempt errors so a live-trade cannot silently
+/// fall through the dry-run broker.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NoopBroker;
+
+#[async_trait::async_trait]
+impl Broker for NoopBroker {
+    fn kind(&self) -> ExchangeKind {
+        ExchangeKind::Parquet
+    }
+
+    async fn place_order(&self, req: &OrderRequest) -> Result<OrderResponse, ExchangeError> {
+        Err(ExchangeError::Other(format!(
+            "no-op broker: order routing is disabled in paper/replay mode ({})",
+            req.symbol
+        )))
+    }
+
+    async fn cancel_order(&self, order_id: &str) -> Result<(), ExchangeError> {
+        Err(ExchangeError::Other(format!(
+            "no-op broker: cannot cancel order {order_id} in paper/replay mode"
+        )))
+    }
+
+    async fn balances(&self) -> Result<Vec<Balance>, ExchangeError> {
+        Ok(Vec::new())
+    }
+
+    async fn close(&mut self) -> Result<(), ExchangeError> {
+        Ok(())
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Factory + symbol helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Construct an exchange implementation. API credentials are read from the
-/// environment (`BYBIT_API_KEY`/`BYBIT_API_SECRET`, `BFX_API_KEY`/`BFX_API_SECRET`);
-/// the public data streams work without any credentials.
-pub fn create_exchange(kind: ExchangeKind) -> Box<dyn Exchange> {
+/// Construct a market-data feed. API credentials are read from the environment
+/// (`BYBIT_API_KEY`/`BYBIT_API_SECRET`, `BFX_API_KEY`/`BFX_API_SECRET`) when the
+/// venue is also used for routing; the public streams work without them.
+pub fn create_feed(kind: ExchangeKind) -> Box<dyn Feed> {
     match kind {
         ExchangeKind::Bybit => Box::new(bybit::BybitExchange::new(
             std::env::var("BYBIT_API_KEY").ok(),
@@ -234,6 +298,7 @@ pub fn create_exchange(kind: ExchangeKind) -> Box<dyn Exchange> {
             std::env::var("BFX_API_KEY").ok(),
             std::env::var("BFX_API_SECRET").ok(),
         )),
+        ExchangeKind::Binance => Box::new(binance::BinanceFeed::new()),
         // Only reachable if a caller drives a replay via `--exchange parquet`;
         // `live-test` builds its own feed path directly. Falls back to the
         // `LIVE_TEST_FEED` env var (connect will fail loudly if it is unset).
@@ -248,20 +313,36 @@ pub fn create_exchange(kind: ExchangeKind) -> Box<dyn Exchange> {
     }
 }
 
-/// Construct a historical replay exchange that reads a pre-converted parquet
-/// feed (see `unified_runner.py live-test`). `start_ms` / `end_ms` / `limit`
-/// bound the replayed window (useful for the multi-GB research parquet files);
-/// when `stop` is provided and the feed is exhausted, the exchange flips it so
+/// Construct a broker (order-routing venue). Binance / parquet have no order
+/// routing from this layer, so they fall back to a [`NoopBroker`].
+pub fn create_broker(kind: ExchangeKind) -> Box<dyn Broker> {
+    match kind {
+        ExchangeKind::Bybit => Box::new(bybit::BybitExchange::new(
+            std::env::var("BYBIT_API_KEY").ok(),
+            std::env::var("BYBIT_API_SECRET").ok(),
+        )),
+        ExchangeKind::Bitfinex => Box::new(bitfinex::BitfinexExchange::new(
+            std::env::var("BFX_API_KEY").ok(),
+            std::env::var("BFX_API_SECRET").ok(),
+        )),
+        ExchangeKind::Binance | ExchangeKind::Parquet => Box::<NoopBroker>::default(),
+    }
+}
+
+/// Construct a historical replay feed that reads a pre-converted parquet feed
+/// (see `unified_runner.py live-test`). `start_ms` / `end_ms` / `limit` bound
+/// the replayed window (useful for the multi-GB research parquet files); when
+/// `stop` is provided and the feed is exhausted, the exchange flips it so
 /// `run_execution_loop` drains and emits the final report — exactly like
 /// Ctrl-C on a live session.
-pub fn create_replay_exchange(
+pub fn create_replay_feed(
     feed_path: &str,
     start_ms: Option<i64>,
     end_ms: Option<i64>,
     limit: Option<usize>,
     loop_feed: bool,
     stop: Option<Arc<AtomicBool>>,
-) -> Box<dyn Exchange> {
+) -> Box<dyn Feed> {
     Box::new(parquet::ReplayExchange::new(
         feed_path, start_ms, end_ms, limit, loop_feed, stop,
     ))
@@ -271,6 +352,11 @@ pub fn create_replay_exchange(
 pub mod symbols {
     /// Bybit linear-perpetual symbol: "btcusdt" -> "BTCUSDT".
     pub fn bybit(ticker: &str) -> String {
+        ticker.trim().to_ascii_uppercase()
+    }
+
+    /// Binance USD-M futures symbol: "btcusdt" -> "BTCUSDT".
+    pub fn binance(ticker: &str) -> String {
         ticker.trim().to_ascii_uppercase()
     }
 

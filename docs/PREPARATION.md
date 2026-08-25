@@ -80,6 +80,50 @@ python -m research.xxx_hypothesis
 ## Executor Algorithm
 live-trade
 live-test
+
+### Feed / broker decoupling (orderflow source ≠ execution venue)
+The execution loop now separates the **feed** (where market data / orderflow is
+streamed) from the **broker** (where orders are routed). This lets you read
+deeper orderflow from Binance or Bybit while executing on Bitfinex (where your
+capital lives):
+
+- `--exchange` — execution venue (Bitfinex holds your API keys / capital).
+- `--feed`     — market-data feed venue: `bybit`, `bitfinex`, or `binance`;
+                 defaults to `--exchange`. `binance` is feed-only (no order
+                 routing from this layer).
+
+Examples via `unified_runner.py` (and the `live-trade` Rust binary supports the
+same `--feed` flag):
+
+```
+# Stream Binance USD-M tape + book, execute on Bitfinex:
+python unified_runner.py live-trade --exchange bitfinex --feed binance --mode live
+
+# Bybit feed, Bitfinex execution:
+python unified_runner.py live-trade --exchange bitfinex --feed bybit --mode paper
+```
+
+Implementation notes: `Exchange` was split into a `Feed` trait (connect /
+`next_events` / `historical_closes`) and a `Broker` trait (`place_order` /
+`cancel_order` / `balances`). `LoopContext` now holds `feed: Box<dyn Feed>` and
+`broker: Box<dyn Broker>`; a `NoopBroker` backs the paper/replay paths. The
+order symbol is mapped from the broker venue (e.g. `tBTCUST` on Bitfinex) while
+the feed independently maps its own symbol (e.g. `BTCUSDT` on Binance).
+
+### Live trade-count dashboard
+The executor prints trade counts to the console, but you can also get a live
+browser page showing how many trades have been executed (plus equity,
+wins/losses, cumulative R, mid, feed staleness) per ticker:
+
+```
+python unified_runner.py live-trade --exchange bitfinex --feed binance --dashboard
+# → open http://localhost:8001
+```
+
+The page polls `status()` once a second (no WebSocket needed) and is purely
+observational. Standalone preview with synthetic data:
+`python -m main.live_dashboard`.
+
 ## Research Backtesting
 ml_state_optimized
   </div>

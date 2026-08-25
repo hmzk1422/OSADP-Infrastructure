@@ -251,6 +251,36 @@ impl DbWriter {
         Ok(out)
     }
 
+    /// Downsampled per-second last-price series for charting: walks the trades
+    /// column family in key order (chronological) and keeps the LAST print of
+    /// each 1-second bucket — i.e. the bucket close. Memory-bounded at O(buckets)
+    /// instead of O(trade prints), so a multi-million-print session still yields
+    /// a compact series. Returns `(bucket_start_ms, close)` pairs, oldest first.
+    pub fn price_series_1s(&self, symbol: &str) -> Result<Vec<(i64, f64)>, DbError> {
+        let cf = self.cf(CF_TRADES)?;
+        let prefix = Self::symbol_prefix(symbol);
+        let mut out: Vec<(i64, f64)> = Vec::new();
+        for item in self
+            .db
+            .iterator_cf(cf, IteratorMode::From(&prefix, Direction::Forward))
+        {
+            let (key, value) = item?;
+            if !key.starts_with(prefix.as_slice()) {
+                break;
+            }
+            let trade: MarketTrade = serde_json::from_slice(&value)?;
+            if trade.price <= 0.0 {
+                continue; // ignore malformed prints rather than corrupting the chart
+            }
+            let bucket = trade.timestamp - trade.timestamp.rem_euclid(1000);
+            match out.last_mut() {
+                Some((ts, px)) if *ts == bucket => *px = trade.price,
+                _ => out.push((bucket, trade.price)),
+            }
+        }
+        Ok(out)
+    }
+
     /// Returns all stored L1 snapshots for `symbol`, oldest first.
     pub fn iter_orderbook(&self, symbol: &str) -> Result<Vec<MarketBookTop>, DbError> {
         let cf = self.cf(CF_ORDERBOOK)?;

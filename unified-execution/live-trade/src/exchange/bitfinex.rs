@@ -17,7 +17,7 @@
 //! buy and a negative AMOUNT is a sell.
 
 use super::{
-    Balance, Exchange, ExchangeError, ExchangeKind, MarketBookTop, MarketEvent, MarketTrade,
+    Balance, Broker, ExchangeError, ExchangeKind, Feed, MarketBookTop, MarketEvent, MarketTrade,
     OrderRequest, OrderResponse, OrderType, TradeSide, header_map, hmac_sha384, now_ms, symbols,
 };
 use futures_util::{SinkExt, StreamExt};
@@ -31,6 +31,7 @@ const PUBLIC_WS_URL: &str = "wss://api-pub.bitfinex.com/ws/2";
 const PUBLIC_REST_URL: &str = "https://api-pub.bitfinex.com/v2";
 const AUTH_REST_URL: &str = "https://api.bitfinex.com/v2";
 const PING_INTERVAL_SECS: u64 = 30;
+const MAX_BARS: u32 = 200;
 
 type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
@@ -76,7 +77,7 @@ impl BitfinexExchange {
 }
 
 #[async_trait::async_trait]
-impl Exchange for BitfinexExchange {
+impl Feed for BitfinexExchange {
     fn kind(&self) -> ExchangeKind {
         ExchangeKind::Bitfinex
     }
@@ -172,13 +173,38 @@ impl Exchange for BitfinexExchange {
 
     async fn historical_closes(&self, ticker: &str, bars: u32) -> Result<Vec<f64>, ExchangeError> {
         let symbol = symbols::bitfinex(ticker);
-        // Candle rows are [MTS, OPEN, CLOSE, HIGH, LOW, VOLUME]; sort=1 = oldest first.
-        let url = format!("{PUBLIC_REST_URL}/candles/trade:5m:{symbol}/hist?limit={bars}&sort=1");
+        let limit = bars.min(MAX_BARS).max(1);
+        // Candle rows are [MTS, OPEN, CLOSE, HIGH, LOW, VOLUME].
+        //
+        // CAUTION: Bitfinex `/hist` PAGES through history in the direction of
+        // `sort`. With `sort=1` and no explicit `start`, "ascending" means it
+        // returns the OLDEST candles on record (2019, BTC ≈ $3,870) — seeding
+        // the feature rings with years-stale prices and pinning Wilder RSI(2)
+        // near 100 (the seam diff into today's price is a colossal fake gain),
+        // which permanently blocks the rsi_2 < 30 hunting zone. `sort=-1`
+        // pages newest-first; reverse locally into the oldest-first order
+        // `seed_macro_closes` expects.
+        let url = format!("{PUBLIC_REST_URL}/candles/trade:5m:{symbol}/hist?limit={limit}&sort=-1");
         let rows: Vec<Vec<serde_json::Value>> = reqwest::get(&url).await?.json().await?;
-        Ok(rows
+        let mut closes: Vec<f64> = rows
             .iter()
             .filter_map(|r| r.get(2).and_then(|c| c.as_f64()))
-            .collect())
+            .collect();
+        // Newest-first → oldest-first for seed warming.
+        closes.reverse();
+        Ok(closes)
+    }
+
+    async fn close(&mut self) -> Result<(), ExchangeError> {
+        self.ws = None;
+        Ok(())
+    }
+}
+
+#[async_trait::async_trait]
+impl Broker for BitfinexExchange {
+    fn kind(&self) -> ExchangeKind {
+        ExchangeKind::Bitfinex
     }
 
     async fn place_order(&self, req: &OrderRequest) -> Result<OrderResponse, ExchangeError> {

@@ -31,10 +31,7 @@
 //! B <ts_ms> <bid_price> <bid_amount> <ask_price> <ask_amount>
 //! ```
 
-use super::{
-    Balance, Exchange, ExchangeError, ExchangeKind, MarketBookTop, MarketEvent, MarketTrade,
-    OrderRequest, OrderResponse, TradeSide,
-};
+use super::{ExchangeError, ExchangeKind, Feed, MarketBookTop, MarketEvent, MarketTrade, TradeSide};
 use std::collections::VecDeque;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
@@ -224,7 +221,7 @@ impl ReplayExchange {
     }
 }
 #[async_trait::async_trait]
-impl Exchange for ReplayExchange {
+impl Feed for ReplayExchange {
     fn kind(&self) -> ExchangeKind {
         ExchangeKind::Parquet
     }
@@ -327,25 +324,6 @@ impl Exchange for ReplayExchange {
     async fn historical_closes(&self, _ticker: &str, bars: u32) -> Result<Vec<f64>, ExchangeError> {
         let from = self.closes.len().saturating_sub(bars as usize);
         Ok(self.closes[from..].to_vec())
-    }
-
-    async fn place_order(&self, req: &OrderRequest) -> Result<OrderResponse, ExchangeError> {
-        // Paper mode never routes orders; this is a defensive no-op so the
-        // replay can never hit a real venue.
-        Ok(OrderResponse {
-            exchange_order_id: format!("replay-{}", req.symbol),
-            status: "simulated".to_string(),
-            avg_price: 0.0,
-            filled_amount: req.amount,
-        })
-    }
-
-    async fn cancel_order(&self, _order_id: &str) -> Result<(), ExchangeError> {
-        Ok(())
-    }
-
-    async fn balances(&self) -> Result<Vec<Balance>, ExchangeError> {
-        Ok(Vec::new())
     }
 
     async fn close(&mut self) -> Result<(), ExchangeError> {

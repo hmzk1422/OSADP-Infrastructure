@@ -6,7 +6,7 @@
 //!     cargo run -p live-trade -- btcusdt --exchange bitfinex --mode paper
 //!     cargo run -p live-trade -- ethusdt --exchange bybit --mode paper --capital 2000
 
-use live_trade::exchange::{ExchangeKind, create_exchange};
+use live_trade::exchange::{ExchangeKind, create_broker, create_feed};
 use live_trade::execution::{
     ExecutionConfig, ExecutionMode, LoopContext, RunStats, run_execution_loop,
 };
@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex};
 
 fn usage<T>() -> T {
     eprintln!(
-        "usage: live-trade [ticker] [--exchange bybit|bitfinex] [--mode paper|live] [--capital USD] [--db PATH] [--no-db] [--seed N] [--config PATH]"
+        "usage: live-trade [ticker] [--exchange bybit|bitfinex] [--feed bybit|bitfinex|binance] [--mode paper|live] [--capital USD] [--db PATH] [--no-db] [--seed N] [--config PATH]"
     );
     std::process::exit(2);
 }
@@ -24,6 +24,10 @@ fn usage<T>() -> T {
 async fn main() {
     let mut ticker = "btcusdt".to_string();
     let mut exchange = ExchangeKind::Bitfinex;
+    // Market-data venue; defaults to the execution venue unless overridden. Use
+    // `--feed bybit|binance` to stream orderflow from one venue while routing
+    // orders to another (`--exchange`) that holds your capital.
+    let mut feed = ExchangeKind::Bitfinex;
     let mut mode = ExecutionMode::Paper;
     let mut capital = 10_000.0f64;
     let mut db_path = "./data/marketdata.rocksdb".to_string();
@@ -37,6 +41,10 @@ async fn main() {
             "--exchange" => {
                 let v = args.next().unwrap_or_else(usage);
                 exchange = ExchangeKind::parse(&v).unwrap_or_else(usage);
+            }
+            "--feed" => {
+                let v = args.next().unwrap_or_else(usage);
+                feed = ExchangeKind::parse(&v).unwrap_or_else(usage);
             }
             "--mode" => {
                 let v = args.next().unwrap_or_else(usage);
@@ -85,7 +93,8 @@ async fn main() {
 
     let cfg = ExecutionConfig {
         ticker: ticker.clone(),
-        exchange,
+        feed,
+        broker: exchange,
         mode,
         db_path,
         seed_bars,
@@ -94,7 +103,8 @@ async fn main() {
         walkforward_dir: None,
     };
     let ctx = LoopContext {
-        exchange: create_exchange(exchange),
+        feed: create_feed(feed),
+        broker: create_broker(exchange),
         stats: Arc::clone(&stats),
         paused,
         stop: Arc::clone(&stop),
