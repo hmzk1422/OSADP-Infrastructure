@@ -47,8 +47,11 @@ python3 unified_runner.py doctor --require-native
 #   installs (they're build-time tools, not needed to run the wheel).
 #   `OK.` + exit code 0 means the native module and repo are healthy.
 
-# paper-trade over Bitfinex (Bybit requires VPN in most regions):
-python3 unified_runner.py live-trade --tickers btcusd --exchange bitfinex --mode paper
+# paper-trade over Bitfinex (Bybit feed, Bitfinex execution):
+python3 unified_runner.py live-trade --exchange bitfinex --feed bybit --mode paper
+
+# or supervise a whole portfolio of assets from one master table:
+python3 unified_runner.py portfolio --config portfolio.json --restart
 ```
 
 Market data persists to `./data/marketdata.rocksdb` (relative paths work

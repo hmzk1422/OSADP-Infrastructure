@@ -124,6 +124,55 @@ The page polls `status()` once a second (no WebSocket needed) and is purely
 observational. Standalone preview with synthetic data:
 `python -m main.live_dashboard`.
 
+### Portfolio supervisor (multi-asset, one process per asset)
+Run a whole book of assets/strategies from one master table. Each asset gets
+its **own** `live-trade` OS process, its own RocksDB store
+(`data/portfolio_<ticker>.rocksdb`) and its own auto-refreshing report — while
+the supervisor aggregates everything:
+
+```powershell
+copy portfolio.example.json portfolio.json   # then edit tickers / capital / feeds
+python unified_runner.py portfolio --config portfolio.json --restart
+```
+
+What you get:
+- per-asset + TOTAL console table (equity, net, R, trades, RSI, P(WIN), mid)
+- tabbed dashboard at `build/portfolio_dashboard.html` (overview + sidebar tab
+  per asset; asset tabs embed that asset's full TradingView-style report)
+- `*** ALERT *** <asset> PROCESS DOWN` when a child crashes, with optional
+  auto-restart (`"restart": true` in the table or `--restart`)
+- Ctrl-C forwards to every child for a clean RocksDB flush
+
+Master-table keys: top-level defaults `mode`, `exchange`, `feed`, `capital`,
+`restart`, `status_interval`; per-asset overrides `ticker`, `exchange`, `feed`,
+`capital`, `config` (per-strategy JSON), `db`.
+
+### RocksDB maintenance (`db`)
+Strategy data lives in local RocksDB stores. Inspect and delete them from the
+runner (stop any running session first - an open store cannot be deleted):
+
+```bash
+python unified_runner.py db --list                       # list stores + sizes
+python unified_runner.py db --clean-ticker btcusdt       # delete matching stores
+python unified_runner.py db --clean-all --yes            # delete ALL of data/
+```
+
+### Console cadence (`--status-interval`)
+`live-trade` ingests market data in real time regardless of logging. The
+console status line cadence is configurable and defaults to 2 s (was 0.5 s,
+which flooded the terminal without adding information):
+
+```bash
+python unified_runner.py live-trade --exchange bitfinex --feed bybit --status-interval 5
+```
+
+### Report timeframes
+The session report draws three panes: price candles aggregated client-side
+from the 1-second tape (chip shows the current grouping, e.g. `20 x 1s`), the
+FULL RSI(2) series - the same macro value the strategy gates on, sampled every
+second from the 300 s composite bars - and the equity curve. Trade markers are
+pinned in the same coordinate space as candles at any zoom level.
+
 ## Research Backtesting
 ml_state_optimized
   </div>

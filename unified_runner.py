@@ -38,8 +38,16 @@ Stack map
 CLI
 ---
     python unified_runner.py backtest
-    python unified_runner.py live-trade --tickers btcusdt ethusdt solusdt \
-        --exchange bitfinex --mode paper --capital 5000
+    python unified_runner.py live-trade --exchange bitfinex --feed bybit \
+        --mode paper --capital 10000
+    # Multi-asset portfolio: one live-trade PROCESS per asset from a master
+    # table (see portfolio.example.json), with total PnL tracking, per-asset
+    # RocksDB stores, a tabbed dashboard (build/portfolio_dashboard.html) and
+    # crash alerts:
+    python unified_runner.py portfolio --config portfolio.json --restart
+    # Inspect / delete RocksDB stores:
+    python unified_runner.py db --list
+    python unified_runner.py db --clean-ticker btcusdt --yes
     # Stream Binance/Bitfinex/Bybit orderflow while executing on Bitfinex:
     python unified_runner.py live-trade --exchange bitfinex --feed binance --mode live
     # Serve a live browser page of trades executed (+equity/wins/losses):
@@ -329,17 +337,10 @@ def cmd_live_trade(args: argparse.Namespace) -> int:
     # and hand it to every strategy, so live-trade runs the exact parameters
     # research/live-test use — e.g. a CONFIDENCE_THRESHOLD edit in
     # main/config.py applies on the next launch WITHOUT a Rust rebuild.
-    if not (REPO_ROOT / "main" / "config.py").exists():
+    trade_config_path = _export_strategy_config()
+    if trade_config_path is None:
         print("ERROR: main/config.py not found — required for config export", file=sys.stderr)
         return 1
-    import importlib.util as _ilu
-
-    _spec = _ilu.spec_from_file_location("_main_config", REPO_ROOT / "main" / "config.py")
-    _mod = _ilu.module_from_spec(_spec)
-    _spec.loader.exec_module(_mod)
-    trade_config_path = str(REPO_ROOT / "build" / "live_trade_config.json")
-    _mod.export_strategy_config(trade_config_path)
-    logger.info("exported strategy config -> %s", trade_config_path)
 
     pf = Portfolio()
     state = {"stopped": False}
@@ -412,12 +413,10 @@ def cmd_live_trade(args: argparse.Namespace) -> int:
 
     try:
         while not state["stopped"] and any(s.is_running for s in pf):
-            # High-frequency control-plane sampling: the Rust loop ingests every
-            # websocket frame in real time — the sleep below only sets how often
-            # Python prints a status line, NOT how fresh the data is. Use a
-            # sub-second cadence and surface the millisecond latency counters so
-            # feed staleness is visible end-to-end (arbitrage diagnostics).
-            time.sleep(0.5)
+            # The Rust loop ingests every websocket frame in real time - this
+            # sleep only sets how often Python prints a status line. Default
+            # 2 s keeps the console readable; use --status-interval to tune.
+            time.sleep(args.status_interval)
             stamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
             for ticker, st in pf.status().items():
                 mid = f'{st["mid"]:.2f}' if st["mid"] else "—"
@@ -780,6 +779,118 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     return 0 if ok else 1
 
 
+def _export_strategy_config() -> Optional[str]:
+    """Materialize main/config.py -> build/live_trade_config.json (shared by
+    live-trade and portfolio so every runner uses identical parameters)."""
+    if not (REPO_ROOT / "main" / "config.py").exists():
+        return None
+    import importlib.util as _ilu
+
+    _spec = _ilu.spec_from_file_location("_main_config", REPO_ROOT / "main" / "config.py")
+    _mod = _ilu.module_from_spec(_spec)
+    _spec.loader.exec_module(_mod)
+    trade_config_path = str(REPO_ROOT / "build" / "live_trade_config.json")
+    _mod.export_strategy_config(trade_config_path)
+    logger.info("exported strategy config -> %s", trade_config_path)
+    return trade_config_path
+
+
+def cmd_portfolio(args: argparse.Namespace) -> int:
+    """Supervise one `live-trade` process per asset from a master JSON table."""
+    from portfolio_supervisor import run_portfolio
+
+    cfg = _export_strategy_config()
+    if cfg is None:
+        print("ERROR: main/config.py not found — required for config export", file=sys.stderr)
+        return 1
+    return run_portfolio(
+        args.config,
+        release=args.release,
+        restart=args.restart,
+        status_interval=args.status_interval,
+        no_dashboard=args.no_dashboard,
+    )
+
+
+def _rocksdb_stores() -> list[Path]:
+    """All local RocksDB stores managed by this repo (data/ + live-test tapes)."""
+    stores: list[Path] = []
+    data = REPO_ROOT / "data"
+    if data.exists():
+        for entry in sorted(data.glob("*.rocksdb*")):
+            stores.append(entry)
+    build = REPO_ROOT / "build"
+    if build.exists():
+        for entry in sorted(build.glob("live_test_*.rocksdb*")):
+            stores.append(entry)
+    return stores
+
+
+def _dir_size_mb(p: Path) -> float:
+    if p.is_file():
+        return p.stat().st_size / (1024 * 1024)
+    total = 0
+    for f in p.rglob("*"):
+        if f.is_file():
+            total += f.stat().st_size
+    return total / (1024 * 1024)
+
+
+def cmd_db(args: argparse.Namespace) -> int:
+    """List or delete local RocksDB stores (data/*.rocksdb, build/live_test_*)."""
+    stores = _rocksdb_stores()
+    if args.list or not (args.clean_ticker or args.clean_all):
+        if not stores:
+            print("no RocksDB stores found")
+            return 0
+        print(f"{'store':<55}{'size':>10}")
+        for s in stores:
+            print(f"{str(s.relative_to(REPO_ROOT)):<55}{_dir_size_mb(s):>8.1f}MB")
+        print(f"\ntotal: {len(stores)} store(s)")
+        print("delete with: python unified_runner.py db --clean-ticker <sym> | --all [--yes]")
+        return 0
+
+    targets: list[Path] = []
+    sym = (args.clean_ticker or "").lower()
+    for s in stores:
+        name = s.name.lower()
+        if args.clean_all or (sym and sym in name):
+            targets.append(s)
+    if not targets:
+        print(f"no stores match '{args.clean_ticker}'")
+        return 1
+
+    print("about to DELETE:")
+    total_mb = 0.0
+    for t in targets:
+        mb = _dir_size_mb(t)
+        total_mb += mb
+        print(f"  - {t.relative_to(REPO_ROOT)}  ({mb:.1f} MB)")
+    print(f"total: {total_mb:.1f} MB across {len(targets)} store(s)")
+
+    if not args.yes:
+        answer = input("type 'yes' to confirm deletion: ").strip().lower()
+        if answer != "yes":
+            print("aborted.")
+            return 1
+
+    import shutil as _shutil
+
+    for t in targets:
+        try:
+            if t.is_dir():
+                _shutil.rmtree(t)
+            else:
+                t.unlink()
+            print(f"deleted {t.relative_to(REPO_ROOT)}")
+        except OSError as exc:
+            # Most common cause: a session is still running with the DB open.
+            print(f"ERROR deleting {t}: {exc}", file=sys.stderr)
+            return 1
+    print("done.")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="unified_runner",
@@ -833,7 +944,56 @@ def build_parser() -> argparse.ArgumentParser:
         "--capital", type=float, default=DEFAULT_CAPITAL_USD,
         help="capital (USD) allocated to EACH strategy",
     )
+    p_trade.add_argument(
+        "--status-interval", type=float, default=2.0,
+        help="seconds between console status lines (default: 2.0; "
+        "data ingestion is always real-time regardless of this value)",
+    )
     p_trade.set_defaults(func=cmd_live_trade)
+
+    p_port = sub.add_parser(
+        "portfolio",
+        help="supervise one live-trade PROCESS per asset from a master JSON table "
+        "(own RocksDB per asset, total PnL tracking, tabbed dashboard, crash alerts)",
+    )
+    p_port.add_argument(
+        "--config", default="portfolio.json",
+        help="master portfolio table (JSON); see portfolio.example.json",
+    )
+    p_port.add_argument(
+        "--release", action="store_true",
+        help="prefer the release build of the live-trade binary",
+    )
+    p_port.add_argument(
+        "--restart", action="store_true",
+        help="auto-restart a child that exits unexpectedly (3s cooldown)",
+    )
+    p_port.add_argument(
+        "--status-interval", type=float, default=None,
+        help="seconds between portfolio summary tables (default: from config, else 5)",
+    )
+    p_port.add_argument(
+        "--no-dashboard", action="store_true",
+        help="skip writing build/portfolio_dashboard.html",
+    )
+    p_port.set_defaults(func=cmd_portfolio)
+
+    p_db = sub.add_parser(
+        "db", help="list or delete local RocksDB stores (per-asset strategy data)"
+    )
+    p_db.add_argument("--list", action="store_true", help="list all known stores (default)")
+    p_db.add_argument(
+        "--clean-ticker", metavar="SYMBOL",
+        help="delete stores whose name contains SYMBOL, e.g. --clean-ticker btcusdt",
+    )
+    p_db.add_argument(
+        "--clean-all", action="store_true",
+        help="delete ALL stores under data/ (dangerous — prompts unless --yes)",
+    )
+    p_db.add_argument(
+        "--yes", action="store_true", help="skip the interactive confirmation"
+    )
+    p_db.set_defaults(func=cmd_db)
 
     p_test = sub.add_parser(
         "live-test",
