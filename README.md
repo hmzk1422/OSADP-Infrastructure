@@ -89,6 +89,18 @@ python unified_runner.py <command> [options]
 
 Add `--help` to any command for the full option list.
 
+### RocksDB maintenance (`db`)
+
+```bash
+python unified_runner.py db --list                        # list stores + sizes
+python unified_runner.py db --clean-ticker btcusdt        # delete one asset's store
+python unified_runner.py db --clean-all --yes             # delete EVERYTHING under data/
+```
+
+Deletion prompts for confirmation unless `--yes` is passed. Stop any running
+session first - a store that is open cannot be deleted.
+
+
 ### Paper-trade with a Bybit feed (recommended first run)
 
 ```bash
@@ -103,6 +115,37 @@ python unified_runner.py live-trade --exchange bitfinex --feed bybit --mode pape
 
 While it runs, open `build/pnl_report_btcusdt.html` in a browser for the live
 TradingView-style report.
+
+#### Multi-asset portfolio (`portfolio`)
+
+One `live-trade` **process per asset** from a master JSON table - each asset
+gets its own RocksDB store and its own auto-refreshing report, while the
+supervisor tracks total PnL, raises alerts when a child crashes, optionally
+auto-restarts it, and writes a tabbed dashboard
+(`build/portfolio_dashboard.html`: overview tab + one tab per asset).
+
+```bash
+copy portfolio.example.json portfolio.json    # then edit tickers/capital
+python unified_runner.py portfolio --config portfolio.json --restart
+```
+
+Master table format:
+
+```json
+{
+  "mode": "paper",
+  "exchange": "bitfinex",
+  "restart": true,
+  "status_interval": 5.0,
+  "assets": [
+    { "ticker": "btcusdt", "feed": "bybit",   "capital": 5000 },
+    { "ticker": "ethusdt", "feed": "binance", "capital": 3000 }
+  ]
+}
+```
+
+Per-asset overrides: `exchange`, `feed`, `capital`, `config` (strategy JSON),
+`db`. Flags: `--release` (prefer release binary), `--no-dashboard`.
 
 ### More examples
 

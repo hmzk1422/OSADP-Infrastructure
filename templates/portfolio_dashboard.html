@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><meta http-equiv="refresh" content="15">
+<title>OSADP Portfolio</title>
+<style>
+:root{--bg:#131722;--panel:#1e222d;--border:#2a2e39;--txt:#d1d4dc;--mut:#787b86;
+      --up:#26a69a;--dn:#ef5350;--acc:#2962ff}
+*{box-sizing:border-box;margin:0}
+body{font-family:'Trebuchet MS','Segoe UI',sans-serif;background:var(--bg);color:var(--txt);
+     display:flex;min-height:100vh}
+.sidebar{width:210px;background:var(--panel);border-right:1px solid var(--border);
+         padding:16px 0;position:sticky;top:0;height:100vh;overflow-y:auto;flex-shrink:0}
+.logo{padding:0 18px 14px;font-weight:bold;color:#f0b90b;font-size:15px}
+.logo span{color:var(--txt);font-weight:normal;display:block;font-size:10px;
+           color:var(--mut);letter-spacing:1px}
+.nav{display:block;padding:9px 18px;color:var(--mut);text-decoration:none;
+     font-size:13px;border-left:2px solid transparent}
+.nav:hover{color:var(--txt)}
+.nav.on{color:#fff;border-color:var(--acc);background:rgba(41,98,255,.12)}
+.nav .tag{float:right;color:var(--dn);font-weight:bold}
+.main{flex:1;padding:18px 22px;min-width:0}
+h1{font-size:17px;margin-bottom:12px} h1 em{font-style:normal;color:var(--mut);font-size:12px}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;margin-bottom:16px}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:10px 12px}
+.card .l{font-size:10px;color:var(--mut);text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px}
+.card .v{font-size:19px;font-weight:bold;font-variant-numeric:tabular-nums}
+.up{color:var(--up)} .dn{color:var(--dn)}
+table{border-collapse:collapse;width:100%;background:var(--panel);
+      border:1px solid var(--border);border-radius:6px;overflow:hidden;
+      font-variant-numeric:tabular-nums}
+th{background:#2a2e39;padding:8px 10px;text-align:left;font-size:10px;color:var(--mut);
+   text-transform:uppercase;letter-spacing:.6px}
+td{padding:7px 10px;border-bottom:1px solid #262a35;font-size:12px}
+td.num{text-align:right}
+.st{font-size:10px;padding:1px 8px;border-radius:3px;font-weight:bold}
+.st.running{background:rgba(38,166,154,.15);color:var(--up)}
+.st.DOWN{background:rgba(239,83,80,.15);color:var(--dn)}
+.st.starting{background:rgba(240,185,11,.15);color:#f0b90b}
+a.rep{color:var(--acc);text-decoration:none;font-size:11px}
+iframe{width:100%;height:78vh;border:1px solid var(--border);border-radius:6px;
+       background:var(--bg)}
+.alerts{margin-top:14px;background:var(--panel);border:1px solid var(--border);
+        border-radius:6px;padding:10px 14px;font-size:11px;line-height:1.7}
+.alerts b{color:#f0b90b}
+.mut{color:var(--mut)}
+</style></head>
+<body>
+<div class="sidebar">
+  <div class="logo">OSADP<span>PORTFOLIO</span></div>
+  <a class="nav on" href="#overview" data-tab="overview">Overview</a>
+  <div style="padding:12px 18px 4px;font-size:9px;color:var(--mut);letter-spacing:1px">ASSETS</div>
+  <div id="nav-assets"></div>
+</div>
+<div class="main"><div id="content"></div></div>
+<script>var DATA = __PAYLOAD__;</script>
+<script>
+(function () {
+  function esc(s){return String(s==null?'':s);}
+  function money(v,d){return '$'+Number(v||0).toFixed(d===undefined?2:d);}
+  function cls(v){return v>=0?'up':'dn';}
+  var nav=document.getElementById('nav-assets'), content=document.getElementById('content');
+  function cards(arr){
+    return '<div class="cards">'+arr.map(function(c){
+      return '<div class="card"><div class="l">'+c.l+'</div><div class="v '+
+             (c.c||'')+'">'+c.v+'</div>'+'</div>';
+    }).join('')+'</div>';
+  }
+  function show(id){
+    if(id==='overview'){
+      var T=DATA.totals;
+      var h='<h1>Overview <em>updated '+esc(DATA.generatedAt)+' - auto-refresh 15s</em></h1>';
+      h+=cards([
+        {l:'Total Equity',v:money(T.equity)},
+        {l:'Net PnL',v:(T.net>=0?'+':'')+money(T.net),c:cls(T.net)},
+        {l:'Total R',v:(T.r>=0?'+':'')+T.r.toFixed(2)+'R',c:cls(T.r)},
+        {l:'Trades',v:T.trades},
+        {l:'Assets Up',v:T.up+' / '+DATA.assets.length,c:T.up===DATA.assets.length?'up':'dn'}
+      ]);
+      h+='<table><thead><tr><th>Asset</th><th>Status</th><th>Feed</th><th>Eq ($)</th>'+
+         '<th>Net ($)</th><th>R</th><th>Trades</th><th>RSI</th><th>P(WIN)</th><th></th></tr></thead><tbody>';
+      DATA.assets.forEach(function(a){
+        h+='<tr><td><b>'+a.ticker.toUpperCase()+'</b><br><span class="mut" style="font-size:10px">'+
+           'restarts '+a.restarts+'</span></td>'+
+           '<td><span class="st '+esc(a.status)+'">'+esc(a.status)+'</span></td>'+
+           '<td>'+esc(a.feed)+'/'+esc(a.exchange)+'</td>'+
+           '<td class="num">'+money(a.equity)+'</td>'+
+           '<td class="num '+cls(a.net)+'">'+(a.net>=0?'+':'')+money(a.net)+'</td>'+
+           '<td class="num '+(a.total_r>=0?'up':'dn')+'">'+(a.total_r>=0?'+':'')+a.total_r.toFixed(2)+'</td>'+
+           '<td class="num">'+a.trades+'</td>'+
+           '<td class="num">'+(a.rsi==null?'-':a.rsi.toFixed(1))+'</td>'+
+           '<td class="num">'+(a.pwin==null?'-':(a.pwin*100).toFixed(0)+'%')+'</td>'+
+           '<td><a class="rep" href="'+esc(a.report)+'">report &#8599;</a></td></tr>';
+      });
+      h+='</tbody></table>';
+      var withAlerts=DATA.assets.filter(function(a){return a.alerts.length;});
+      if(withAlerts.length){
+        h+='<div class="alerts"><b>RECENT EVENTS</b><br>';
+        withAlerts.forEach(function(a){
+          h+='['+a.ticker.toUpperCase()+'] '+esc(a.alerts.join(' &nbsp;|&nbsp; '))+'<br>';
+        });
+        h+='</div>';
+      }
+      content.innerHTML=h; return;
+    }
+    var i=+id.slice(1), a=DATA.assets[i]; if(!a) return;
+    var h='<h1>'+a.ticker.toUpperCase()+
+      ' <em>'+esc(a.feed)+'/'+esc(a.exchange)+' - '+esc(a.mode)+
+      ' | capital '+money(a.capital,0)+
+      ' <span class="st '+esc(a.status)+'">'+esc(a.status)+'</span></em></h1>';
+    h+=cards([
+      {l:'Equity',v:money(a.equity)},
+      {l:'Net PnL',v:(a.net>=0?'+':'')+money(a.net),c:cls(a.net)},
+      {l:'Total R',v:(a.total_r>=0?'+':'')+a.total_r.toFixed(2)+'R',c:cls(a.total_r)},
+      {l:'Trades',v:a.trades},
+      {l:'RSI(2)',v:a.rsi==null?'-':a.rsi.toFixed(1)},
+      {l:'P(WIN)',v:a.pwin==null?'-':(a.pwin*100).toFixed(0)+'%'},
+      {l:'Mid',v:a.mid==null?'-':money(a.mid)},
+      {l:'Restarts',v:a.restarts}
+    ]);
+    if(a.lastEvent) h+='<div class="alerts mut">last event: '+esc(a.lastEvent)+'</div>';
+    h+='<iframe src="'+esc(a.report)+'"></iframe>';
+    content.innerHTML=h;
+  }
+  DATA.assets.forEach(function(a,i){
+    var L={id:'a'+i,label:a.ticker.toUpperCase(),bad:a.status!=='running'};
+    var el=document.createElement('a');
+    el.className='nav'; el.href='#'+L.id; el.dataset.tab=L.id;
+    el.innerHTML=L.label+(L.bad?' <span class="tag">!</span>':'');
+    el.addEventListener('click',function(ev){
+      ev.preventDefault(); show(L.id);
+      document.querySelectorAll('.nav').forEach(function(x){x.classList.remove('on');});
+      el.classList.add('on');
+    });
+    document.getElementById('nav-assets').appendChild(el);
+  });
+  show('overview');
+})();
+</script></body></html>

@@ -129,3 +129,71 @@ Run it:
 python unified_runner.py live-test --ticker btcusdt --limit 500000 --release
 python unified_runner.py live-test --ticker btcusdt --start-ms 1709344800000 --end-ms 1709431200000
 ```
+
+# Live-Trade Hardening: Feeds, Report, Portfolio Supervisor
+Reference: production-hardening pass
+
+## Feed connectivity (the `11001` / silent-feed family)
+Three stacked defects made live feeds fail or look dead; all are endpoint/data
+issues, not strategy issues:
+
+1. **Bybit v5 WS path** — `/v5/public` returns **404**: v5 public streams are
+   category-specific (`/v5/public/linear|spot|inverse|option`). The feed now
+   connects to `wss://stream.bybit.com/v5/public/linear` with
+   `ws.bybit.com/v5/public/linear` as DNS-fallback host (some VPN resolvers -
+   e.g. ProtonVPN - do not resolve `ws.bybit.com`; error surfaced historically
+   as `os error 11001 No such host is known`). The subscribe ACK also changed:
+   v5 answers `{"success":true,...,"op":"subscribe"}` at TOP level, not nested
+   under `request.op` - both forms accepted.
+2. **Bybit seed klines** - two serde bugs: envelope key is `retCode`
+   (struct said `ret_code`, so EVERY fetch failed with "error decoding
+   response body"), and rows are ARRAYS `[ts,o,h,l,c,vol,turnover]` with close
+   at index 4 (struct expected objects). Interval fixed `1 -> 5` minutes to
+   match the 300 s composite bar (see features.py "seeding MUST use the same
+   bar size"). Regression test `historical_closes_decode_and_order` guards it.
+3. **Binance futures data degraded on some networks** - measured on a VPN exit:
+   `fstream.binance.com` served `@bookTicker`/depth fine but delivered ZERO
+   frames for `@aggTrade`/klines across raw-path, combined-URL and SUBSCRIBE
+   forms. The binance feed therefore uses **SPOT** endpoints
+   (`stream.binance.com:9443` + `api.binance.com/api/v3`); spot BTCUSDT tracks
+   the perp within bps. Spot bookTicker frames carry no `"e"` field - the
+   parser dispatches on payload shape when `e` is absent.
+
+## Per-second feature persistence (report indicator history)
+New RocksDB column family `features`: one `FeatureSample {ts_ms, rsi_2,
+win_prob}` per closed micro-bar, written from the execution loop's
+`EngineEvent::BarClosed` arm. This is what lets the HTML report draw the FULL
+RSI(2) history instead of only the hunting-zone moments. Note: samples only
+exist for sessions run on this build - older tape has none.
+
+## HTML report rewritten TradingView-style (`report_chart.js`)
+Single canvas, three panes (price candles / RSI(2)+P(WIN) / equity) sharing a
+crosshair and a data-window legend. Candles aggregate client-side from the
+1 s tape (chip shows e.g. `20 x 1s`); zoom = wheel, pan = drag, dblclick =
+reset to the recent default window. Trade list is sortable/filterable and
+jumps the chart via `locateTrade()`. Summary cards use REAL profit factor
+(grossProfit/grossLoss - was win/loss counts) plus max drawdown, expectancy,
+avg win/loss, best/worst. JS lives in `live-trade/src/report_chart.js`
+(`include_str!`), not inline Rust.
+
+**Marker alignment bug**: aggregated candles were drawn in group-index space
+while markers/ticks used base-index space - diverging by up to ~28 px once
+`k > 1` (the "icons glitch when panning" report). Fixed by giving every group
+its absolute base-index center (`bi`) and routing ALL drawing through one
+`xForIdx(baseIdx)` mapping (verified 0.0000 px max error at k=20).
+
+## Portfolio supervisor (`portfolio_supervisor.py`) + `db` command
+Multi-asset without touching the engine: `unified_runner.py portfolio` reads a
+master JSON table (`portfolio.example.json`) and spawns ONE `live-trade`
+PROCESS per asset - own tokio runtime, own RocksDB
+(`data/portfolio_<ticker>.rocksdb`), own auto-refreshing report. The
+supervisor parses each child's console protocol (`[bar]`/`[entry]`/`[exit]`/
+connect failures) into live state, prints a per-asset + TOTAL table every
+`status_interval`, raises `*** ALERT *** <asset> PROCESS DOWN` on unexpected
+exit with optional auto-restart (3 s cooldown), forwards Ctrl-C as
+CTRL_BREAK/SIGINT for graceful flushes, and writes a tabbed dashboard
+(`build/portfolio_dashboard.html`: overview tab + sidebar tab per asset,
+linking each asset's full report). `unified_runner.py db --list /
+--clean-ticker <sym> / --clean-all [--yes]` manages local stores. Console
+status lines for `live-trade` moved from 0.5 s to `--status-interval`
+(default 2 s) - ingestion cadence is unaffected.
