@@ -1,13 +1,19 @@
-//! Binance USD-M futures — public market-data feed (feed-only venue).
+//! Binance SPOT — public market-data feed (feed-only venue).
 //!
 //! Wraps the **public** WebSocket + REST endpoints directly (no SDK):
 //!
-//!   * [`aggTrade`](https://developers.binance.com/docs/derivatives/usds-margined-futures/websocket-market-streams/Aggregate-Trade-Stream)
+//!   * [`aggTrade`](https://developers.binance.com/docs/binance-spot-api-docs/websocket-streams#aggregate-trade-streams)
 //!     trade prints -> [`MarketEvent::Trade`].
-//!   * [`bookTicker`](https://developers.binance.com/docs/derivatives/usds-margined-futures/websocket-market-streams/Individual-Symbol-Book-Ticker-Streams)
+//!   * [`bookTicker`](https://developers.binance.com/docs/binance-spot-api-docs/websocket-streams#individual-symbol-book-ticker-streams)
 //!     best bid/ask -> [`MarketEvent::BookTop`].
-//!   * REST [`/fapi/v1/klines`](https://binance-docs.github.io/apidocs/futures/en/#kline-candlestick-data)
-//!     to warm feature rings (`historical_closes`).
+//!   * REST `/api/v3/klines` to warm feature rings (`historical_closes`).
+//!
+//! NOTE on venue choice: some networks / VPN exits receive silently-degraded
+//! **futures** (`fstream.binance.com`) market data — `@aggTrade` and kline
+//! streams deliver nothing while `@bookTicker`/depth keep flowing. The SPOT
+//! endpoints (`stream.binance.com` + `api.binance.com`) serve every stream
+//! reliably from those same networks, so this feed uses SPOT. Spot BTCUSDT
+//! tracks the perp within a few bps, which is immaterial for feature input.
 //!
 //! Aggressor-side convention (matches CCXT): for an `aggTrade`, when `m`
 //! (isBuyerMaker) is `true` the buyer was maker and the **seller** was the
@@ -24,8 +30,8 @@ use tokio::net::TcpStream;
 use tokio::time::{Interval, interval};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async, tungstenite::Message};
 
-const PUBLIC_WS_URL: &str = "wss://fstream.binance.com/stream";
-const REST_URL: &str = "https://fapi.binance.com/fapi/v1";
+const PUBLIC_WS_URL: &str = "wss://stream.binance.com:9443/stream";
+const REST_URL: &str = "https://api.binance.com/api/v3";
 const PING_INTERVAL_SECS: u64 = 30;
 const MAX_BARS: u32 = 200;
 
@@ -135,7 +141,12 @@ impl Feed for BinanceFeed {
     async fn historical_closes(&self, ticker: &str, bars: u32) -> Result<Vec<f64>, ExchangeError> {
         let symbol = symbols::binance(ticker);
         let limit = bars.min(MAX_BARS).max(1);
-        let url = format!("{REST_URL}/klines?symbol={symbol}&interval=1m&limit={limit}");
+        // Seed with 5-minute closes so the composite (TIMEFRAME_BARRIER=300 s)
+        // RSI/MA feature rings are warmed on the SAME bar size the engine
+        // evaluates on — feeding 1-minute closes into a 5-minute ring pins the
+        // seeded rsi_2 near 0 (see features.py "Seeding MUST use the same bar
+        // size"). Matches the Bitfinex `trade:5m` path.
+        let url = format!("{REST_URL}/klines?symbol={symbol}&interval=5m&limit={limit}");
 
         let text = reqwest::get(&url).await?.text().await?;
         // Each row: [openTime, open, high, low, close, volume, ...]
@@ -163,7 +174,27 @@ fn parse_stream_frame(text: &str) -> Result<Option<Vec<MarketEvent>>, ExchangeEr
         Some(d) => d,
         None => return Ok(None),
     };
-    match data.get("e").and_then(|e| e.as_str()) {
+    // Spot bookTicker frames carry no `"e"` event field at all
+    // (`{"u":..,"s":"BTCUSDT","b":..,"B":..,"a":..,"A":..}`), so dispatch on
+    // the payload shape when `e` is absent.
+    let event = data.get("e").and_then(|e| e.as_str());
+    if event.is_none() && data.get("b").is_some() && data.get("a").is_some() {
+        let bid_price = BinanceFeed::parse_f64(data.get("b"));
+        let bid_amount = BinanceFeed::parse_f64(data.get("B"));
+        let ask_price = BinanceFeed::parse_f64(data.get("a"));
+        let ask_amount = BinanceFeed::parse_f64(data.get("A"));
+        if bid_price <= 0.0 || ask_price <= 0.0 {
+            return Ok(None);
+        }
+        return Ok(Some(vec![MarketEvent::BookTop(MarketBookTop {
+            timestamp: now_ms(),
+            bid_price,
+            bid_amount,
+            ask_price,
+            ask_amount,
+        })]));
+    }
+    match event {
         Some("aggTrade") => {
             let timestamp = data.get("E").and_then(|x| x.as_i64()).unwrap_or_else(now_ms);
             let price = BinanceFeed::parse_f64(data.get("p"));
@@ -209,6 +240,36 @@ fn parse_stream_frame(text: &str) -> Result<Option<Vec<MarketEvent>>, ExchangeEr
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Spot bookTicker frames carry no `"e"` field — they must still parse
+    /// into a BookTop (regression for the futures-only dispatcher).
+    #[test]
+    fn spot_book_ticker_without_event_field_parses() {
+        let frame = r#"{"stream":"btcusdt@bookTicker","data":{"u":400900217,"s":"BTCUSDT","b":"27135.20","B":"0.500","a":"27135.50","A":"0.300"}}"#;
+        let events = parse_stream_frame(frame).unwrap().unwrap();
+        match &events[0] {
+            MarketEvent::BookTop(b) => {
+                assert_eq!(b.bid_price, 27135.2);
+                assert_eq!(b.ask_price, 27135.5);
+            }
+            other => panic!("expected booktop, got {other:?}"),
+        }
+    }
+
+    /// Live-network test: spot /api/v3/klines seed decodes and is ordered
+    /// oldest-first with the tail tracking current spot.
+    #[tokio::test]
+    async fn historical_closes_decode_and_order() {
+        let feed = BinanceFeed::new();
+        let closes = Feed::historical_closes(&feed, "btcusdt", 20)
+            .await
+            .expect("binance kline fetch must decode");
+        assert!(closes.len() >= 10, "expected ~20 closes, got {}", closes.len());
+        assert!(closes.iter().all(|c| *c > 1000.0), "BTCUSDT prices expected");
+        let spread = (closes.last().unwrap() - closes.first().unwrap()).abs()
+            / closes.first().unwrap();
+        assert!(spread < 0.10, "20x5m closes should be within 10% of spot, {spread}");
+    }
 
     #[test]
     fn agg_trade_buyer_maker_true_is_sell() {
