@@ -545,6 +545,18 @@ async fn handle_engine_events(
                     s.win_prob = f.win_prob;
                     s.gate = strategy.entry_gate().to_string();
                 }
+                // Persist the feature sample so the HTML report can draw the
+                // full RSI / P(WIN) history in its indicator panes.
+                if let Some(db) = db {
+                    db.record_feature(
+                        &cfg.ticker,
+                        &crate::db::FeatureSample {
+                            ts_ms: f.ts,
+                            rsi_2: f.rsi_2,
+                            win_prob: f.win_prob,
+                        },
+                    );
+                }
                 // Console gate telemetry. RSI(2)/P(WIN) are macro features
                 // recomputed once per composite-bar boundary, so printing only
                 // on a change yields one line per ~5 minutes instead of one

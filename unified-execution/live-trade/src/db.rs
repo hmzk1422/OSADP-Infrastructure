@@ -27,6 +27,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 const CF_TRADES: &str = "trades";
 const CF_ORDERBOOK: &str = "orderbook_top";
 const CF_PNL: &str = "pnl";
+const CF_FEATURES: &str = "features";
 
 #[derive(Debug, thiserror::Error)]
 pub enum DbError {
@@ -69,6 +70,15 @@ pub struct ClosedTrade {
     pub duration_s: f64,
 }
 
+/// One closed micro-bar of strategy features, persisted for the HTML report's
+/// indicator pane. Written once per second while the feed is live.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct FeatureSample {
+    pub ts_ms: i64,
+    pub rsi_2: f64,
+    pub win_prob: f64,
+}
+
 pub struct DbWriter {
     db: DB,
     seq: AtomicU64,
@@ -93,6 +103,7 @@ impl DbWriter {
             ColumnFamilyDescriptor::new(CF_TRADES, Options::default()),
             ColumnFamilyDescriptor::new(CF_ORDERBOOK, Options::default()),
             ColumnFamilyDescriptor::new(CF_PNL, Options::default()),
+            ColumnFamilyDescriptor::new(CF_FEATURES, Options::default()),
         ]
     }
 
@@ -447,6 +458,58 @@ impl DbWriter {
 
     fn pnl_trade_key(symbol: &str, ts: i64, seq: u64) -> Vec<u8> {
         let mut key = Self::pnl_trade_prefix(symbol);
+        key.extend_from_slice(&ts.to_be_bytes());
+        key.push(0x00);
+        key.extend_from_slice(&seq.to_be_bytes());
+        key
+    }
+
+    // ---- strategy feature history (report indicator panes) ------------------
+
+    /// Persist one closed micro-bar of strategy features. Fire-and-forget.
+    pub fn record_feature(&self, symbol: &str, sample: &FeatureSample) {
+        if let Err(e) = self.try_record_feature(symbol, sample) {
+            eprintln!(
+                "[db] failed to write feature sample {symbol} @ {}: {e}",
+                sample.ts_ms
+            );
+        }
+    }
+
+    fn try_record_feature(&self, symbol: &str, sample: &FeatureSample) -> Result<(), DbError> {
+        let cf = self.cf(CF_FEATURES)?;
+        let key = Self::feature_key(symbol, sample.ts_ms, self.next_seq());
+        let value = serde_json::to_vec(sample)?;
+        self.db.put_cf(cf, key, value)?;
+        Ok(())
+    }
+
+    /// Read all feature samples for `symbol`, oldest first (one per second).
+    pub fn iter_features(&self, symbol: &str) -> Result<Vec<FeatureSample>, DbError> {
+        let cf = self.cf(CF_FEATURES)?;
+        let prefix = Self::feature_prefix(symbol);
+        let mut out = Vec::new();
+        for item in self
+            .db
+            .iterator_cf(cf, IteratorMode::From(&prefix, Direction::Forward))
+        {
+            let (key, value) = item?;
+            if !key.starts_with(prefix.as_slice()) {
+                break;
+            }
+            out.push(serde_json::from_slice(&value)?);
+        }
+        Ok(out)
+    }
+
+    fn feature_prefix(symbol: &str) -> Vec<u8> {
+        let mut p = Self::symbol_prefix(symbol);
+        p.extend_from_slice(b"feat\x00");
+        p
+    }
+
+    fn feature_key(symbol: &str, ts: i64, seq: u64) -> Vec<u8> {
+        let mut key = Self::feature_prefix(symbol);
         key.extend_from_slice(&ts.to_be_bytes());
         key.push(0x00);
         key.extend_from_slice(&seq.to_be_bytes());

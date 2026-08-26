@@ -23,7 +23,13 @@ use tokio::net::TcpStream;
 use tokio::time::{Interval, interval};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async, tungstenite::Message};
 
-const PUBLIC_WS_URL: &str = "wss://ws.bybit.com/v5/public";
+// Bybit v5 public WS endpoints are category-specific: a bare `/v5/public`
+// path returns 404. BTCUSDT-style linear perpetuals stream on the `linear`
+// endpoint. `stream.bybit.com` resolves reliably; `ws.bybit.com` (the old
+// default) is not resolved by some networks (e.g. ProtonVPN) and is kept only
+// as a secondary if a network resolves it.
+const PUBLIC_WS_URL: &str = "wss://stream.bybit.com/v5/public/linear";
+const PUBLIC_WS_FALLBACK: &str = "wss://ws.bybit.com/v5/public/linear";
 const REST_URL: &str = "https://api.bybit.com/v5";
 const PING_INTERVAL_SECS: u64 = 30;
 const MAX_BARS: u32 = 200;
@@ -82,18 +88,10 @@ impl BybitExchange {
             ("X-BAPI-RECV-WINDOW", recv_window.to_string()),
         ]
     }
-}
 
-#[async_trait::async_trait]
-impl Feed for BybitExchange {
-    fn kind(&self) -> ExchangeKind {
-        ExchangeKind::Bybit
-    }
-
-    async fn connect(&mut self, ticker: &str) -> Result<(), ExchangeError> {
-        self.symbol = symbols::bybit(ticker);
-        let (mut ws, _resp) = connect_async(PUBLIC_WS_URL).await?;
-
+    /// Subscribe to `publicTrade` + `orderbook.1` on a connected socket and wait
+    /// for the ack before handing the stream back to the caller.
+    async fn after_connect(&mut self, mut ws: WsStream) -> Result<(), ExchangeError> {
         let sub = json!({
             "op": "subscribe",
             "args": [
@@ -103,16 +101,22 @@ impl Feed for BybitExchange {
         });
         ws.send(Message::Text(sub.to_string())).await?;
 
-        // Wait for the subscription ack before handing the stream back.
+        // Wait for the subscription ack before handing the stream back. Bybit
+        // v5 acknowledges with a top-level `"operate":"subscribe"` field
+        // (`{"success":true,"ret_msg":"","conn_id":...,"op":"subscribe"}`) —
+        // NOT a nested `request.op`. Accept both forms so older/newer Bybit
+        // responses are handled.
         loop {
             let msg = ws.next().await.ok_or(ExchangeError::ConnectionClosed)??;
             if let Message::Text(text) = &msg {
                 let v: serde_json::Value = serde_json::from_str(text)?;
-                let is_ack = v.get("success").and_then(|x| x.as_bool()).unwrap_or(false)
-                    && v.get("request")
+                let is_sub = v.get("op").and_then(|o| o.as_str()) == Some("subscribe")
+                    || v.get("request")
                         .and_then(|r| r.get("op"))
                         .and_then(|o| o.as_str())
                         == Some("subscribe");
+                let is_ack = v.get("success").and_then(|x| x.as_bool()).unwrap_or(false)
+                    && is_sub;
                 if is_ack {
                     break;
                 }
@@ -127,6 +131,28 @@ impl Feed for BybitExchange {
 
         self.ws = Some(ws);
         Ok(())
+    }
+}
+
+#[async_trait::async_trait]
+impl Feed for BybitExchange {
+    fn kind(&self) -> ExchangeKind {
+        ExchangeKind::Bybit
+    }
+
+    async fn connect(&mut self, ticker: &str) -> Result<(), ExchangeError> {
+        self.symbol = symbols::bybit(ticker);
+        // Try the primary public endpoint first, then the fallback: a network's
+        // DNS can fail to resolve one Bybit host but answer the other, so this
+        // keeps the feed alive across VPN nodes / resolver changes.
+        let mut last_err: Option<ExchangeError> = None;
+        for url in [PUBLIC_WS_URL, PUBLIC_WS_FALLBACK] {
+            match connect_async(url).await {
+                Ok((ws, _resp)) => return self.after_connect(ws).await,
+                Err(e) => last_err = Some(e.into()),
+            }
+        }
+        Err(last_err.unwrap_or(ExchangeError::ConnectionClosed))
     }
 
     async fn next_events(&mut self) -> Result<Vec<MarketEvent>, ExchangeError> {
@@ -161,19 +187,19 @@ impl Feed for BybitExchange {
         let symbol = symbols::bybit(ticker);
         let limit = bars.min(MAX_BARS).max(1);
         let url = format!(
-            "{REST_URL}/market/kline?category=linear&symbol={symbol}&interval=1&limit={limit}"
+            "{REST_URL}/market/kline?category=linear&symbol={symbol}&interval=5&limit={limit}"
         );
 
         #[derive(Deserialize)]
-        struct KlineItem {
-            close: String,
-        }
-        #[derive(Deserialize)]
         struct KlineResult {
-            list: Vec<KlineItem>,
+            list: Vec<Vec<serde_json::Value>>,
         }
         #[derive(Deserialize)]
         struct KlineEnvelope {
+            // Bybit v5 returns camelCase `retCode`; without this rename serde
+            // looks for a literal `ret_code` key and every fetch fails with
+            // "missing field `ret_code`" -> "error decoding response body".
+            #[serde(rename = "retCode")]
             ret_code: i64,
             result: Option<KlineResult>,
         }
@@ -182,9 +208,14 @@ impl Feed for BybitExchange {
         let mut closes: Vec<f64> = Vec::new();
         if env.ret_code == 0 {
             if let Some(res) = env.result {
-                for item in res.list {
-                    if let Ok(c) = item.close.parse::<f64>() {
-                        closes.push(c);
+                // Each row is an array:
+                // [startTime, open, high, low, close, volume, turnover]
+                // — close is index 4 (a numeric string).
+                for row in res.list {
+                    if let Some(c) = row.get(4).and_then(|v| v.as_str()) {
+                        if let Ok(c) = c.parse::<f64>() {
+                            closes.push(c);
+                        }
                     }
                 }
             }
@@ -473,6 +504,26 @@ fn parse_book_top(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Live-network test: the v5 kline endpoint returns `result.list` as an
+    /// array of arrays (close = index 4). Guards against regressions to the
+    /// object-shaped deserializer that made every seed fetch fail with
+    /// "error decoding response body" and left rsi_2 at its 100.0 placeholder.
+    #[tokio::test]
+    async fn historical_closes_decode_and_order() {
+        let ex = BybitExchange::new(None, None);
+        let closes = Feed::historical_closes(&ex, "btcusdt", 20)
+            .await
+            .expect("bybit kline fetch must decode");
+        assert!(closes.len() >= 10, "expected ~20 closes, got {}", closes.len());
+        assert!(closes.iter().all(|c| *c > 1000.0), "BTCUSDT prices expected");
+        // Oldest-first ordering: the last close must track current spot.
+        let live = closes.last().copied().unwrap();
+        assert!(
+            (live - closes[closes.len() - 2]).abs() < closes[closes.len() - 2] * 0.05,
+            "consecutive 5m closes should be within 5% of each other, got {live}"
+        );
+    }
 
     #[test]
     fn symbol_mapping() {

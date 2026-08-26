@@ -785,6 +785,18 @@ def build_parser() -> argparse.ArgumentParser:
         prog="unified_runner",
         description="OSADP-Core unified runner — backtest, paper-replay and live-trade "
         "orchestration for the hybrid Python/Rust stack.",
+        epilog=(
+            "quick start:\n"
+            "  python unified_runner.py doctor --require-native\n"
+            "  python unified_runner.py live-trade --exchange bitfinex --feed bybit "
+            "--mode paper\n\n"
+            "feeds & venues (--feed streams data, --exchange routes orders):\n"
+            "  bybit / binance (spot market data) | bitfinex (data + order routing)\n"
+            "  paper mode simulates fills; live mode routes real orders.\n\n"
+            "the session report is written to build/pnl_report_<symbol>.html and\n"
+            "auto-refreshes - open it in a browser while a session runs.\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("-v", "--verbose", action="store_true", help="enable debug logging")
     sub = parser.add_subparsers(dest="command", required=True)
