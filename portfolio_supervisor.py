@@ -1,4 +1,4 @@
-"""Portfolio supervisor - run many live-trade processes from one master table.
+﻿"""Portfolio supervisor - run many live-trade processes from one master table.
 
 Every asset runs as its OWN `live-trade` OS process (own tokio runtime, own
 RocksDB store, own auto-refreshing HTML report) - exactly like running it
@@ -39,7 +39,7 @@ import threading
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger("portfolio")
 
@@ -89,12 +89,13 @@ class AssetHandle:
         self.status = "starting"
         self.last_event = ""
         self.alerts: list[str] = []
-        self.started_at = datetime.now()
+        self.started_at: float = 0.0  # wall-clock epoch when the asset was spawned
+        self.stop_requested: bool = False  # True once we've asked the child to stop
 
     # ---- lifecycle ----------------------------------------------------------
 
     def spawn(self) -> None:
-        kwargs: Dict[str, Any] = dict(
+        kwargs: dict[str, Any] = dict(
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -242,6 +243,22 @@ class PortfolioSupervisor:
             return
         a.spawn()
 
+    def _signal_children(self, signum) -> None:
+        """Forward a signal to every running child immediately.
+        Called from the SIGINT/SIGTERM handler so each live-trade process
+        triggers its own graceful shutdown (RocksDB flush + close) in parallel,
+        rather than waiting for the monitor loop to notice a flag.
+        """
+        for a in self.assets:
+            if a.proc and a.proc.poll() is None and not a.stop_requested:
+                try:
+                    if sys.platform == "win32":
+                        a.proc.send_signal(signal.CTRL_BREAK_EVENT)
+                    else:
+                        a.proc.send_signal(signal.SIGINT)
+                except (OSError, ProcessLookupError):
+                    pass
+
     def stop_all(self) -> None:
         self.stop_requested = True
         logger.info("stopping %d asset(s)...", len(self.assets))
@@ -253,9 +270,7 @@ class PortfolioSupervisor:
         for t in threads:
             t.join(timeout=15.0)
 
-    # ---- aggregation ----------------------------------------------------------
-
-    def totals(self) -> Dict[str, float]:
+    def totals(self) -> dict[str, float]:
         cap = sum(a.capital for a in self.assets)
         eq = sum(a.equity for a in self.assets)
         return {
@@ -392,8 +407,17 @@ def run_portfolio(
         if not state["stopped"]:
             state["stopped"] = True
             logger.info(
-                "%s received - shutting down portfolio...", signal.Signals(signum).name
+                "%s received - shutting down portfolio - signaling children...",
+                signal.Signals(signum).name,
             )
+            # A custom SIGINT handler suppresses Python's default KeyboardInterrupt,
+            # so the monitor() loop only ever exits because *this flag* goes False.
+            # Setting it here turns the loop, letting the finally below call
+            # stop_all() (graceful RocksDB flush + kill-if-needed on every child).
+            sup.stop_requested = True
+            # Forward the signal to every child immediately so each live-trade
+            # process gets its own graceful shutdown (RocksDB flush + close).
+            sup._signal_children(signum)
 
     signal.signal(signal.SIGINT, _shutdown)
     try:

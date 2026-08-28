@@ -1,7 +1,7 @@
 # =============================================================================
 # OSADP-Core — Root Rust Workspace
 # =============================================================================
-# All Rust crates live under `unified-execution/`:
+# All Rust crates live under `uets_rs/`:
 #   engine/     — research-faithful strategy engine (also the maturin/PyO3 module)
 #   live-trade/ — real-market execution (Bybit WebSocket + RocksDB store)
 #   live-test/  — historical replay / paper-trading runner
@@ -13,9 +13,9 @@
 
 [workspace]
 members = [
-    "unified-execution/engine",
-    "unified-execution/live-test",
-    "unified-execution/live-trade",
-    "unified-execution/bindings",
+    "uets_rs/engine",
+    "uets_rs/live-test",
+    "uets_rs/live-trade",
+    "uets_rs/bindings",
 ]
 resolver = "2"

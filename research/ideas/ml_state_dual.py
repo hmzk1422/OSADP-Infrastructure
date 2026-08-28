@@ -67,7 +67,7 @@ from ml_state_optimized import (
     CLASS_NAMES,
 )
 
-from main.config import (
+from uets_legacy.config import (
     LOOKAHEAD_SECONDS, BARRIER_MULTIPLIER, RSI_FILTER_COLUMN, RSI_FILTER_THRESHOLD,
     RR_RATIO, TRADE_DIRECTION, TIMEFRAME_BARRIER,
     RSI_14_WINDOW, RSI_2_WINDOW, SMA_14_WINDOW, DEEPLOB_Z_WINDOW, RSI_Z_WINDOW,
@@ -77,7 +77,7 @@ from main.config import (
 )
 
 try:
-    from main.config import BARRIER_VOL_BAR_WINDOW
+    from uets_legacy.config import BARRIER_VOL_BAR_WINDOW
 except ImportError:
     BARRIER_VOL_BAR_WINDOW = 20
 

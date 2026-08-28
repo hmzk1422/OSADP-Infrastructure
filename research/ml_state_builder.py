@@ -618,6 +618,27 @@ def load_and_build_state_space(orderbook_path: str, trades_path: str, session_id
     'execution_price' (the true, unlagged fill price) and 'session_id'.
     """
     df_orderbook, df_trades = _load_and_clean_chunk_events(orderbook_path, trades_path, session_id, start_dt, end_dt)
+    return _load_and_build_state_space_from_frames(
+        df_orderbook, df_trades, session_id=session_id,
+        start_dt=start_dt, session_features=session_features,
+    )
+
+
+def _load_and_build_state_space_from_frames(
+    df_orderbook: pl.DataFrame,
+    df_trades: pl.DataFrame,
+    session_id: int,
+    start_dt=None,
+    session_features: SessionFeatureContext | None = None,
+) -> pl.DataFrame:
+    """The orchestration shared by every input path (parquet and replay feed).
+
+    `df_orderbook` / `df_trades` must already be cleaned EAGER frames with a
+    `datetime` column and the parquet schema (`timestamp`, `bid_price`,
+    `bid_amount`, `ask_price`, `ask_amount` / `timestamp`, `price`, `amount`,
+    `side`, `id`). The replay-feed loader produces exactly that, so replay
+    validation runs byte-identical feature construction to the walk-forward.
+    """
     df_trades = _with_buy_sell_split(df_trades)
 
     df_price_bars = _build_price_bars(df_orderbook)
@@ -663,3 +684,100 @@ def load_and_build_state_space(orderbook_path: str, trades_path: str, session_id
         state_space = state_space.filter(pl.col("datetime") >= start_dt)
 
     return state_space
+
+
+def load_state_space_from_replay(feed_path: str, session_id: int = 0,
+                                 session_features: SessionFeatureContext | None = None) -> pl.DataFrame:
+    """Build the point-in-time-safe state space from a Rust live-test replay
+    feed text file (the same file `live-test` replays through the engine).
+
+    This is the research-side validation of `unified_runner.py live-test`: the
+    exact event stream the Rust engine consumes is fed through the SAME feature
+    pipeline the walk-forward trains on, so the two can be compared 1:1 on
+    identical inputs. Config knob: `REPLAY_FEED` in config/strategy.py.
+    """
+    df_book, df_trades = _parse_replay_feed(feed_path)
+
+    df_orderbook = _with_datetime(pl.LazyFrame(df_book)).filter(pl.col("datetime").is_not_null())
+    df_trades_clean = _with_datetime(pl.LazyFrame(df_trades)).filter(pl.col("datetime").is_not_null())
+
+    df_orderbook = df_orderbook.sort(["datetime", "timestamp"], maintain_order=True)
+    df_trades_clean = df_trades_clean.sort(["datetime", "timestamp"], maintain_order=True)
+    df_orderbook = df_orderbook.with_columns(
+        ((pl.col("bid_price") + pl.col("ask_price")) / 2).alias("mid_price")
+    )
+
+    return _load_and_build_state_space_from_frames(
+        df_orderbook.collect(), df_trades_clean.collect(), session_id,
+        session_features=session_features,
+    )
+
+
+def _parse_replay_feed(feed_path: str) -> tuple[pl.DataFrame, pl.DataFrame]:
+    """Parse a Rust live-test replay feed text file into (orderbook, trades)
+    frames with the SAME schema as the parquet sources.
+
+    Feed format (see config/strategy.py `REPLAY_FEED` docstring):
+        #TICKER btcusdt             `#` headers are ignored
+        T <ts_ms> <price> <amount> <buy|sell> <id>        trade print
+        B <ts_ms> <bid_px> <bid_amount> <ask_px> <ask_amount>   L1 book
+
+    When the feed has no orderbook (`B`) lines a degenerate bid==ask==price
+    book (zero depth) is synthesized from the trade prints so the feature
+    pipeline still runs — spread/depth features then collapse to ~0, which is
+    the correct behaviour for a trades-only validation feed.
+    """
+    trade_rows: list[tuple[int, float, float, str, str]] = []
+    book_rows: list[tuple[int, float, float, float, float]] = []
+    with open(feed_path, "r", encoding="utf-8", errors="replace") as fh:
+        for line in fh:
+            tok = line.split()
+            if not tok or tok[0].startswith("#"):
+                continue
+            if tok[0] == "T":
+                if len(tok) < 5:
+                    continue
+                ts = int(tok[1])
+                px = float(tok[2])
+                amt = float(tok[3])
+                side = "buy" if tok[4].lower() == "buy" else "sell"
+                tid = tok[5] if len(tok) > 5 else str(ts)
+                trade_rows.append((ts, px, amt, side, tid))
+            elif tok[0] == "B":
+                if len(tok) < 5:
+                    continue
+                ts = int(tok[1])
+                bp = float(tok[2])
+                ba = float(tok[3])
+                ap = float(tok[4])
+                aa = float(tok[5]) if len(tok) > 5 else 0.0
+                book_rows.append((ts, bp, ba, ap, aa))
+
+    if not trade_rows:
+        raise ValueError(f"replay feed {feed_path!r} contains no trade (T) events")
+
+    if not book_rows:
+        print(f"  [REPLAY] feed {feed_path!r} has no orderbook (B) lines - "
+              "synthesizing bid==ask==trade-price (spread/depth features ~0)")
+        book_rows = [(ts, px, 0.0, px, 0.0) for (ts, px, _amt, _side, _tid) in trade_rows]
+
+    df_trades = pl.DataFrame(
+        {
+            "timestamp": pl.Series("timestamp", [r[0] for r in trade_rows], dtype=pl.Int64),
+            "price": [r[1] for r in trade_rows],
+            "amount": [r[2] for r in trade_rows],
+            "side": [r[3] for r in trade_rows],
+            "id": [r[4] for r in trade_rows],
+        }
+    )
+    df_book = pl.DataFrame(
+        {
+            "timestamp": pl.Series("timestamp", [r[0] for r in book_rows], dtype=pl.Int64),
+            "bid_price": [r[1] for r in book_rows],
+            "bid_amount": [r[2] for r in book_rows],
+            "ask_price": [r[3] for r in book_rows],
+            "ask_amount": [r[4] for r in book_rows],
+        }
+    )
+    print(f"  [REPLAY] parsed feed: {df_trades.height:,} trades, {df_book.height:,} orderbook rows")
+    return df_book, df_trades

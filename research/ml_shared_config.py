@@ -1,5 +1,5 @@
 import os
-from main.config import (
+from uets_legacy.config import (
     LOOKAHEAD_SECONDS, BARRIER_MULTIPLIER, RSI_FILTER_COLUMN, RSI_FILTER_THRESHOLD,
     ENABLE_RSI_ACCEL_FILTER,
     RR_RATIO, TRADE_DIRECTION, TIMEFRAME_BARRIER,
@@ -7,10 +7,11 @@ from main.config import (
     MA_SLOPE_WINDOW, PRICE_ROC_WINDOW_3, LABEL_LOSS, LABEL_WIN, FEATURE_COLUMNS,
     FEE_BPS, ENABLE_SLIPPAGE, MIN_BARRIER_PCT, MAX_BARRIER_PCT, EPS,
     HYSTERESIS_BUFFER, LOCKOUT_SECONDS, MODEL_PATH,
+    REPLAY_FEED,
 )
 
 try:
-    from main.config import BARRIER_VOL_BAR_WINDOW
+    from uets_legacy.config import BARRIER_VOL_BAR_WINDOW
 except ImportError:
     BARRIER_VOL_BAR_WINDOW = 20
 
@@ -88,4 +89,21 @@ SESSION_BOUNDS = [
     ("Pacific (20:00-00:00)", 1200, 1440),
 ]
 SESSION_ORDER = [label for label, _, _ in SESSION_BOUNDS]
+
+# ============================================================================
+# TRADE LOG FEATURE WINDOWS (research walk-forward CSV enrichment)
+# ----------------------------------------------------------------------------
+# When True, the walk-forward trade log CSV (`build/walk_forward_trade_log_v3.csv`)
+# gains per-feature OPEN / HIGH / LOW / CLOSE columns measured over each trade's
+# holding window:
+#   - `{feature}_open`  : feature value on the 1-second row the trade entered
+#   - `{feature}_high`  : highest value reached while the trade was held
+#   - `{feature}_low`   : lowest value reached while the trade was held
+#   - `{feature}_close` : value on the row the trade exited (barrier/timeout)
+# This is observational diagnostics ONLY — never used for prediction or
+# labeling — so it cannot cause lookahead bias. The values are read from the
+# already-shifted, point-in-time-safe micro grid. Set False to save memory on
+# very long datasets (it materializes one numpy column per feature).
+# ============================================================================
+TRADE_FEATURE_WINDOWS = True
  

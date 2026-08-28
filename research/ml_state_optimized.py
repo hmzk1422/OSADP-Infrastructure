@@ -272,6 +272,41 @@ def deduplicate_to_bar(df: pl.DataFrame, bar_freq: str = BAR_FREQ) -> pl.DataFra
     )
 
 
+def _trade_feature_windows(grid_dt: np.ndarray, grid_vals: dict[str, np.ndarray],
+                           entry_dts: np.ndarray, exit_dts: np.ndarray) -> list[dict]:
+    """Measure each feature's OPEN / HIGH / LOW / CLOSE over one trade's holding
+    window on the 1-second grid (observational diagnostics ONLY — these values
+    are recorded but never used for prediction or barrier labeling).
+
+    - `{f}_open`  : value on the grid row the trade entered
+    - `{f}_high`  : max value over rows (entry, exit] (the whole holding window)
+    - `{f}_low`   : min value over the same window
+    - `{f}_close` : value on the grid row the trade exited (barrier/timeout)
+
+    `grid_dt` / `grid_vals` are the pre-dedup, point-in-time-safe micro grid
+    (see `TRADE_FEATURE_WINDOWS`); `entry_dts` / `exit_dts` are per-trade
+    datetime64[ns] boundary arrays.
+    """
+    i0_all = np.searchsorted(grid_dt, entry_dts, side="left")
+    i1_all = np.searchsorted(grid_dt, exit_dts, side="right")
+    n = len(grid_dt)
+    out: list[dict] = []
+    for k in range(len(i0_all)):
+        a = max(int(i0_all[k]), 0)
+        b = min(int(i1_all[k]), n)
+        if b <= a:
+            b = a + 1  # degenerate 1-row window — high == low == close
+        row: dict = {"entry_dt": entry_dts[k], "exit_dt": exit_dts[k]}
+        for f, arr in grid_vals.items():
+            seg = arr[a:b]
+            row[f"{f}_open"] = float(arr[a])
+            row[f"{f}_high"] = float(np.max(seg))
+            row[f"{f}_low"] = float(np.min(seg))
+            row[f"{f}_close"] = float(arr[b - 1])
+        out.append(row)
+    return out
+
+
 def add_barrier_labels(df: pl.DataFrame, lookahead_seconds: int = LOOKAHEAD_SECONDS,
                         barrier_mult: float = BARRIER_MULTIPLIER) -> pl.DataFrame:
     parts = []
@@ -763,7 +798,14 @@ if __name__ == "__main__":
     # Chunking partitions the finished state space for downstream storage or
     # transport. Feature calculation itself remains session-continuous.
     df_state_space = []
-    if DATA_FORMAT == "csv":
+    if REPLAY_FEED:
+        # Replay-validation path: build the state space from the SAME replay
+        # feed text file the Rust live-test engine consumes (config/strategy.py
+        # REPLAY_FEED). Everything downstream (barrier labels, hunting zone,
+        # walk-forward, trade log) is identical to the parquet path.
+        print(f"\n[REPLAY] input source: live-test replay feed = {REPLAY_FEED}")
+        df_state_space = load_state_space_from_replay(REPLAY_FEED, session_id=0)
+    elif DATA_FORMAT == "csv":
         df_baseline = build_historical_state_space(chunk_sessions=False)
     
         df_state_space = build_historical_state_space(
@@ -815,6 +857,11 @@ if __name__ == "__main__":
     df_state_space = df_state_space.filter(pl.col("volume") > 0)
 
     print(f"\nState space before dedup: {df_state_space.height} rows")
+    # Keep a reference to the 1-second grid BEFORE deduplication so per-trade
+    # feature OPEN/HIGH/LOW/CLOSE windows can be measured over each trade's
+    # holding period at full resolution (see TRADE_FEATURE_WINDOWS).
+    # Observational only — never used for prediction or barrier labeling.
+    df_state_space_grid = df_state_space
     df_state_space = deduplicate_to_bar(df_state_space)
     print(f"State space after dedup (bar-level): {df_state_space.height} rows")
 
@@ -906,6 +953,22 @@ if __name__ == "__main__":
     print(f"\nFeatures ({len(features)} total):")
     for f in features:
         print(f"  - {f}")
+
+    # ---- per-trade feature OHLC grid (see TRADE_FEATURE_WINDOWS) ------------
+    if TRADE_FEATURE_WINDOWS:
+        _wc = list(features)
+        if "execution_price" not in _wc:
+            _wc.append("execution_price")
+        _missing = [c for c in _wc if c not in df_state_space_grid.columns]
+        if _missing:
+            print(f"[warn] TRADE_FEATURE_WINDOWS: grid lacks columns {_missing} — "
+                  "feature open/high/low/close logging disabled for this run")
+            grid_dt, grid_vals = None, None
+        else:
+            grid_dt = df_state_space_grid["datetime"].cast(pl.Datetime("ns")).to_numpy()
+            grid_vals = {c: np.asarray(df_state_space_grid[c].to_numpy(), dtype=float) for c in _wc}
+    else:
+        grid_dt, grid_vals = None, None
 
     # ------------------------------------------------------------------
     # STEP 5 — Risk-Normalized Return
@@ -1141,7 +1204,23 @@ if __name__ == "__main__":
                 # short trades back to the broken 1R-win/RR_RATIO-loss shape.
                 traded_returns = normalized_return[traded_idx].copy()
 
-                trade_log[t].extend(zip(datetimes[traded_idx], traded_returns))
+                # Per-trade feature OPEN/HIGH/LOW/CLOSE over the holding window
+                # (observational only; recorded in the CSV, never used for
+                # prediction or labeling). bars_to_exit_arr is measured in 1 s
+                # grid rows; the barrier is touched at offset bars_to_exit + 1.
+                if grid_vals is not None:
+                    try:
+                        _entry = datetimes[traded_idx].astype("datetime64[ns]")
+                        _bars = np.asarray(bars_to_exit_arr[traded_idx], dtype=np.int64) + 1
+                        _exit = _entry + _bars.astype("timedelta64[s]")
+                        stats_rows = _trade_feature_windows(grid_dt, grid_vals, _entry, _exit)
+                    except Exception as _wfe:  # noqa: BLE001 - observational only
+                        print(f"[warn] TRADE_FEATURE_WINDOWS: window capture failed: {_wfe}")
+                        stats_rows = [None] * num_trades
+                else:
+                    stats_rows = [None] * num_trades
+
+                trade_log[t].extend(zip(datetimes[traded_idx], traded_returns, stats_rows))
 
                 strategy_wins = int((traded_returns > 0).sum())
                 strategy_losses = int((traded_returns < 0).sum())
@@ -1269,12 +1348,16 @@ if __name__ == "__main__":
     for t in thresholds_to_track:
         if len(trade_log[t]) == 0:
             continue
-        dts = np.array([x[0] for x in trade_log[t]])
-        returns = np.array([x[1] for x in trade_log[t]], dtype=float)
-        order = np.argsort(dts)
-        dts, returns = dts[order], returns[order]
+        recs = sorted(trade_log[t], key=lambda r: r[0])
+        dts = np.array([r[0] for r in recs])
+        returns = np.array([r[1] for r in recs], dtype=float)
 
         log_df = pl.DataFrame({"datetime": dts, "ret": returns, "threshold": round(float(t), 2)})
+        if TRADE_FEATURE_WINDOWS and any(r[2] is not None for r in recs):
+            # Per-trade feature OPEN/HIGH/LOW/CLOSE columns (diagnostic only).
+            wrows = [r[2] for r in recs]
+            cols = {k: [w[k] for w in wrows] for k in wrows[0]}
+            log_df = log_df.with_columns([pl.Series(k, v) for k, v in cols.items()])
         log_df = log_df.with_columns(pl.col("ret").cum_sum().alias("cum_pnl"))
         all_trades_frames.append(log_df)
 

@@ -1,0 +1,12 @@
+{
+  "_comment": "Master portfolio table - one entry per asset/strategy. Top-level keys are defaults; per-asset overrides: exchange, feed, capital, config, db.",
+  "mode": "paper",
+  "exchange": "bitfinex",
+  "restart": true,
+  "status_interval": 5.0,
+  "assets": [
+    { "ticker": "btcusdt", "feed": "bybit",   "capital": 5000 },
+    { "ticker": "ethusdt", "feed": "binance", "capital": 3000 },
+    { "ticker": "solusdt", "feed": "bybit",   "capital": 2000 }
+  ]
+}

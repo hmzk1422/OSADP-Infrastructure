@@ -65,6 +65,9 @@ iframe{width:100%;height:78vh;border:1px solid var(--border);border-radius:6px;
     }).join('')+'</div>';
   }
   function show(id){
+    // Remember the active tab so the 15s auto-refresh doesn't kick you back
+    // to Overview every time you drill into an asset's chart report.
+    try{ sessionStorage.setItem('port_tab',id); }catch(e){}
     if(id==='overview'){
       var T=DATA.totals;
       var h='<h1>Overview <em>updated '+esc(DATA.generatedAt)+' - auto-refresh 15s</em></h1>';
@@ -132,6 +135,23 @@ iframe{width:100%;height:78vh;border:1px solid var(--border);border-radius:6px;
     });
     document.getElementById('nav-assets').appendChild(el);
   });
-  show('overview');
+  // Wire the Overview nav item (it had no handler) so it too persists.
+  var ov = document.querySelector('.nav[data-tab="overview"]');
+  if (ov) ov.addEventListener('click', function(ev){
+    ev.preventDefault();
+    document.querySelectorAll('.nav').forEach(function(x){ x.classList.remove('on'); });
+    ov.classList.add('on');
+    show('overview');
+  });
+  // Restore the tab the reader was on before the last auto-refresh.
+  var saved = null;
+  try{ saved = sessionStorage.getItem('port_tab'); }catch(e){}
+  if (saved === 'overview' || /^a\d+$/.test(saved || '')) {
+    var savedEl = document.querySelector('.nav[data-tab="' + saved + '"]');
+    if (savedEl) savedEl.classList.add('on');
+    show(saved);
+  } else {
+    show('overview');
+  }
 })();
 </script></body></html>

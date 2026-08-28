@@ -33,25 +33,25 @@ Note: Should latency matter, migrate execution layer and histbacktest/live execu
 
 ## Checklist of Items
 
-### 1. `unified-execution/engine/src/lib.rs` — Feature vector completed
+### 1. `uets_rs/engine/src/lib.rs` — Feature vector completed
 - **Line 700**: Added 4 missing orderflow features to the 15-element feature array:
   - `m.tick_autocorr`, `m.inst_ratio`, `m.delta_divergence_z`, `m.depth_imbalance_z`
   - Previously the array had only 11 of 15 initializers; Rust zero-filled the rest, giving the model garbage features
 
-### 2. `unified-execution/engine/src/lib.rs` — Orderflow config wired
+### 2. `uets_rs/engine/src/lib.rs` — Orderflow config wired
 - **Module constant** `USE_ORDERFLOW_FEATURES: bool = true` (lines 67/81)
 - **StrategyConfig field** `use_orderflow_features: bool` (line 129)
 - **Config initialization** passes `use_orderflow_features: USE_ORDERFLOW_FEATURES` (line 157)
 - **Feature gating** at line 1190: `if self.cfg.use_orderflow_features` computes all 8 orderflow accumulators (ofi_z, cvd_delta_z, cvd_slope_z, absorption_z, tick_autocorr, inst_ratio, delta_divergence_z, depth_imbalance_z); otherwise falls back to `(0.0, 0.0, ...)`
 
-### 3. `unified-execution/engine/src/lib.rs` — Model gate + hysteresis already existed
+### 3. `uets_rs/engine/src/lib.rs` — Model gate + hysteresis already existed
 - **Lines 763–774**: Hysteresis signal detector with state machine:
   - `signal_armed` toggles when `p_win < lower` (where `lower = confidence_threshold - hysteresis_buffer`)
   - Model gate: `if p_win + 1e-12 < confidence_threshold { return; }` — returns LOW_CONFIDENCE if below 0.5
   - Only fires entry when `P(WIN) ≥ 0.5` AND signal is armed
 - This was the missing link: the gate was correct, but the model was never loaded so `p_win` was always the proxy (~0.42)
 
-### 4. `unified-execution/live-trade/src/main.rs` — Model loading added
+### 4. `uets_rs/live-trade/src/main.rs` — Model loading added
 - **Lines 42–68**: New code after DB restore, before trade/ob tasks:
   - Finds `main/models/lgb_model.txt` relative to CWD
   - Reads and parses with `LightGbm::from_str()` (the zero-dep text parser, validated by `real_model_matches_lightgbm` test)
@@ -59,7 +59,7 @@ Note: Should latency matter, migrate execution layer and histbacktest/live execu
   - Logs model stats (trees, features) or fallback errors
 - If the file is absent, the engine gracefully falls back to the proxy logit (original behavior)
 
-### 5. `unified-execution/live-trade/src/main.rs` — Historical seeding added
+### 5. `uets_rs/live-trade/src/main.rs` — Historical seeding added
 - **Lines 67–100**: After model loading:
   - Attempts to read `build/btc_usdt_5m_last_150.csv` from the working directory
   - Parses CSV of `[timestamp, close]` rows
@@ -106,10 +106,10 @@ strategy/engine implementation is the suspect.
     `(timestamp, ordinal)` (trades before book tops at equal ms — deterministic)
     and writes one event-per-line replay stream to
     `build/live_test_feed_{ticker}.replay`.
-  - `unified-execution/live-trade/src/exchange/parquet.rs` (`ReplayExchange`)
+  - `uets_rs/live-trade/src/exchange/parquet.rs` (`ReplayExchange`)
     parses that stream into `MarketEvent`s and serves them back in
     `REPLAY_BATCH`-sized batches — the replay equivalent of a WebSocket frame.
-  - `unified-execution/live-test/src/main.rs` builds a `LoopContext` with the
+  - `uets_rs/live-test/src/main.rs` builds a `LoopContext` with the
     replay exchange and calls the identical `live_trade::execution::run_execution_loop`.
 - **Stream format**: `#TICKER btcusdt`, optional `#CLOSES a,b,c` (feature warmup),
   `T <ts> <price> <amount> <buy|sell> <id>`, `B <ts> <bid_px> <bid_amt> <ask_px> <ask_amt>`.
@@ -129,6 +129,62 @@ Run it:
 python unified_runner.py live-test --ticker btcusdt --limit 500000 --release
 python unified_runner.py live-test --ticker btcusdt --start-ms 1709344800000 --end-ms 1709431200000
 ```
+
+# Replay Parity Validation — Python research vs Rust live-test
+Reference: `research/parity_diagnostics.py`, `config/strategy.py REPLAY_FEED`
+
+The design goal above ("a replay of the same parquet should reproduce the same
+trades") needs a MEASUREMENT, not a hope. Three moving parts form the parity
+chain:
+
+1. **Same feed.** `unified_runner.py live-test` materializes
+   `build/live_test_feed_{ticker}.replay` from the research parquet/csv store.
+   `config/strategy.py` exposes `REPLAY_FEED`: pointing it at that same file
+   makes the research pipeline (`research/ml_state_optimized.py`) build its
+   state space from the identical event stream the Rust engine consumes.
+2. **Same outputs, as txt.**
+   - Python txt: `build/walk_forward_trade_log_v3.csv` (STEP 10 of
+     `ml_state_optimized.py` — columns `datetime, ret, threshold, cum_pnl`,
+     returns in R).
+   - Rust txt: the `pnl` column family of the live-test RocksDB store
+     (closed-trade JSON records; export with
+     `python research/extract_rocksdb.py --db <store> --out-dir <dir>` →
+     `pnl_trades.csv` / `pnl_snapshots.csv`). Columns: `entry_ms, exit_ms,
+     side, entry_price, exit_price, reason, qty, net_usd, r_multiple,
+     equity_after, duration_s, barrier_pct, target_price, stop_price`.
+3. **Column-by-column validator.** `research/parity_diagnostics.py` loads both
+   logs ASYNCHRONOUSLY (asyncio worker threads + gathered comparison tasks),
+   aligns trades by order, and reports per-column similarity: the % of aligned
+   pairs agreeing within tolerance (100% / 90% / FAIL verdicts), mean/max
+   absolute difference, correlation, and trade-count agreement. Timestamp
+   verdicts are offset-corrected (a constant clock shift is reported as the
+   median offset instead of failing every pair).
+
+Run it:
+```
+# after running BOTH paths on the same feed window:
+python unified_runner.py live-test --ticker btcusdt --limit 500000 --release
+#   (research, same feed — set in config/strategy.py)
+#   REPLAY_FEED = "build/live_test_feed_btcusdt.replay"
+#   python -m research.ml_state_optimized
+
+# then validate (Rust side read straight from the RocksDB store):
+python -m research.parity_diagnostics --rust-db build/live_test_btcusdt.rocksdb
+
+# or from an extract_rocksdb.py CSV export instead:
+python -m research.parity_diagnostics --rust-csv build/pnl_trades.csv
+```
+
+Reading the report (`build/parity_diagnostic_report.md`):
+- `return_r` (python `ret` vs rust `r_multiple`) is THE parity column: PASS
+  here means both engines priced/exited identically.
+- `exit_time` FAIL means the trade SEQUENCES themselves diverge — check entry
+  gates (`--wf-dir` parity gates: `require_fold_coverage`,
+  `one_candidate_per_bar`), fold-model coverage of the replay window, and the
+  hunting-zone filter before suspecting pricing.
+- `cum_return_r` compares python `cum_pnl` against the running sum of the
+  Rust `r_multiple` — drift that grows over the session shows up here even
+  when individual trades are near-identical.
 
 # Live-Trade Hardening: Feeds, Report, Portfolio Supervisor
 Reference: production-hardening pass
@@ -197,3 +253,27 @@ linking each asset's full report). `unified_runner.py db --list /
 --clean-ticker <sym> / --clean-all [--yes]` manages local stores. Console
 status lines for `live-trade` moved from 0.5 s to `--status-interval`
 (default 2 s) - ingestion cadence is unaffected.
+
+# UETS/Research Validator
+Though both of them use the same txt file, research and UETS must be double verified to
+ensure they work in the same way. Implemented following methods to solve for it.
+- executor_matching_diagnostics.py -> Runs ml_state_optimized back using txt file and executor.rs
+asynchronously. At the end, run lossless test. If lossless factor >= 99%, uets and research
+execution matches. Otherwise, requires double checking. Config files are altercated so both
+tests match.
+
+# Report session scoping + research replay/validation (2026-08-28)
+- HTML PnL reports are now SESSION-SCOPED by default: every equity snapshot and closed
+  trade is tagged with a `session_id` (unix-ms at process start) via a new RocksDB
+  `sessions` column family. `live-trade --session latest|all` (default `latest`) selects
+  whether the report shows only the current run (matching the terminal status table) or
+  the whole store's history. Existing rows without the field (session_id=0) still read fine.
+- `research/ml_state_optimized.py` now writes per-feature OPEN / HIGH / LOW / CLOSE columns
+  into `build/walk_forward_trade_log_v3.csv` for every walk-forward trade (entry value,
+  min/max over the holding window, value at exit; `TRADE_FEATURE_WINDOWS` toggle, default
+  on, observational only, never used for prediction/labeling).
+- `config/strategy.py: REPLAY_FEED` lets the research pipeline build its state space from
+  the same replay feed TEXT FILE the Rust live-test engine consumes
+  (`build/live_test_feed_<sym>.replay`, `T`/`B` event lines). Implemented via
+  `load_state_space_from_replay()` in `ml_state_builder.py`; feeds without orderbook lines
+  get a degenerate bid==ask==price book so feature construction still runs.

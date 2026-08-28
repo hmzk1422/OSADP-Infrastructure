@@ -6,7 +6,7 @@ OSADP-Core — Unified Runner
 
 Single-point orchestration for the hybrid Python/Rust quant stack.
 
-The Rust core (``unified-execution/``) is compiled into a native Python
+The Rust core (``uets_rs/``) is compiled into a native Python
 extension with **maturin**. The compiled module is imported as ``engine`` and
 exposes the ``engine.Strategy`` class. Each **asset** (ticker + venue) is
 represented by one :class:`Strategy` instance, and a :class:`Portfolio` holds
@@ -26,11 +26,11 @@ Stack map
     research/ml_state_optimized.py   research backtest (feature engineering,
                                      walk-forward evaluation, model training)
     main/                            Python live / dry-run application packages
-    unified-execution/engine/        Rust strategy engine
-    unified-execution/live-trade/    real-market execution (Bybit/Bitfinex WS +
+    uets_rs/engine/        Rust strategy engine
+    uets_rs/live-trade/    real-market execution (Bybit/Bitfinex WS +
                                      RocksDB persistence)
-    unified-execution/live-test/     historical replay (paper-trading) runner
-    unified-execution/bindings/      PyO3 bindings -> the ``engine`` module
+    uets_rs/live-test/     historical replay (paper-trading) runner
+    uets_rs/bindings/      PyO3 bindings -> the ``engine`` module
     scripts/ingestion/               Binance caching, download, CCXT conversion
     build/                           HTML reports, CSV trade logs
     docs/                            dev log + trade journal
@@ -76,6 +76,11 @@ from pathlib import Path
 from typing import Any, Dict, Iterator, Optional, Sequence
 
 REPO_ROOT = Path(__file__).resolve().parent
+
+# Canonical strategy config: the Python source of truth (repo-root level,
+# outside the legacy `main/` package) that gets exported to JSON for the
+# Rust engine on every run.
+STRATEGY_CONFIG_PY = REPO_ROOT / "config" / "strategy.py"
 
 # Must match `[tool.maturin] module-name` in pyproject.toml.
 NATIVE_MODULE = "engine"
@@ -333,13 +338,13 @@ def cmd_live_trade(args: argparse.Namespace) -> int:
         print("       Run `maturin develop --release` from the repo root, then retry.", file=sys.stderr)
         return 1
 
-    # Materialize the strategy config (single source of truth: main/config.py)
+    # Materialize the strategy config (single source of truth: config/strategy.py)
     # and hand it to every strategy, so live-trade runs the exact parameters
     # research/live-test use — e.g. a CONFIDENCE_THRESHOLD edit in
-    # main/config.py applies on the next launch WITHOUT a Rust rebuild.
+    # config/strategy.py applies on the next launch WITHOUT a Rust rebuild.
     trade_config_path = _export_strategy_config()
     if trade_config_path is None:
-        print("ERROR: main/config.py not found — required for config export", file=sys.stderr)
+        print(f"ERROR: {STRATEGY_CONFIG_PY} not found — required for config export", file=sys.stderr)
         return 1
 
     pf = Portfolio()
@@ -391,7 +396,7 @@ def cmd_live_trade(args: argparse.Namespace) -> int:
     dashboard = None
     if getattr(args, "dashboard", False):
         try:
-            from main.live_dashboard import LiveDashboard
+            from uets_legacy.live_dashboard import LiveDashboard
 
             dashboard = LiveDashboard()
             dashboard.start()
@@ -669,13 +674,13 @@ def cmd_live_test(args: argparse.Namespace) -> int:
             print(f"ERROR: {err}", file=sys.stderr)
             return 1
 
-    # 2. Materialize strategy config (single source: main/config.py) unless the
-    # caller passed an explicit --config, then hand it to the engine.
+    # 2. Materialize strategy config (single source: config/strategy.py) unless
+    # the caller passed an explicit --config, then hand it to the engine.
     config_path = args.config or str(REPO_ROOT / "build" / "live_test_config.json")
-    if not (REPO_ROOT / "main" / "config.py").exists():
-        raise RuntimeError("main/config.py not found — required for --config export")
+    if not STRATEGY_CONFIG_PY.exists():
+        raise RuntimeError(f"{STRATEGY_CONFIG_PY} not found — required for --config export")
     import importlib.util as _ilu
-    _spec = _ilu.spec_from_file_location("_main_config", REPO_ROOT / "main" / "config.py")
+    _spec = _ilu.spec_from_file_location("_strategy_config", STRATEGY_CONFIG_PY)
     _mod = _ilu.module_from_spec(_spec)
     _spec.loader.exec_module(_mod)
     _mod.export_strategy_config(config_path)
@@ -780,13 +785,13 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 
 
 def _export_strategy_config() -> Optional[str]:
-    """Materialize main/config.py -> build/live_trade_config.json (shared by
+    """Materialize config/strategy.py -> build/live_trade_config.json (shared by
     live-trade and portfolio so every runner uses identical parameters)."""
-    if not (REPO_ROOT / "main" / "config.py").exists():
+    if not STRATEGY_CONFIG_PY.exists():
         return None
     import importlib.util as _ilu
 
-    _spec = _ilu.spec_from_file_location("_main_config", REPO_ROOT / "main" / "config.py")
+    _spec = _ilu.spec_from_file_location("_strategy_config", STRATEGY_CONFIG_PY)
     _mod = _ilu.module_from_spec(_spec)
     _spec.loader.exec_module(_mod)
     trade_config_path = str(REPO_ROOT / "build" / "live_trade_config.json")
@@ -801,7 +806,7 @@ def cmd_portfolio(args: argparse.Namespace) -> int:
 
     cfg = _export_strategy_config()
     if cfg is None:
-        print("ERROR: main/config.py not found — required for config export", file=sys.stderr)
+        print(f"ERROR: {STRATEGY_CONFIG_PY} not found — required for config export", file=sys.stderr)
         return 1
     return run_portfolio(
         args.config,
@@ -894,79 +899,151 @@ def cmd_db(args: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="unified_runner",
-        description="OSADP-Core unified runner — backtest, paper-replay and live-trade "
-        "orchestration for the hybrid Python/Rust stack.",
+        description=(
+            "OSADP-Core unified runner - orchestration for the hybrid Python/Rust "
+            "quant stack (backtest, replay, live paper/live execution, HTML reports).\n"
+            "\n"
+            "Every command below auto-exports the strategy parameters from "
+            "config/strategy.py into a JSON the Rust engine reads, so editing "
+            "parameters does NOT need a Rust rebuild.\n"
+            "\n"
+            "COMMANDS (run '<command> -h' for full options of one):\n"
+            "  doctor      check the environment / repo / native Rust binding\n"
+            "  backtest    run the research walk-forward backtest (Python pipeline)\n"
+            "  live-test   replay historical parquet/CSV through the Rust engine\n"
+            "  live-trade  run one or more tickers live (paper or real orders)\n"
+            "  portfolio   supervise many live-trade child PROCESSES from a JSON table\n"
+            "  db          list / delete the RocksDB stores that back the reports"
+        ),
         epilog=(
-            "quick start:\n"
+            "EXAMPLES\n"
+            "  # environment health check (fail if the native module is missing):\n"
             "  python unified_runner.py doctor --require-native\n"
-            "  python unified_runner.py live-trade --exchange bitfinex --feed bybit "
-            "--mode paper\n\n"
-            "feeds & venues (--feed streams data, --exchange routes orders):\n"
-            "  bybit / binance (spot market data) | bitfinex (data + order routing)\n"
-            "  paper mode simulates fills; live mode routes real orders.\n\n"
-            "the session report is written to build/pnl_report_<symbol>.html and\n"
-            "auto-refreshes - open it in a browser while a session runs.\n"
+            "  # paper-trade several tickers on Bybit tape, executing on Bitfinex:\n"
+            "  python unified_runner.py live-trade --tickers btcusdt ethusdt \\\n"
+            "      --exchange bitfinex --feed bybit --mode paper --capital 10000\n"
+            "  # real orders on Bitfinex while streaming Binance orderflow:\n"
+            "  python unified_runner.py live-trade --exchange bitfinex \\\n"
+            "      --feed binance --mode live\n"
+            "  # multi-asset portfolio (one OS process per asset) + tabbed dashboard:\n"
+            "  python unified_runner.py portfolio --config portfolio.json --restart\n"
+            "  # replay history deterministically (to reproduce the backtest):\n"
+            "  python unified_runner.py live-test --ticker btcusdt --release\n"
+            "  # manage the RocksDB stores:\n"
+            "  python unified_runner.py db --list\n"
+            "  python unified_runner.py db --clean-ticker btcusdt --yes\n"
+            "\n"
+            "OUTPUTS\n"
+            "  build/pnl_report_<symbol>.html   per-symbol TradingView-style report\n"
+            "  build/portfolio_dashboard.html   multi-asset tabbed dashboard\n"
+            "  build/live_trade_config.json     strategy params the Rust engine uses\n"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("-v", "--verbose", action="store_true", help="enable debug logging")
+    parser.add_argument(
+        "-v", "--verbose", action="store_true",
+        help="enable debug-level logging (default: INFO)",
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_backtest = sub.add_parser(
-        "backtest", help="run the research backtest (research/ml_state_optimized.py)"
+        "backtest",
+        help="run the research walk-forward backtest",
+        description=(
+            "Run the pure-Python research backtest (research/ml_state_optimized.py): "
+            "feature engineering, walk-forward evaluation and the model export used "
+            "to train the LightGBM model that live-trade / live-test score with.\n"
+            "This is the research side of the stack - it does not touch a live "
+            "exchange and writes its reports under build/."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     p_backtest.set_defaults(func=cmd_backtest)
 
     p_trade = sub.add_parser(
-        "live-trade", help="run strategies for one or more tickers (in-process Rust)"
+        "live-trade",
+        help="run one or more tickers (paper or live orders), in-process Rust",
+        description=(
+            "Run strategies for one or more tickers concurrently. Each ticker runs "
+            "in its own tokio runtime inside the Rust process; Python is only the "
+            "control plane. By default this simulates fills (--mode paper); "
+            "--mode live routes real orders.\n\n"
+            "Feeds vs venues:\n"
+            "  --feed       where market data streams from (orderflow source)\n"
+            "  --exchange   where orders are routed (execution venue)\n"
+            "  They can differ, e.g. --exchange bitfinex --feed binance streams "
+            "Binance tape while executing on Bitfinex.\n\n"
+            "While it runs the session report (build/pnl_report_<symbol>.html) "
+            "auto-regenerates - open it in a browser to watch trades live."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     p_trade.add_argument(
         "--tickers", nargs="+", default=list(DEFAULT_TICKERS),
         help="symbols to run concurrently, e.g. btcusdt ethusdt solusdt",
     )
-    p_trade.add_argument("--exchange", default=DEFAULT_EXCHANGE, choices=SUPPORTED_EXCHANGES)
+    p_trade.add_argument(
+        "--exchange", default=DEFAULT_EXCHANGE, choices=SUPPORTED_EXCHANGES,
+        help="venue orders are routed to (execution). Choices: "
+             + ", ".join(SUPPORTED_EXCHANGES),
+    )
     p_trade.add_argument(
         "--feed", default=None, choices=SUPPORTED_FEEDS,
         help="market-data feed venue (orderflow source); defaults to --exchange. "
-        "e.g. --exchange bitfinex --feed binance streams Binance tape while "
-        "executing on Bitfinex",
+             "e.g. --exchange bitfinex --feed binance streams Binance tape while "
+             "executing on Bitfinex. Choices: " + ", ".join(SUPPORTED_FEEDS),
     )
     p_trade.add_argument(
         "--dashboard", action="store_true",
-        help="serve a live HTML page (http://localhost:8001) showing trades "
-        "executed, equity, wins/losses and feed freshness per ticker",
+        help="serve a live browser page (http://localhost:8001) showing trades "
+             "executed, equity, wins/losses and feed freshness per ticker",
     )
     p_trade.add_argument(
         "--mode", default="paper", choices=SUPPORTED_MODES,
-        help="execution mode: paper (dry-run) or live (real orders)",
+        help="execution mode: paper (simulated fills, no orders) or live (real "
+             "orders). Default: paper. Choices: " + ", ".join(SUPPORTED_MODES),
     )
     p_trade.add_argument(
         "--capital", type=float, default=DEFAULT_CAPITAL_USD,
-        help="capital (USD) allocated to EACH strategy",
+        help="capital (USD) allocated to EACH ticker "
+             "(default: %d)" % DEFAULT_CAPITAL_USD,
     )
     p_trade.add_argument(
         "--status-interval", type=float, default=2.0,
-        help="seconds between console status lines (default: 2.0; "
-        "data ingestion is always real-time regardless of this value)",
+        help="seconds between console status lines (default: 2.0). Only affects "
+             "the printed status, never data ingestion (which is always real-time)",
     )
     p_trade.set_defaults(func=cmd_live_trade)
 
     p_port = sub.add_parser(
         "portfolio",
-        help="supervise one live-trade PROCESS per asset from a master JSON table "
-        "(own RocksDB per asset, total PnL tracking, tabbed dashboard, crash alerts)",
+        help="supervise one live-trade PROCESS per asset from a master JSON table",
+        description=(
+            "Run a whole book of assets from one master JSON table (see "
+            "portfolio.example.json). Each asset gets its OWN live-trade OS process "
+            "(own tokio runtime, own RocksDB store data/portfolio_<ticker>.rocksdb, "
+            "own auto-refreshing HTML report) while this supervisor:\n"
+            "  - parses each child's console output into live state,\n"
+            "  - prints a per-asset + PORTFOLIO-TOTAL table on a fixed cadence,\n"
+            "  - raises an ALERT when a child exits unexpectedly (optional restart),\n"
+            "  - writes build/portfolio_dashboard.html (tabbed overview + per asset),\n"
+            "  - forwards Ctrl-C to every child for a graceful RocksDB flush."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     p_port.add_argument(
         "--config", default="portfolio.json",
-        help="master portfolio table (JSON); see portfolio.example.json",
+        help="master portfolio table (JSON); see portfolio.example.json "
+             "(default: portfolio.json)",
     )
     p_port.add_argument(
         "--release", action="store_true",
-        help="prefer the release build of the live-trade binary",
+        help="prefer the release build of the live-trade binary "
+             "(target/release/live-trade) over the debug build",
     )
     p_port.add_argument(
         "--restart", action="store_true",
-        help="auto-restart a child that exits unexpectedly (3s cooldown)",
+        help="auto-restart a child process that exits unexpectedly (3s cooldown)",
     )
     p_port.add_argument(
         "--status-interval", type=float, default=None,
@@ -979,32 +1056,57 @@ def build_parser() -> argparse.ArgumentParser:
     p_port.set_defaults(func=cmd_portfolio)
 
     p_db = sub.add_parser(
-        "db", help="list or delete local RocksDB stores (per-asset strategy data)"
+        "db",
+        help="list or delete the local RocksDB stores (report data)",
+        description=(
+            "Manage the RocksDB stores under data/ that back each session's HTML "
+            "report. These store market tape, features, PnL snapshots and closed "
+            "trades. Cleaning a store discards that asset's history - a fresh "
+            "session starts from a clean report."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    p_db.add_argument("--list", action="store_true", help="list all known stores (default)")
+    p_db.add_argument(
+        "--list", action="store_true",
+        help="list all known stores (this is the default action)",
+    )
     p_db.add_argument(
         "--clean-ticker", metavar="SYMBOL",
         help="delete stores whose name contains SYMBOL, e.g. --clean-ticker btcusdt",
     )
     p_db.add_argument(
         "--clean-all", action="store_true",
-        help="delete ALL stores under data/ (dangerous — prompts unless --yes)",
+        help="delete ALL stores under data/ (dangerous - prompts unless --yes)",
     )
     p_db.add_argument(
-        "--yes", action="store_true", help="skip the interactive confirmation"
+        "--yes", action="store_true",
+        help="skip the interactive confirmation prompt",
     )
     p_db.set_defaults(func=cmd_db)
 
     p_test = sub.add_parser(
         "live-test",
-        help="replay historical parquet data through the Rust engine (paper trading)",
+        help="replay historical parquet/CSV through the Rust engine (paper)",
+        description=(
+            "Replay historical orderbook + trade data (research/csv, parquet or a "
+            "prebuilt .replay stream) through the exact same Rust execution loop as "
+            "live-trade. Everything downstream - 1s micro-bars, 300s composite "
+            "features, entry/exit gates, RocksDB persistence, HTML report - is the "
+            "identical code path, so replaying the same data that produced the "
+            "research backtest should reproduce the same trades.\n"
+            "Use --wf-dir to reproduce the walk-forward backtest exactly (fold "
+            "models + research trade-universe gates)."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     p_test.add_argument(
-        "--ticker", default=DEFAULT_TICKERS[0], help="symbol to replay, e.g. btcusdt"
+        "--ticker", default=DEFAULT_TICKERS[0],
+        help="symbol to replay, e.g. btcusdt (default: %s)" % DEFAULT_TICKERS[0],
     )
     p_test.add_argument(
         "--feed-dir", default="research/csv",
-        help="directory with {TICKER}_trades / _{TICKER}_orderbook parquet (or csv) feeds",
+        help="directory with {TICKER}_trades / _{TICKER}_orderbook parquet (or csv) "
+             "feeds (default: research/csv)",
     )
     p_test.add_argument(
         "--feed", default=None,
@@ -1016,19 +1118,22 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_test.add_argument(
         "--no-db", action="store_true",
-        help="do not persist to RocksDB (skips the HTML report; default DB wiped per run)",
+        help="do not persist to RocksDB (skips the HTML report; default DB is wiped "
+             "per run)",
     )
     p_test.add_argument(
         "--db", default=None,
-        help="explicit RocksDB path (default: build/live_test_{ticker}.rocksdb, wiped per run)",
+        help="explicit RocksDB path (default: build/live_test_{ticker}.rocksdb, "
+             "wiped per run)",
     )
     p_test.add_argument(
         "--seed", type=int, default=0,
-        help="composite closes used to warm feature rings (0 = warm live from the feed)",
+        help="composite closes used to warm feature rings (0 = warm live from the "
+             "feed)",
     )
     p_test.add_argument(
         "--start-ms", type=int, default=None,
-        help="only replay events with timestamp >= MS (uses for huge multi-day feeds)",
+        help="only replay events with timestamp >= MS (for huge multi-day feeds)",
     )
     p_test.add_argument(
         "--end-ms", type=int, default=None,
@@ -1040,37 +1145,46 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_test.add_argument(
         "--loop", action="store_true",
-        help="loop the feed forever (continuous sim) instead of stopping at end-of-data",
+        help="loop the feed forever (continuous sim) instead of stopping at "
+             "end-of-data",
     )
     p_test.add_argument(
-        "--release", action="store_true", help="build the replay binary in release mode"
+        "--release", action="store_true",
+        help="build/use the release replay binary instead of debug",
     )
     p_test.add_argument(
         "--config", default=None,
         help="path to a StrategyConfig JSON (default: build/live_test_config.json "
-             "exported from main/config.py)",
+             "exported from config/strategy.py)",
     )
     p_test.add_argument(
         "--wf-dir", default=None,
         help="walk-forward fold-model dir (build/walkforward_models). When set, "
              "live-test scores each second with the fold model whose OOS test "
-             "window covers it and restricts entries to research's trade "
-             "universe (one volume>0 candidate per composite bar) so the "
-             "replay reproduces the walk-forward backtest.",
+             "window covers it and restricts entries to research's trade universe "
+             "(one volume>0 candidate per composite bar) so the replay reproduces "
+             "the walk-forward backtest.",
     )
     p_test.set_defaults(func=cmd_live_test)
 
     p_doc = sub.add_parser(
-        "doctor", help="validate the environment, repo layout and native binding"
+        "doctor",
+        help="validate the environment, repo layout and native binding",
+        description=(
+            "Run a self-check of the environment: Python/cargo availability, repo "
+            "layout, the RocksDB / native 'engine' binding, and the strategy config "
+            "source. Use --require-native to fail hard if the maturin-compiled "
+            "'engine' module is not importable - useful in CI."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     p_doc.add_argument(
         "--require-native", action="store_true",
-        help="fail if the maturin module is not importable",
+        help="fail if the maturin-compiled 'engine' module is not importable",
     )
     p_doc.set_defaults(func=cmd_doctor)
 
     return parser
-
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     args = build_parser().parse_args(argv)

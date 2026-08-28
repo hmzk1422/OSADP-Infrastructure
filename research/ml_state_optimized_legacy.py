@@ -44,7 +44,7 @@ from sklearn.linear_model import LinearRegression
 # actually runs live (e.g. LOOKAHEAD_SECONDS=600 here vs 3000 in config.py,
 # BARRIER_MULTIPLIER=3.0 here vs 0.5 in config.py). Import, don't duplicate.
 # ============================================================================
-from main.config import (
+from uets_legacy.config import (
     LOOKAHEAD_SECONDS, BARRIER_MULTIPLIER, RSI_FILTER_COLUMN, RSI_FILTER_THRESHOLD,
     RR_RATIO, TRADE_DIRECTION, TIMEFRAME_BARRIER, BARRIER_VOL_WINDOW,
     RSI_14_WINDOW, RSI_2_WINDOW, SMA_14_WINDOW, DEEPLOB_Z_WINDOW, RSI_Z_WINDOW,
@@ -59,7 +59,7 @@ from main.config import (
 # but you should add BARRIER_VOL_BAR_WINDOW=20 to config.py explicitly so this
 # can't silently drift the next time someone changes the fallback in features.py.
 try:
-    from main.config import BARRIER_VOL_BAR_WINDOW
+    from uets_legacy.config import BARRIER_VOL_BAR_WINDOW
 except ImportError:
     BARRIER_VOL_BAR_WINDOW = 20  # matches features.py fallback default
 

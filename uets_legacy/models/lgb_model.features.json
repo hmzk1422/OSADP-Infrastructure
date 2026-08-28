@@ -1,0 +1,51 @@
+{
+  "features": [
+    "spread_bps_z",
+    "ma_slope_5",
+    "rsi_x_ma",
+    "ma_accel",
+    "price_roc_3",
+    "rsi_2",
+    "sma_14",
+    "ofi_z",
+    "cvd_delta_z",
+    "cvd_slope_z",
+    "absorption_z",
+    "tick_autocorr",
+    "inst_ratio",
+    "delta_divergence_z",
+    "depth_imbalance_z"
+  ],
+  "n_features": 15,
+  "includes_orderflow": true,
+  "orderflow_features": [
+    "ofi_z",
+    "cvd_delta_z",
+    "cvd_slope_z",
+    "absorption_z",
+    "tick_autocorr",
+    "inst_ratio",
+    "delta_divergence_z",
+    "depth_imbalance_z"
+  ],
+  "base_features": [
+    "spread_bps_z",
+    "ma_slope_5",
+    "rsi_x_ma",
+    "ma_accel",
+    "price_roc_3",
+    "rsi_2",
+    "sma_14"
+  ],
+  "trained_rows": 14564,
+  "trained_at_utc": "2026-08-28T06:20:43.675752+00:00",
+  "label_counts": {
+    "LOSS": 12841,
+    "WIN": 1723
+  },
+  "rr_ratio": 10,
+  "lookahead_seconds": 6000,
+  "barrier_multiplier": 0.3,
+  "trade_direction": "long",
+  "confidence_threshold_note": "This manifest does not set CONFIDENCE_THRESHOLD \u2014 that stays a config.py / CLI setting. See the per-threshold table above (now computed from non-overlapping folds) before trusting a threshold."
+}
