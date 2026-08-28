@@ -142,7 +142,7 @@ def prepare_training_matrix():
     from research.ml_state_optimized import (  # noqa: E402
         build_historical_state_space, add_barrier_labels, deduplicate_to_bar,
     )
-    from main.config import (  # noqa: E402
+    from uets_legacy.config import (  # noqa: E402
         RSI_FILTER_COLUMN, RSI_FILTER_THRESHOLD, ENABLE_RSI_ACCEL_FILTER,
         TRADE_DIRECTION, FEATURE_COLUMNS,
     )

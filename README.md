@@ -18,10 +18,10 @@ runtime thread per asset.
 ```
 research/ml_state_optimized.py   research backtest (features -> walk-forward -> model)
 main/                            live Python packages (config, executor, dashboard)
-unified-execution/engine/        Rust strategy engine (venue-agnostic)
-unified-execution/live-trade/    real execution: WS/REST venues + RocksDB + HTML report
-unified-execution/live-test/     historical replay (paper) runner
-unified-execution/bindings/      PyO3 bindings -> the `engine` Python module
+uets_rs/engine/        Rust strategy engine (venue-agnostic)
+uets_rs/live-trade/    real execution: WS/REST venues + RocksDB + HTML report
+uets_rs/live-test/     historical replay (paper) runner
+uets_rs/bindings/      PyO3 bindings -> the `engine` Python module
 scripts/ingestion/               Binance caching / CCXT conversion
 build/                           reports, configs, walk-forward models
 ```

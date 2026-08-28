@@ -210,7 +210,7 @@ def main() -> None:
         trades,
         [
             "entry_ms_utc", "exit_ms_utc", "side", "entry_price", "exit_price",
-            "reason", "qty", "net_usd", "r_multiple", "equity_after",
+            "reason", "qty", "net_usd", "r_multiple", "r_raw", "equity_after",
             "duration_s", "entry_ms", "exit_ms",
         ],
     )

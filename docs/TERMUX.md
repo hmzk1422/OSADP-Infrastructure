@@ -32,7 +32,7 @@ python3 -m pip install --upgrade pip
 pip install unified_execution-*.whl
 
 # Option B — from PyPI once a version is tagged:
-pip install unified-execution
+pip install uets_rs
 ```
 
 ## 3. Run the runner

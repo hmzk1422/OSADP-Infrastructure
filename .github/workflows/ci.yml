@@ -14,7 +14,7 @@
 #   smoke-arm64 — validate the aarch64 wheel under QEMU (Termux-proot / RPi path)
 #   release     — publish wheels to PyPI on version tags (trusted publishing)
 #
-# NOTE: the `wheels` job compiles `unified-execution/engine` into a Python
+# NOTE: the `wheels` job compiles `uets_rs/engine` into a Python
 # module. The crate must expose a PyO3 `#[pymodule]` (see pyproject.toml);
 # the `rust` job validates the workspace independently of that binding.
 # =============================================================================
