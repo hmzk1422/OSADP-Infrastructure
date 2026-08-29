@@ -227,7 +227,7 @@ MODEL_PATH = "uets_legacy/models/lgb_model.txt"
 # --- Execution ---
 DRY_RUN = True                    # Set False to place real orders!
 MAX_TRADES_PER_HOUR = 300
-FEE_BPS = 0.1                   # Binance/Bybit taker fee ~0.055%
+FEE_BPS = 0                   # Binance/Bybit taker fee ~0.055%
 
 # --- Signal Debounce & Re-entry Lockout (matches research walk-forward) ---
 # Research (ml_state_optimized.py) uses a hysteresis buffer to collapse

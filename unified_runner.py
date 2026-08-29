@@ -679,11 +679,16 @@ def cmd_live_test(args: argparse.Namespace) -> int:
     config_path = args.config or str(REPO_ROOT / "build" / "live_test_config.json")
     if not STRATEGY_CONFIG_PY.exists():
         raise RuntimeError(f"{STRATEGY_CONFIG_PY} not found — required for --config export")
-    import importlib.util as _ilu
-    _spec = _ilu.spec_from_file_location("_strategy_config", STRATEGY_CONFIG_PY)
-    _mod = _ilu.module_from_spec(_spec)
-    _spec.loader.exec_module(_mod)
-    _mod.export_strategy_config(config_path)
+
+    if args.config:
+        config_path = args.config
+        logger.info("using explicit strategy config -> %s", config_path)
+    else:
+        config_path = _export_strategy_config()
+        if config_path is None:
+            raise RuntimeError(
+                f"{STRATEGY_CONFIG_PY} not found — required for config export"
+            )
     logger.info("exported strategy config -> %s", config_path)
 
     # Walk-forward parity mode: when --wf-dir is given, flip the two research-
@@ -785,19 +790,76 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 
 
 def _export_strategy_config() -> Optional[str]:
-    """Materialize config/strategy.py -> build/live_trade_config.json (shared by
-    live-trade and portfolio so every runner uses identical parameters)."""
+    """Materialize config/strategy.py -> build/live_trade_config.json.
+
+    Also verify that the generated JSON actually contains the fields Rust
+    needs for position sizing. Fail immediately rather than letting Rust
+    silently fall back to defaults.
+    """
     if not STRATEGY_CONFIG_PY.exists():
         return None
-    import importlib.util as _ilu
 
-    _spec = _ilu.spec_from_file_location("_strategy_config", STRATEGY_CONFIG_PY)
-    _mod = _ilu.module_from_spec(_spec)
-    _spec.loader.exec_module(_mod)
-    trade_config_path = str(REPO_ROOT / "build" / "live_trade_config.json")
-    _mod.export_strategy_config(trade_config_path)
-    logger.info("exported strategy config -> %s", trade_config_path)
-    return trade_config_path
+    import importlib.util as _ilu
+    import json as _json
+
+    spec = _ilu.spec_from_file_location("_strategy_config", STRATEGY_CONFIG_PY)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"cannot load strategy config: {STRATEGY_CONFIG_PY}")
+
+    mod = _ilu.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    trade_config_path = REPO_ROOT / "build" / "live_trade_config.json"
+
+    # ALWAYS regenerate. Never trust an existing/stale JSON file.
+    mod.export_strategy_config(str(trade_config_path))
+
+    # Read back what was actually written.
+    with open(trade_config_path, "r", encoding="utf-8") as fh:
+        generated = _json.load(fh)
+
+    # These are critical runtime sizing/execution parameters.
+    required = {
+        "risk_pct_per_trade": getattr(mod, "RISK_PCT_PER_TRADE"),
+        "max_leverage": getattr(mod, "MAX_LEVERAGE"),
+        "rr_ratio": getattr(mod, "RR_RATIO"),
+        "fee_bps": getattr(mod, "FEE_BPS"),
+        "max_position_usd": getattr(mod, "MAX_POSITION_USD"),
+    }
+
+    missing = [k for k in required if k not in generated]
+    if missing:
+        raise RuntimeError(
+            "Generated strategy config is missing required fields: "
+            + ", ".join(missing)
+        )
+
+    mismatches = []
+    for key, expected in required.items():
+        actual = generated[key]
+        if actual != expected:
+            mismatches.append(
+                f"{key}: expected {expected!r}, generated {actual!r}"
+            )
+
+    if mismatches:
+        raise RuntimeError(
+            "Generated strategy config does not match config/strategy.py:\n  "
+            + "\n  ".join(mismatches)
+        )
+
+    logger.info(
+        "strategy config -> %s | risk_pct_per_trade=%s max_leverage=%s "
+        "rr_ratio=%s fee_bps=%s max_position_usd=%s",
+        trade_config_path,
+        generated["risk_pct_per_trade"],
+        generated["max_leverage"],
+        generated["rr_ratio"],
+        generated["fee_bps"],
+        generated["max_position_usd"],
+    )
+
+    return str(trade_config_path)
 
 
 def cmd_portfolio(args: argparse.Namespace) -> int:
