@@ -1,7 +1,7 @@
 """
 Live Strategy Executor — 1-Second Resolution
 ==============================================
-The core loop that ties everything together, matching research/ml_state_optimized.py.
+The core loop that ties everything together, matching research/ofmr/ml_state_optimized.py.
 
 Research Architecture (ml_state_optimized.py):
     df_micro = df_trades.resample('1s')       → 1-second bars
@@ -97,7 +97,7 @@ class ModelManager:
         self.feature_columns: list = []
         self.is_trained: bool = False
         # FIX: populated by _load_feature_manifest() when a
-        # research/ml_state_optimized.py STEP 12 export is found next to
+        # research/ofmr/ml_state_optimized.py STEP 12 export is found next to
         # model_path. None means "no manifest" — a loaded-but-unmanifested
         # model can't be verified, only trusted, which is exactly the gap
         # that let a feature-order/feature-set mismatch go undetected before.
@@ -117,7 +117,7 @@ class ModelManager:
 
     def _load_feature_manifest(self) -> None:
         """Load the <model>.features.json sibling written by
-        ml_state_optimized.py's STEP 12 export. This is the only reliable
+        ofmr/ml_state_optimized.py's STEP 12 export. This is the only reliable
         way to know the exact feature list/order a given model file was
         trained on. It matters because predict_proba() below calls the raw
         Booster with a plain numpy array — no column names — so a mismatch
@@ -496,7 +496,7 @@ class StrategyExecutor:
                 "from candle high-low range instead. It also has NO orderflow "
                 "features (OFI/CVD/VPIN/absorption/etc). This model will NOT match "
                 "research's walk-forward results.\n"
-                "Run research/ml_state_optimized.py (with EXPORT_PRODUCTION_MODEL=True) "
+                "Run research/ofmr/ml_state_optimized.py (with EXPORT_PRODUCTION_MODEL=True) "
                 "and place the resulting model + <model>.features.json at %s before "
                 "trading live with real capital.\n" + "=" * 70,
                 self.model_mgr.model_path, self.model_mgr.model_path,

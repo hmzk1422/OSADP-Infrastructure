@@ -1,7 +1,7 @@
-
+﻿
 """
 ============================================================================
-STEP 1A — ORDERFLOW AND PRICE FEATURE COMPUTATION
+STEP 1A ΓÇö ORDERFLOW AND PRICE FEATURE COMPUTATION
 
 Extracts two tiers of orderflow features:
 - Micro (1s resampling): Captures granular orderflow dynamics for live execution, 
@@ -28,7 +28,7 @@ You are a quant researcher. You can only read from selective sources of the foll
 books, etc. Compute  features without breaking quant practice (all your features must have economic rationale).
 If the features fail, logically find out why and make fixes. This is what you can do at root directory.
 
-python -m research.ml_state_optimized --> to run the strategy and output report.
+python -m research.ofmr.ml_state_optimized --> to run the strategy and output report.
 build/backtest_report_v3.md --> You read this to get the output of the result
 
 Objective: Inside of build/backtest_report_v3.md, you must return such that the average trade expectancy > 0.2,
@@ -46,7 +46,7 @@ Rules:
 import sys
 import os
 
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..','..'))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
@@ -78,7 +78,7 @@ CUSTOM FUNCTIONS: Place custom functions here for computation
 
 
 def _pl_rolling_zscore(col: str, window: int) -> pl.Expr:
-    """Rolling z-score (sample std, ddof=1, NaN->0) — see module docstring
+    """Rolling z-score (sample std, ddof=1, NaN->0) ΓÇö see module docstring
     point 6. This is a reimplementation, not your real calculate_zscore()."""
     mean = pl.col(col).rolling_mean(window_size=window, min_samples=window)
     std = pl.col(col).rolling_std(window_size=window, min_samples=window, ddof=1)
@@ -129,7 +129,7 @@ def compute_orderflow_features(df_trades: pl.DataFrame, df_orderbook: pl.DataFra
     ofi_1s = dense_resample(ob, "1s", [pl.col("ofi_raw").sum()], zero_fill_cols=["ofi_raw"])
     ofi_1m = dense_resample(ofi_1s, BAR_FREQ, [pl.col("ofi_raw").sum().alias("ofi_1m")], zero_fill_cols=["ofi_1m"])
     ofi_1m = ofi_1m.with_columns(pl.col("ofi_1m").diff().fill_null(0).alias("ofi_diff"))
-    del ofi_1s  # 1s intermediate, not returned — free before it compounds
+    del ofi_1s  # 1s intermediate, not returned ΓÇö free before it compounds
 
     trades = df_trades.sort(["datetime", "timestamp"], maintain_order=True).with_columns([
         pl.when(pl.col("side") == "buy").then(pl.col("amount")).otherwise(0.0).alias("buy_vol"),
@@ -182,7 +182,7 @@ def compute_orderflow_features(df_trades: pl.DataFrame, df_orderbook: pl.DataFra
                )
                .select(["datetime", "tick_autocorr"])
     )
-    del tick_1s  # 1s intermediate, not returned — free before it compounds
+    del tick_1s  # 1s intermediate, not returned ΓÇö free before it compounds
 
     trades_sorted = trades.sort(["datetime", "timestamp"], maintain_order=True)
     session_volume = total_session_volume if total_session_volume is not None else trades_sorted["amount"].sum()
@@ -202,7 +202,7 @@ def compute_orderflow_features(df_trades: pl.DataFrame, df_orderbook: pl.DataFra
     n_buckets_closed = trades_sorted["_bucket"].n_unique()
     if n_buckets_closed < VPIN_MIN_PERIODS:
         print(f"  [VPIN WARNING] Only {n_buckets_closed} buckets closed this session "
-              f"(need {VPIN_MIN_PERIODS}+) — VPIN will be null/sparse for this session.")
+              f"(need {VPIN_MIN_PERIODS}+) ΓÇö VPIN will be null/sparse for this session.")
 
     vpin_buckets = (
         trades_sorted.group_by("_bucket", maintain_order=True)
@@ -224,13 +224,13 @@ def compute_orderflow_features(df_trades: pl.DataFrame, df_orderbook: pl.DataFra
         pl.col("vpin_raw").rolling_mean(window_size=VPIN_WINDOW_BUCKETS, min_samples=VPIN_MIN_PERIODS)
           .alias("vpin_smoothed")
     )
-    # See module docstring point 4 — must bin bucket closes into the bar
+    # See module docstring point 4 ΓÇö must bin bucket closes into the bar
     # grid (dense_resample), not asof-join against bar left edges.
     vpin_by_bucket_close = vpin_buckets.select(pl.col("bucket_end_time").alias("datetime"), "vpin_smoothed")
     vpin_lookup = dense_resample(
         vpin_by_bucket_close, BAR_FREQ, [pl.col("vpin_smoothed").last()]
     ).with_columns(pl.col("vpin_smoothed").forward_fill())
-    del trades_sorted, vpin_buckets, vpin_by_bucket_close  # not returned — free VPIN workspace
+    del trades_sorted, vpin_buckets, vpin_by_bucket_close  # not returned ΓÇö free VPIN workspace
 
     trade_size = dense_resample(
         trades.with_columns([
@@ -280,7 +280,7 @@ def compute_orderflow_features(df_trades: pl.DataFrame, df_orderbook: pl.DataFra
 
     # Memory hygiene: the two giant raw event frames and the now-unused bucket
     # workspace are freed right before returning. None of them are part of the
-    # returned dict, so this is strictly lossless — outputs are bit-identical.
+    # returned dict, so this is strictly lossless ΓÇö outputs are bit-identical.
     del ob, trades
     gc.collect()
 
@@ -304,14 +304,14 @@ def compute_price_features(price_and_volume: pl.DataFrame, rsi_features: pl.Data
             'close', and 'volume' (see _build_price_bars / _build_bar_volume).
             Extra columns (open, high, low, spread_pct) pass through untouched.
         rsi_features: session-scoped rsi_2 / rsi_14 / sma_14, computed once
-            over the whole session's close series (recursive — cannot be
+            over the whole session's close series (recursive ΓÇö cannot be
             safely computed per-chunk, see _rsi_features_from_price_bars).
             Left-joined onto price_and_volume by datetime.
 
     Returns:
         price_and_volume with rsi_2/rsi_14/sma_14 plus every feature below
         added. Every rolling/diff feature here is causal (uses only bars at
-        or before the current one) — but the shift that makes the WHOLE
+        or before the current one) ΓÇö but the shift that makes the WHOLE
         frame safe to broadcast onto live micro-bars happens later, in
         _broadcast_bar_features_to_micro. This function only guarantees each
         row is internally consistent with its own bar's close time.
@@ -359,7 +359,7 @@ def _join_orderflow_features(df_price_1m: pl.DataFrame, feats: dict) -> pl.DataF
     Kept separate from compute_price_features because these columns come
     from a genuinely different data source (trades/orderbook orderflow, not
     price bars), and because most of them share the same
-    join -> fill_null(0) -> rolling-zscore pattern, repeated six times — that
+    join -> fill_null(0) -> rolling-zscore pattern, repeated six times ΓÇö that
     repetition is easier to review as one pass than interleaved with the
     price-only derivations above.
     """

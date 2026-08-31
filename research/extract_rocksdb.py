@@ -127,7 +127,11 @@ def main() -> None:
     )
     parser.add_argument("--db", default="./build/live_test_btcusdt.rocksdb")
     parser.add_argument("--cf", default="pnl")
-    parser.add_argument("--out-dir", default=".", help="Where to write the CSVs")
+    parser.add_argument(
+        "--out-dir",
+        default=os.path.join(PROJECT_ROOT, "build"),
+        help="Where to write the CSVs (default: <project>/build)",
+    )
     parser.add_argument(
         "--rescale",
         action="store_true",

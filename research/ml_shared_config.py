@@ -106,4 +106,35 @@ SESSION_ORDER = [label for label, _, _ in SESSION_BOUNDS]
 # very long datasets (it materializes one numpy column per feature).
 # ============================================================================
 TRADE_FEATURE_WINDOWS = True
+
+# ============================================================================
+# REGIME STUDY FOLD SCHEME (research/regime_data.make_folds)
+# ----------------------------------------------------------------------------
+# Selects the walk-forward scheme used by EVERY learner in the regime study
+# (buckets, trees, HMM — they all pull their folds from regime_data.make_folds).
+# Edit the values here; no environment variables or code changes needed.
+#
+#   REGIME_FOLD_MODE:
+#     "monthly" -> expanding window, test = the following calendar month
+#                  (original regime-study scheme).
+#     "purged"  -> N-purged chronological walk-forward in the style of
+#                  ml_state_optimized.purged_chronological_splits: an initial
+#                  train block of 35% of the stream, then REGIME_FOLD_N_SAMPLES
+#                  non-overlapping test blocks of REGIME_FOLD_BLOCK_SIZE trades
+#                  spaced evenly over the remainder; every train trade whose
+#                  outcome horizon + embargo reaches into the test block is
+#                  purged from training. The fold count is auto-reduced (with a
+#                  [FOLD COUNT ADJUSTED] notice) if fewer independent windows
+#                  fit the stream.
+#
+# Purge parameters: `ret` is realized over the trade's own holding window
+# (research barrier horizon = 600 s, see config/strategy.py), and entries
+# within a threshold stream are non-overlapping (lockout), so a train trade is
+# purged when dt + horizon + embargo >= first test-trade dt.
+# ============================================================================
+REGIME_FOLD_MODE = "purged"           # "monthly" or "purged"
+REGIME_FOLD_N_SAMPLES = 2             # requested number of non-overlapping test folds
+REGIME_FOLD_BLOCK_SIZE = 1000          # trades per test fold
+REGIME_FOLD_HORIZON_SECONDS = 600     # trade outcome horizon used for purging
+REGIME_FOLD_EMBARGO_SECONDS = 600     # extra embargo on top of the horizon
  

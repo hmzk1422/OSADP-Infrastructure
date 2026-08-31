@@ -23,7 +23,7 @@ market data. The Python `Strategy` simply forwards ``run``/``pause``/
 
 Stack map
 ---------
-    research/ml_state_optimized.py   research backtest (feature engineering,
+    research/ofmr/ml_state_optimized.py   research backtest (feature engineering,
                                      walk-forward evaluation, model training)
     main/                            Python live / dry-run application packages
     uets_rs/engine/        Rust strategy engine
@@ -86,7 +86,7 @@ STRATEGY_CONFIG_PY = REPO_ROOT / "config" / "strategy.py"
 NATIVE_MODULE = "engine"
 
 # Research backtest entry point (pure-Python research pipeline).
-RESEARCH_BACKTEST = REPO_ROOT / "research" / "ml_state_optimized.py"
+RESEARCH_BACKTEST = REPO_ROOT / "research" / "ofmr" / "ml_state_optimized.py"
 
 # Cargo binary/crate names (one per workspace manifest `name`).
 LIVE_TEST_BIN = "live-test"
@@ -324,7 +324,7 @@ class Portfolio:
 # CLI commands
 # ─────────────────────────────────────────────────────────────────────────────
 def cmd_backtest(args: argparse.Namespace) -> int:
-    """Run the research backtest (research/ml_state_optimized.py)."""
+    """Run the research backtest (research/ofmr/ml_state_optimized.py)."""
     if not RESEARCH_BACKTEST.exists():
         print(f"research backtest not found: {RESEARCH_BACKTEST}", file=sys.stderr)
         return 1
@@ -434,9 +434,10 @@ def cmd_live_trade(args: argparse.Namespace) -> int:
                 rsi = st.get("rsi_2")
                 pwin = st.get("win_prob")
                 gate = st.get("gate") or ""
+                outages = st.get("n_outages")
                 logger.info(
                     "  %-10s %s  eq=%9.2f tr=%d r=%+.2f mid=%s "
-                    "rsi=%5.1f p_win=%.2f gate=%s stal=%7.1fms lat=%6.2fms sk=%+8.1fms",
+                    "rsi=%5.1f p_win=%.2f gate=%s stal=%7.1fms lat=%6.2fms sk=%+8.1fms out=%d",
                     ticker, stamp,
                     st["equity"], st["n_trades"], st["total_r"], mid,
                     rsi if isinstance(rsi, (int, float)) else -1.0,
@@ -445,6 +446,7 @@ def cmd_live_trade(args: argparse.Namespace) -> int:
                     stal if isinstance(stal, (int, float)) else -1.0,
                     lat if isinstance(lat, (int, float)) else -1.0,
                     sk if isinstance(sk, (int, float)) else 0.0,
+                    outages if isinstance(outages, (int, float)) else 0,
                 )
                 if dashboard is not None:
                     # Push the latest snapshot so the browser page updates live.
@@ -1012,7 +1014,7 @@ def build_parser() -> argparse.ArgumentParser:
         "backtest",
         help="run the research walk-forward backtest",
         description=(
-            "Run the pure-Python research backtest (research/ml_state_optimized.py): "
+            "Run the pure-Python research backtest (research/ofmr/ml_state_optimized.py): "
             "feature engineering, walk-forward evaluation and the model export used "
             "to train the LightGBM model that live-trade / live-test score with.\n"
             "This is the research side of the stack - it does not touch a live "

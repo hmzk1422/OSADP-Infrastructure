@@ -81,7 +81,7 @@ still be subtly wrong on data shaped differently than what I tested.
 import sys
 import os
 
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..','..'))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
@@ -108,7 +108,7 @@ os.environ["POLARS_MAX_THREADS"] = "4"
 # (np.diff(...) output) — untouched by the pandas->polars switch.
 
 from research.ml_shared_config import *
-from research.feature_builder import compute_orderflow_features, compute_price_features, _join_orderflow_features
+from research.ofmr.feature_builder import compute_orderflow_features, compute_price_features, _join_orderflow_features
 
 def _ensure_parquet(parquet_path: str, csv_fallback_path: str) -> str:
     """Ensure the Parquet file exists, handling legacy CSV fallbacks.

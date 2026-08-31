@@ -140,7 +140,7 @@ chain:
 1. **Same feed.** `unified_runner.py live-test` materializes
    `build/live_test_feed_{ticker}.replay` from the research parquet/csv store.
    `config/strategy.py` exposes `REPLAY_FEED`: pointing it at that same file
-   makes the research pipeline (`research/ml_state_optimized.py`) build its
+   makes the research pipeline (`research/ofmr/ml_state_optimized.py`) build its
    state space from the identical event stream the Rust engine consumes.
 2. **Same outputs, as txt.**
    - Python txt: `build/walk_forward_trade_log_v3.csv` (STEP 10 of
@@ -166,7 +166,7 @@ Run it:
 python unified_runner.py live-test --ticker btcusdt --limit 500000 --release
 #   (research, same feed — set in config/strategy.py)
 #   REPLAY_FEED = "build/live_test_feed_btcusdt.replay"
-#   python -m research.ml_state_optimized
+#   python -m research.ofmr.ml_state_optimized
 
 # then validate (Rust side read straight from the RocksDB store):
 python -m research.parity_diagnostics --rust-db build/live_test_btcusdt.rocksdb
@@ -268,7 +268,7 @@ tests match.
   `sessions` column family. `live-trade --session latest|all` (default `latest`) selects
   whether the report shows only the current run (matching the terminal status table) or
   the whole store's history. Existing rows without the field (session_id=0) still read fine.
-- `research/ml_state_optimized.py` now writes per-feature OPEN / HIGH / LOW / CLOSE columns
+- `research/ofmr/ml_state_optimized.py` now writes per-feature OPEN / HIGH / LOW / CLOSE columns
   into `build/walk_forward_trade_log_v3.csv` for every walk-forward trade (entry value,
   min/max over the holding window, value at exit; `TRADE_FEATURE_WINDOWS` toggle, default
   on, observational only, never used for prediction/labeling).

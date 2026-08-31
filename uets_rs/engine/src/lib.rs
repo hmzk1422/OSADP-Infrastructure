@@ -1,7 +1,7 @@
 //! Unified Execution Engine — research-faithful dry-run trading strategy.
 //!
 //! A Rust port of the exact entry/exit mechanics from
-//! [`research/ml_state_optimized.py`](../../research/ml_state_optimized.py) and
+//! [`research/ofmr/ml_state_optimized.py`](../../research/ofmr/ml_state_optimized.py) and
 //! the live [`main/execution.py`](../../main/execution.py) `PositionTracker`,
 //! using the SAME numbers as [`main/config.py`](../../main/config.py):
 //!
@@ -37,7 +37,7 @@ use std::collections::VecDeque;
 pub mod lgbm;
 
 /// Manifest of which feature slots the model expects, matched to
-/// `uets_legacy/models/lgb_model.features.json` base + orderflow blocks.
+/// `uets_rs/models/lgb_model.features.json` base + orderflow blocks.
 #[derive(Clone, Debug)]
 pub struct FeatureManifest {
     pub base: [&'static str; 7],
@@ -63,7 +63,7 @@ pub const BARRIER_MULTIPLIER: f64 = 0.3;
 /// If true, the engine computes the 8 orderflow features (OFI z-score, CVD delta/slope,
 /// absorption, tick autocorrelation, institutional ratio, delta divergence, depth imbalance)
 /// and forwards all 15 features to the LightGBM model. Set to true when running with the
-/// research model (`uets_legacy/models/lgb_model.txt`), false for the model-free proxy mode.
+/// research model (`uets_rs/models/lgb_model.txt`), false for the model-free proxy mode.
 pub const USE_ORDERFLOW_FEATURES: bool = true;
 pub const RR_RATIO: f64 = 10.0;
 pub const RSI_FILTER_THRESHOLD: f64 = 30.0;
@@ -214,7 +214,7 @@ impl Default for StrategyConfig {
 /// (matches `LiveFeatureEngine._compute_macro_features` + `.ffill()`).
 /// One exported walk-forward fold model plus its out-of-sample test window
 /// (`build/walkforward_models/catalog.json`, written by
-/// `research/ml_state_optimized.py` STEP 6a). Scoring time t with the fold
+/// `research/ofmr/ml_state_optimized.py` STEP 6a). Scoring time t with the fold
 /// covering t reproduces walk-forward evaluation in a live-legal way: in real
 /// trading you periodically retrain and deploy the freshly fitted model --
 /// exactly what each fold represents.

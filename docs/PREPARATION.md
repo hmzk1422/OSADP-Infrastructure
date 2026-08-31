@@ -54,8 +54,8 @@ If `[OK] native module 'engine' present` is missing, re-run `maturin develop --r
 |-----------|----------------|--------------|
 | `scripts/ingestion/*` |  Download historical data for backtesting | Stable |
 | `scripts/utils/*` |  Functions used for research | Outdated, in use |
-| `research/feature_builder` | Feature building + LLM pipeline for alpha generation automation. | Stable |
-| `research/ml_state_builder` | Feature abstraction (Recursive/Non-recursive) | Stable |
+| `research/ofmr/feature_builder` | Feature building + LLM pipeline for alpha generation automation. | Stable |
+| `research/ofmr/ml_state_builder` | Feature abstraction (Recursive/Non-recursive) | Stable |
 
 ## CI/CD
 

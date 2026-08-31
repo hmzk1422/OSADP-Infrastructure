@@ -139,7 +139,7 @@ def load_candidate_features(path: str = None) -> tuple[list[str], dict[str, set[
 # module docstring for why this is a mirror rather than an import.
 # ----------------------------------------------------------------------------
 def prepare_training_matrix():
-    from research.ml_state_optimized import (  # noqa: E402
+    from research.ofmr.ml_state_optimized import (  # noqa: E402
         build_historical_state_space, add_barrier_labels, deduplicate_to_bar,
     )
     from uets_legacy.config import (  # noqa: E402
@@ -419,7 +419,7 @@ def main():
     rep.add("")
 
     X, y, features, datetimes = prepare_training_matrix()
-    from research.ml_state_optimized import purged_chronological_splits  # noqa: E402
+    from research.ofmr.ml_state_optimized import purged_chronological_splits  # noqa: E402
     folds = list(purged_chronological_splits(
         datetimes, n_samples=N_RANDOM_SAMPLES, block_size=TEST_BLOCK_SIZE,
         horizon_seconds=EMBARGO_SECONDS, embargo_seconds=EMBARGO_SECONDS,

@@ -296,6 +296,9 @@ impl Strategy {
         "last_event_ts_ms": s.last_event_ts_ms,
         "last_event_latency_ms": s.last_event_latency_ms,
         "clock_skew_ms": s.clock_skew_ms,
+        "n_outages": s.n_outages,
+        "outage_active": s.outage_active,
+        "max_staleness_ms": s.max_staleness_ms,
         "feed_staleness_ms": s.last_event_instant
             .map(|t| t.elapsed().as_secs_f64() * 1000.0)
             .unwrap_or(0.0),

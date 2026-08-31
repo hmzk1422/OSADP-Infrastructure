@@ -62,7 +62,7 @@ anywhere). Stop with Ctrl-C — the runner drains and flushes RocksDB cleanly.
 - **Memory**: installing the prebuilt wheel needs ~200 MB; never `pip install maturin`
   + compile on-device (Rust builds will OOM on phones).
 - **Python version**: any ≥3.9 works (abi3 wheel).
-- **Backtest**: `unified_runner.py backtest` shells out to `research/ml_state_optimized.py`,
+- **Backtest**: `unified_runner.py backtest` shells out to `research/ofmr/ml_state_optimized.py`,
   which needs the heavy scientific stack (`pandas`, `polars`, …). Install
   `requirements.txt` inside the proot distro if you need it — but live-trade,
   live-test and doctor run from the wheel alone.

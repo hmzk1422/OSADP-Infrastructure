@@ -8,7 +8,7 @@ every trade column?"
 It compares, COLUMN BY COLUMN, the two realized trade logs:
 
   Python (txt):  `build/walk_forward_trade_log_v3.csv`
-                 written by STEP 10 of research/ml_state_optimized.py
+                 written by STEP 10 of research/ofmr/ml_state_optimized.py
                  columns: datetime, ret, threshold, cum_pnl   (ret in R units)
 
   Rust (txt):    the `pnl` column family of the live-test RocksDB store
