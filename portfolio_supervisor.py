@@ -89,6 +89,15 @@ class AssetHandle:
         self.status = "starting"
         self.last_event = ""
         self.alerts: list[str] = []
+        # Network-health state parsed from the child's periodic `[net]` line
+        # (staleness / latency / clock skew / outage episodes). See
+        # execution.rs: NET_OUTAGE_STALENESS_MS / NET_PRINT_SECS for definitions.
+        self.stal_ms: Optional[float] = None
+        self.lat_ms: Optional[float] = None
+        self.skew_ms: Optional[float] = None
+        self.outages: int = 0
+        self.max_stal_ms: Optional[float] = None
+        self.outage_active: bool = False
         self.started_at: float = 0.0  # wall-clock epoch when the asset was spawned
         self.stop_requested: bool = False  # True once we've asked the child to stop
 
@@ -121,7 +130,10 @@ class AssetHandle:
 
     def _parse_line(self, line: str) -> None:
         """Extract live state from the live-trade console protocol."""
-        self.last_event = line[:160]
+        if not line.startswith("[net] "):
+            # [net] lines arrive every few seconds — never let them drown the
+            # last economically meaningful event in the dashboard/console.
+            self.last_event = line[:160]
         if line.startswith("[bar] "):
             for tok in line.split():
                 if tok.startswith("close="):
@@ -153,6 +165,46 @@ class AssetHandle:
                         self.equity = float(tok[7:])
                     except ValueError:
                         pass
+        elif line.startswith("[net] "):
+            # [net] btcusdt stal=12ms lat=0.45ms sk=+2ms outages=1
+            #       max_stal=1500ms [OUTAGE]
+            # Emitted by the Rust loop every NET_PRINT_SECS; carries the same
+            # staleness / latency / clock-skew numbers latency_diag.py samples,
+            # plus the running count of distinct network-outage episodes.
+            toks: dict[str, str] = {}
+            for tok in line.split()[2:]:
+                if "=" in tok:
+                    k, v = tok.split("=", 1)
+                    toks[k] = v
+
+            def _ms(key: str) -> Optional[float]:
+                v = toks.get(key)
+                if v is None:
+                    return None
+                try:
+                    return float(v.rstrip("ms"))
+                except ValueError:
+                    return None
+
+            self.stal_ms = _ms("stal")
+            self.lat_ms = _ms("lat")
+            self.skew_ms = _ms("sk")
+            self.max_stal_ms = _ms("max_stal")
+            try:
+                n = int(toks.get("outages", ""))
+            except ValueError:
+                n = self.outages
+            if n > self.outages:
+                # A NEW outage episode started since the last [net] line.
+                self._alert(
+                    f"network outage #{n} - feed staleness exceeded 1000ms"
+                )
+            self.outages = n
+            self.outage_active = "[OUTAGE]" in line
+            if self.outage_active:
+                self.status = "outage"
+            elif self.status == "outage":
+                self.status = "running"  # episode ended
         elif line.startswith("[seed] warmed"):
             self.last_event = "features seeded"
         elif "connect failed" in line or "stream error" in line:
@@ -280,6 +332,7 @@ class PortfolioSupervisor:
             "trades": sum(a.n_trades for a in self.assets),
             "r": sum(a.total_r for a in self.assets),
             "up": sum(1 for a in self.assets if a.status == "running"),
+            "outages": sum(a.outages for a in self.assets),
         }
 
     def _print_table(self) -> None:
@@ -287,22 +340,29 @@ class PortfolioSupervisor:
         print(f"\n=== PORTFOLIO @ {stamp} ===")
         print(
             f"  {'asset':<10}{'status':<10}{'eq($)':>11}{'net($)':>10}"
-            f"{'tr':>4}{'totR':>8}{'mid':>11}{'rsi':>6}{'pWin':>6}  last event"
+            f"{'tr':>4}{'totR':>8}{'mid':>11}{'rsi':>6}{'pWin':>6}"
+            f"{'stal':>10}{'lat':>8}{'skew':>9}{'out':>5}  last event"
         )
         for a in self.assets:
             mid = f"{a.mid:.2f}" if a.mid else "-"
             rsi = f"{a.rsi:.1f}" if a.rsi is not None else "-"
             pw = f"{a.pwin:.2f}" if a.pwin is not None else "-"
+            stal = f"{a.stal_ms:.0f}ms" if a.stal_ms is not None else "-"
+            lat = f"{a.lat_ms:.2f}ms" if a.lat_ms is not None else "-"
+            sk = f"{a.skew_ms:+.0f}ms" if a.skew_ms is not None else "-"
+            flag = " !" if a.outage_active else ""
             print(
                 f"  {a.ticker:<10}{a.status:<10}{a.equity:>11.2f}"
                 f"{a.equity - a.capital:>10.2f}{a.n_trades:>4}{a.total_r:>8.2f}"
-                f"{mid:>11}{rsi:>6}{pw:>6}  {a.last_event}"
+                f"{mid:>11}{rsi:>6}{pw:>6}{stal:>10}{lat:>8}{sk:>9}"
+                f"{a.outages:>4}{flag}  {a.last_event}"
             )
         tt = self.totals()
         print(
             f"  {'TOTAL':<10}{'':<10}{tt['equity']:>11.2f}{tt['net']:>10.2f}"
             f"{tt['trades']:>4}{tt['r']:>8.2f}   "
             f"up {tt['up']}/{len(self.assets)} | capital ${tt['capital']:.0f}"
+            f" | network outages {tt['outages']}"
         )
 
     # ---- dashboard --------------------------------------------------------------
@@ -326,6 +386,16 @@ class PortfolioSupervisor:
                     "mid": a.mid,
                     "rsi": a.rsi,
                     "pwin": a.pwin,
+                    # network diagnostics from the child's periodic [net] line
+                    "stal_ms": a.stal_ms,
+                    "lat_ms": a.lat_ms,
+                    "skew_ms": a.skew_ms,
+                    "outages": a.outages,
+                    "max_stal_ms": a.max_stal_ms,
+                    "outage_active": a.outage_active,
+                    # the session report is deleted at session end (data lives
+                    # in RocksDB), so only link it while it actually exists
+                    "has_report": (BUILD_DIR / f"pnl_report_{a.ticker}.html").exists(),
                     "restarts": a.restarts,
                     "lastEvent": a.last_event,
                     "alerts": a.alerts[-5:],

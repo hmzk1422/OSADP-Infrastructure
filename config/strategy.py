@@ -5,7 +5,7 @@ CANONICAL HOME: this file now lives at `config/strategy.py` (repo-root level)
 so the toolchain does NOT depend on the legacy `main/` package. Edit parameters
 HERE — `main/config.py` is just a compatibility shim that re-exports these.
 
-Central config matching the research parameters in ml_state_optimized.py.
+Central config matching the research parameters in ofmr/ml_state_optimized.py.
 All parameters verified against the optimized research.
 """
 
@@ -16,7 +16,7 @@ TESTNET = False                    # False = real API for data, True = testnet (
 API_KEY = "..."                   # Your real Bybit API key (read-only is fine for data)
 API_SECRET = "..."                # Your real Bybit API secret
 
-# --- Strategy Parameters (VERIFIED against research/ml_state_optimized.py) ---
+# --- Strategy Parameters (VERIFIED against research/ofmr/ml_state_optimized.py) ---
 LOOKAHEAD_SECONDS    = 6000      # Barrier horizon / timeout in seconds (research
                                  # walk-forward used 600 s; live runs 10x that)
 BARRIER_MULTIPLIER   = 0.3       # Volatility-scaled barrier width (matches research 0.3)
@@ -50,7 +50,7 @@ MAX_POSITION_USD     = 100       # Max notional per position (~0.0017 BTC at $60
 MIN_ORDER_SIZE       = 0.001     # Minimum contract size
 RR_RATIO             = 10       # Risk:Reward ratio (2.0 = 1:2, profit target = 2x stop distance)
 
-# R-multiple clip (research STEP 5 parity, ml_state_optimized.py): research
+# R-multiple clip (research STEP 5 parity, ofmr/ml_state_optimized.py): research
 # clamps normalized_return dataset-wide with
 #     cap = max(|q(0.99)|, |q(0.01)|, RR_RATIO)
 # BEFORE any expectancy is computed. A streaming engine cannot know that cap in
@@ -88,7 +88,7 @@ TIMEFRAME_BARRIER = 300         # In unit seconds (5 minutes)
 RISK_PCT_PER_TRADE = 0.002   # 0.2% of equity risked per trade
 MAX_LEVERAGE = 100.0           # notional ceiling = 3x slot equity
 
-# --- Feature Windows (research ml_state_optimized.py) ---
+# --- Feature Windows (research ofmr/ml_state_optimized.py) ---
 RSI_14_WINDOW      = 14
 RSI_2_WINDOW       = 2
 SMA_14_WINDOW      = 14
@@ -99,7 +99,7 @@ BARRIER_VOL_WINDOW = 100        # Rolling window for vol estimation (research: r
 # --- Aggregated-bar volatility window (barrier sizing) ---
 # Number of TIMEFRAME_BARRIER bars used to estimate bar-to-bar return std for
 # barrier sizing. This is the window both LiveFeatureEngine (features.py) and
-# research/ml_state_optimized.py fall back to via globals().get(..., 20) when
+# research/ofmr/ml_state_optimized.py fall back to via globals().get(..., 20) when
 # it's absent. Defining it here explicitly closes that silent-drift fallback so
 # the live engine, the research pipeline, and the training-data builder all use
 # the SAME window. Matches the research add_barrier_labels() bootstrap floor
@@ -122,8 +122,8 @@ LABEL_SHORT = 0
 LABEL_LONG  = 1
 EPS = 1e-9
 
-# --- Feature definition (EXACT match to ml_state_optimized.py Step 4) ---
-# From ml_state_optimized.py lines 492-499:
+# --- Feature definition (EXACT match to ofmr/ml_state_optimized.py Step 4) ---
+# From ofmr/ml_state_optimized.py lines 492-499:
 # drop_cols = ['target', 'price', 'open', 'high', 'low', 'close',
 #              'profit_barrier', 'stop_barrier', 'session_id',
 #              'bars_to_exit', 'exit_ret', 'terminal_ret', 'is_timeout',
@@ -149,13 +149,13 @@ FEATURE_COLUMNS = [
 # negligibly and adds complexity. The research also excludes it from model
 # features since it's in the drop_cols.
 
-# --- Orderflow Features (optional 9-feature block, ml_state_optimized.py Step 4) ---
-# These mirror the constants ml_state_optimized.py hardcodes locally near the
+# --- Orderflow Features (optional 9-feature block, ofmr/ml_state_optimized.py Step 4) ---
+# These mirror the constants ofmr/ml_state_optimized.py hardcodes locally near the
 # top of that file (USE_ORDERFLOW_FEATURES, ORDERFLOW_FEATURE_COLUMNS,
 # RETAIL_THRESHOLD, VPIN_TARGET_BUCKETS_PER_SESSION, VPIN_WINDOW_BUCKETS,
 # VPIN_MIN_PERIODS). The research script is read-only and imports its copies
 # from itself, not from here — so if you ever change RETAIL_THRESHOLD or the
-# VPIN bucket/window constants in ml_state_optimized.py, update the matching
+# VPIN bucket/window constants in ofmr/ml_state_optimized.py, update the matching
 # values below too, or the live orderflow features will silently be computed
 # on different definitions than whatever produced the model's manifest.
 #
@@ -166,7 +166,7 @@ FEATURE_COLUMNS = [
 USE_ORDERFLOW_FEATURES = False
 
 # Exact same 9 names, same order, as ORDERFLOW_FEATURE_COLUMNS in
-# ml_state_optimized.py — order matters, it's the column order the model was
+# ofmr/ml_state_optimized.py — order matters, it's the column order the model was
 # trained on.
 ORDERFLOW_FEATURE_COLUMNS = [
     'ofi_z', 'cvd_delta_z', 'cvd_slope_z', 'absorption_z',
@@ -176,12 +176,12 @@ ORDERFLOW_FEATURE_COLUMNS = [
 # Rolling z-score window (in bars) for ofi_z, cvd_delta_z, cvd_slope_z,
 # absorption_z, delta_divergence_z, depth_imbalance_z — mirrors the
 # hardcoded window=10 in every calculate_zscore(...) call for these features
-# in ml_state_optimized.py.
+# in ofmr/ml_state_optimized.py.
 ORDERFLOW_Z_WINDOW = 10
 
 # Trade-size cutoff (base-asset units) separating "retail" from
 # "institutional" for inst_ratio / delta_divergence_z. Matches
-# RETAIL_THRESHOLD in ml_state_optimized.py.
+# RETAIL_THRESHOLD in ofmr/ml_state_optimized.py.
 RETAIL_THRESHOLD = 0.05
 
 # --- VPIN (volume-clock informed-trading probability) ---
@@ -203,7 +203,7 @@ VPIN_SESSION_LOOKBACK_SECONDS = 86400   # trailing window used to size buckets (
 # ---------------------------------------------------------------------------
 # Research replay / validation — feed override (read by research pipeline)
 # ---------------------------------------------------------------------------
-# Point `research/ml_state_optimized` (and `feature_builder`) at a replay feed
+# Point `research/ofmr/ml_state_optimized` (and `feature_builder`) at a replay feed
 # TEXT FILE instead of the `research/csv/*.parquet` store. The replay format is
 # exactly what the Rust live-test replay exchange consumes — one event per line
 # (`#` header lines ignored):
@@ -222,7 +222,7 @@ REPLAY_FEED = ""
 # --- Training ---
 TRAIN_ON_STARTUP = True           # Retrain model on initial historical fetch?
 N_HISTORICAL_BARS = 5000          # Fetch this many 1-min bars for initial training
-MODEL_PATH = "uets_legacy/models/lgb_model.txt"
+MODEL_PATH = "uets_rs/models/lgb_model.txt"   # exported by research STEP 12 (moved out of uets_legacy)
 
 # --- Execution ---
 DRY_RUN = True                    # Set False to place real orders!
@@ -230,7 +230,7 @@ MAX_TRADES_PER_HOUR = 300
 FEE_BPS = 0                   # Binance/Bybit taker fee ~0.055%
 
 # --- Signal Debounce & Re-entry Lockout (matches research walk-forward) ---
-# Research (ml_state_optimized.py) uses a hysteresis buffer to collapse
+# Research (ofmr/ml_state_optimized.py) uses a hysteresis buffer to collapse
 # probability flicker into one trade per elevated-probability period, and a
 # non-overlapping position filter that blocks re-entry until the previous
 # trade's barrier horizon has elapsed. Live previously used only a loose

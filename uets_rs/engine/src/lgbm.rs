@@ -1,7 +1,7 @@
 //! LightGBM text-model parser + predictor (zero-dependency, std only).
 //!
-//! Reads the `uets_legacy/models/lgb_model.txt` export produced by
-//! `research/ml_state_optimized.py` STEP 12 and reproduces
+//! Reads the `uets_rs/models/lgb_model.txt` export produced by
+//! `research/ofmr/ml_state_optimized.py` STEP 12 and reproduces
 //! `lightgbm.Booster.predict` for `objective=binary sigmoid:1` — the exact
 //! P(WIN) the live `main/executor.py` feeds into its entry gate.
 //!
@@ -282,7 +282,7 @@ shrinkage=1
     /// Skips gracefully when the model/cases files are absent.
     #[test]
     fn real_model_matches_lightgbm() {
-        let model_path = match find_upwards(&["uets_legacy/models/lgb_model.txt"]) {
+        let model_path = match find_upwards(&["uets_rs/models/lgb_model.txt"]) {
             Some(p) => p,
             None => {
                 eprintln!("skipping: lgb_model.txt not found");

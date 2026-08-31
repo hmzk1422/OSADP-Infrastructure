@@ -88,7 +88,7 @@ the fix and why it had to happen in both places.
 import sys
 import os
 
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..','..'))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
@@ -109,8 +109,8 @@ import lightgbm as lgb
 from sklearn.metrics import precision_score, recall_score, classification_report
 import shap
 from sklearn.inspection import permutation_importance
-from research.ml_state_builder import *
-from research.ml_state_builder import _session_time_bounds
+from research.ofmr.ml_state_builder import *
+from research.ofmr.ml_state_builder import _session_time_bounds
 
 # Suppress sklearn's missing feature names warning
 warnings.filterwarnings(

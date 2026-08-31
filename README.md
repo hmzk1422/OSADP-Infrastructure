@@ -16,7 +16,7 @@ runtime thread per asset.
 ## Architecture
 
 ```
-research/ml_state_optimized.py   research backtest (features -> walk-forward -> model)
+research/ofmr/ml_state_optimized.py   research backtest (features -> walk-forward -> model)
 main/                            live Python packages (config, executor, dashboard)
 uets_rs/engine/        Rust strategy engine (venue-agnostic)
 uets_rs/live-trade/    real execution: WS/REST venues + RocksDB + HTML report
@@ -226,4 +226,14 @@ pip install <linux-aarch64 wheel>                          # self-contained:
                                                            # rustls TLS + bundled RocksDB
 python3 unified_runner.py doctor --require-native
 python3 unified_runner.py live-trade --tickers btcusd --exchange bitfinex --mode paper
+```
+
+## extract_rocksDB
+```
+python research\extract_rocksdb.py --db data\portfolio_solusdt.rocksdb --cf trades        --out-dir research\replay\sol
+python research\extract_rocksdb.py --db data\portfolio_solusdt.rocksdb --cf orderbook_top --out-dir research\replay\sol
+```
+## Regime-Detection Research
+```
+python -m research.regime_report
 ```

@@ -241,7 +241,7 @@ def main():
                 "diagnostic's csv-path findings also apply to it.")
         rep.add("")
 
-    from research.ml_state_builder import build_historical_state_space  # noqa: E402
+    from research.ofmr.ml_state_builder import build_historical_state_space  # noqa: E402
 
     rep.add("## 1. Building chunked vs unchunked state space (same session data, two configs)")
     rep.add("")
@@ -264,7 +264,7 @@ def main():
 
     rep.add("## 3. Boundary-concentration test (does error cluster at chunk seams?)")
     rep.add("")
-    from research.ml_state_builder import _session_time_bounds, get_session_paths
+    from research.ofmr.ml_state_builder import _session_time_bounds, get_session_paths
     sessions = get_session_paths()
     all_boundaries = []
     for ob_path, tr_path, _sid in sessions:

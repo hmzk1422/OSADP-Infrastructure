@@ -1,11 +1,11 @@
 """
 ml_state_optimized_regime.py
 =============================
-SESSION-LEVEL REGIME-DETECTION EXTENSION on top of research/ml_state_optimized.py.
+SESSION-LEVEL REGIME-DETECTION EXTENSION on top of research/ofmr/ml_state_optimized.py.
 
 WHY THIS IS A SEPARATE FILE, NOT AN EDIT TO ml_state_optimized.py
 -------------------------------------------------------------------
-Per your call: this imports research.ml_state_optimized unmodified
+Per your call: this imports research.ofmr.ml_state_optimized unmodified
 (`import *` plus the handful of underscore-prefixed helpers it needs) and
 only ADDS the new per-session study + regime-detection CSV around the
 existing pipeline. ml_state_optimized.py itself is untouched — if this
@@ -74,7 +74,7 @@ N_RANDOM_SAMPLES if fewer independent windows fit the data).
 import sys
 import os
 
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..','..'))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
@@ -95,8 +95,8 @@ from sklearn.metrics import precision_score, recall_score, classification_report
 # plus everything ml_state_optimized.py itself pulled in transitively from
 # ml_state_builder.py and ml_shared_config.py (BAR_FREQ, RR_RATIO, FEE_BPS,
 # FEATURE_COLUMNS, BUILD_DIR, ROLLING_WINDOW, CLASS_NAMES, ensure_dir, ...).
-from research.ml_state_optimized import *
-from research.ml_state_optimized import _pwe, _sortino, _start_report_capture
+from research.ofmr.ml_state_optimized import *
+from research.ofmr.ml_state_optimized import _pwe, _sortino, _start_report_capture
 from research.ml_shared_config import *
 
 

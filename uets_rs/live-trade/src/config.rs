@@ -69,7 +69,7 @@ pub fn load_strategy_config(path: &Path) -> Option<StrategyConfig> {
     Some(cfg)
 }
 /// Load the walk-forward fold-model catalog exported by
-/// `research/ml_state_optimized.py` STEP 6a (`catalog.json` + `fold_XXX.txt`
+/// `research/ofmr/ml_state_optimized.py` STEP 6a (`catalog.json` + `fold_XXX.txt`
 /// LightGBM dumps inside `dir`). Models that fail to parse are skipped with a
 /// warning so a partially exported catalog still runs. Returns folds sorted
 /// by test-window start.

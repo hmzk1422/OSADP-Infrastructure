@@ -1,11 +1,14 @@
 //! Research model loading — finds and parses the LightGBM text export
-//! (`uets_legacy/models/lgb_model.txt`) so the strategy scores with the real
+//! (`uets_rs/models/lgb_model.txt`) so the strategy scores with the real
 //! 15-feature model instead of the fallback logit proxy.
 
 use engine::lgbm::LightGbm;
 
 /// Candidate model paths, checked from the working directory upward.
-const MODEL_PATH_CANDIDATES: &[&str] = &["uets_legacy/models/lgb_model.txt", "uets_legacy/lgb_model.txt"];
+/// The canonical home of the exported model is `uets_rs/models/` (the file no
+/// longer lives under `uets_legacy/`); the flat `uets_rs/lgb_model.txt` variant
+/// is a fallback for ad-hoc drops.
+const MODEL_PATH_CANDIDATES: &[&str] = &["uets_rs/models/lgb_model.txt", "uets_rs/lgb_model.txt"];
 const EXPECTED_FEATURE_COUNT: usize = 15;
 
 /// Walk up from the current directory looking for any of `paths`.

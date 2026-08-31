@@ -56,7 +56,11 @@ Usage
     python latency_diag.py --exchange bybit --duration 30
     python latency_diag.py --no-persist            # delete temp RocksDB
 
-Per-sample CSV + machine-readable JSON report are written under build/.
+Per-sample CSV + JSON artifacts are OPT-IN (`--save`) and land under build/ —
+by default only the console report is printed. The same staleness / latency /
+skew numbers are also persisted per tick in the strategy's RocksDB diag
+column family, and are live-visible in the portfolio dashboard via the
+children's periodic `[net]` console line.
 """
 
 from __future__ import annotations
@@ -282,7 +286,13 @@ def print_report(r: Dict[str, Any]) -> None:
 def write_artifacts(
     samples: List[Dict[str, Any]], report: Dict[str, Any], ticker: str,
 ) -> List[Path]:
-    """Persist per-sample CSV + a machine-readable JSON report in build/."""
+    """Persist per-sample CSV + a machine-readable JSON report in build/.
+
+    OPT-IN ONLY (``--save``): the console report above is the default output —
+    writing one CSV+JSON pair per run into build/ cluttered the folder, and
+    everything these files carry is also persisted per-tick in the strategy's
+    RocksDB ``diag`` column family (see uets_rs/live-trade/src/db.rs).
+    """
     BUILD_DIR.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     base = BUILD_DIR / f"latency_diag_{ticker}_{stamp}"
@@ -329,6 +339,9 @@ def main(argv: Optional[List[str]] = None) -> int:
                     help="RocksDB path (default: data/latency_diag_<ticker>.rocksdb)")
     ap.add_argument("--no-persist", action="store_true",
                     help="delete the temp RocksDB store after the run")
+    ap.add_argument("--save", action="store_true",
+                    help="also write latency_diag_<ticker>_<ts>.csv/.json into build/ "
+                         "(default OFF: console report only — build/ stays clean)")
     args = ap.parse_args(argv)
 
     logging.basicConfig(
@@ -365,7 +378,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         )
         report = build_report(samples, ticker, args.exchange)
         print_report(report)
-        write_artifacts(samples, report, ticker)
+        if args.save:
+            write_artifacts(samples, report, ticker)
         return 0
     except KeyboardInterrupt:
         print("\ninterrupted - shutting down cleanly...")

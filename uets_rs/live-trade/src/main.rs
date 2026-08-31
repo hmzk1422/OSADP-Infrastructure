@@ -138,8 +138,8 @@ async fn main() {
 
     let s = stats.lock().unwrap();
     println!(
-        "=== final: equity={:.2} trades={} (W:{}/L:{}) total_r={:.2} ===",
-        s.equity, s.n_trades, s.n_wins, s.n_losses, s.total_r
+        "=== final: equity={:.2} trades={} (W:{}/L:{}) total_r={:.2} outages={} max_stal={:.0}ms ===",
+        s.equity, s.n_trades, s.n_wins, s.n_losses, s.total_r, s.n_outages, s.max_staleness_ms
     );
     if let Some(err) = &s.last_error {
         println!("last error: {err}");

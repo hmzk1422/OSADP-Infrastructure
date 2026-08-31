@@ -20,6 +20,14 @@ use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
+/// DEVLOG staleness standard: once the newest market event ages past this,
+/// the feed counts as stale (network outage or illiquid market). Consecutive
+/// ticks past the threshold are ONE outage episode (`RunStats::n_outages`).
+const NET_OUTAGE_STALENESS_MS: f64 = 1000.0;
+/// Cadence of the periodic `[net]` console line (parsed by the portfolio
+/// supervisor into the dashboard; also handy in a bare terminal).
+const NET_PRINT_SECS: u64 = 5;
+
 /// Rolling minimum of `raw_skew` over a trailing window. Since `raw_skew =
 /// now - exchange_ts` mixes clock offset and network/exchange transit delay
 /// into one number that can't be split without an independent time source,
@@ -172,6 +180,15 @@ pub struct RunStats {
     /// entries) — it isolates transient queuing/network jitter from whatever
     /// constant baseline (clock error + typical transit time) is present.
     pub relative_staleness_ms: f64,
+    /// Network-outage telemetry (see NET_OUTAGE_STALENESS_MS): number of
+    /// distinct episodes where the newest market event aged past the outage
+    /// threshold, the worst staleness seen this session, and whether such an
+    /// episode is active right now. Surfaced in `status()` and the periodic
+    /// `[net]` console line so the portfolio supervisor / dashboard can count
+    /// outages and judge speed standards without a separate diagnostic run.
+    pub n_outages: u64,
+    pub outage_active: bool,
+    pub max_staleness_ms: f64,
 }
 
 /// Shared handles the loop and its controlling caller both hold.
@@ -322,6 +339,8 @@ pub async fn run_execution_loop(cfg: ExecutionConfig, mut ctx: LoopContext) {
 
     // -- main feed loop -------------------------------------------------------
     let mut last_report_wake = std::time::Instant::now();
+    // Periodic [net] telemetry cadence (see the print block inside the loop).
+    let mut last_net_print = std::time::Instant::now();
     loop {
         if ctx.stop.load(Ordering::SeqCst) {
             break;
@@ -452,15 +471,31 @@ pub async fn run_execution_loop(cfg: ExecutionConfig, mut ctx: LoopContext) {
             s.loop_cadence_ms = iter_started.elapsed().as_secs_f64() * 1000.0;
             s.batch_process_ms = batch_started.elapsed().as_secs_f64() * 1000.0;
 
+            // Feed-health / outage tracking. The DEVLOG standard marks a feed
+            // stale (network outage or illiquid market) once the newest event
+            // ages past 1000 ms; consecutive ticks past the threshold are ONE
+            // episode, so `n_outages` counts distinct events, not ticks.
+            let feed_staleness_ms = s
+                .last_event_instant
+                .map(|t| t.elapsed().as_secs_f64() * 1000.0)
+                .unwrap_or(0.0);
+            if feed_staleness_ms > NET_OUTAGE_STALENESS_MS {
+                if !s.outage_active {
+                    s.outage_active = true;
+                    s.n_outages += 1;
+                }
+            } else {
+                s.outage_active = false;
+            }
+            if feed_staleness_ms > s.max_staleness_ms {
+                s.max_staleness_ms = feed_staleness_ms;
+            }
+
             // Persist a latency / feed-health sample to RocksDB every tick so
             // the HTML report's diagnostics pane can show latency / skew /
             // staleness aligned with the price tape (previously only surfaced by
             // a Python poller writing CSVs into build/).
             if let Some(dbw) = db.as_ref() {
-                let feed_staleness_ms = s
-                    .last_event_instant
-                    .map(|t| t.elapsed().as_secs_f64() * 1000.0)
-                    .unwrap_or(0.0);
                 let ts_ms = s.last_event_ts_ms.unwrap_or_else(|| {
                     std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
@@ -493,6 +528,31 @@ pub async fn run_execution_loop(cfg: ExecutionConfig, mut ctx: LoopContext) {
                     .map(|c| c.rr_ratio)
                     .unwrap_or(engine::RR_RATIO);
                 crate::report::generate_html_report(db, &cfg.ticker, cfg.report_scope, rr).await;
+            }
+        }
+
+        // Periodic network-health telemetry. The portfolio supervisor runs each
+        // asset as a separate OS process and only sees this console stream, so
+        // this line is what carries staleness / latency / clock skew / outage
+        // counts into the dashboard (the same numbers latency_diag.py samples
+        // via PyO3 status(), and the same ones persisted to RocksDB above).
+        if last_net_print.elapsed().as_secs() >= NET_PRINT_SECS {
+            last_net_print = std::time::Instant::now();
+            if let Ok(s) = ctx.stats.lock() {
+                let staleness_ms = s
+                    .last_event_instant
+                    .map(|t| t.elapsed().as_secs_f64() * 1000.0)
+                    .unwrap_or(-1.0);
+                println!(
+                    "[net] {} stal={:.0}ms lat={:.2}ms sk={:+.0}ms outages={} max_stal={:.0}ms{}",
+                    cfg.ticker,
+                    staleness_ms,
+                    s.last_event_latency_ms,
+                    s.clock_skew_ms,
+                    s.n_outages,
+                    s.max_staleness_ms,
+                    if s.outage_active { " [OUTAGE]" } else { "" },
+                );
             }
         }
     }
@@ -766,6 +826,18 @@ async fn finish(cfg: &ExecutionConfig, mut ctx: LoopContext, db: &Option<Arc<DbW
                 .unwrap_or(engine::RR_RATIO);
             crate::report::generate_html_report(db, &cfg.ticker, cfg.report_scope, rr).await;
         }
+    }
+    // The session report is transient by design: it exists only WHILE the
+    // strategy runs (regenerated on a timer for the live browser view) and is
+    // removed at session end — every trade / equity snapshot / diag sample it
+    // rendered is already persisted in RocksDB, so nothing is lost and build/
+    // does not accumulate stale per-session HTML files.
+    let report_path = format!("build/pnl_report_{}.html", cfg.ticker);
+    match std::fs::remove_file(&report_path) {
+        Ok(_) => println!(
+            "[report] session ended - removed {report_path} (data persists in RocksDB)"
+        ),
+        Err(_) => {} // never written (no-db) or already gone
     }
     if let Err(e) = ctx.feed.close().await {
         eprintln!("[feed close] {e}");
