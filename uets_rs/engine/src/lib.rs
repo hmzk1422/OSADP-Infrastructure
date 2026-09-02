@@ -79,8 +79,12 @@ pub const SLIPPAGE_BPS_FALLBACK: f64 = 0.75;
 /// Matches `config/strategy.py` `MIN_BARRIER_PCT` (0.01%): reject entries whose
 /// volatility-scaled barrier is tighter than this (research applies the same
 /// filter in its training/live universe).
-pub const MIN_BARRIER_PCT: f64 = 0.0001;
+pub const MIN_BARRIER_PCT: f64 = 0.00015; // 0.015% — pure reject filter for collapsed vol-scaled barriers
 pub const MAX_BARRIER_PCT: f64 = 0.05;
+/// Score barrier exits by the REAL move / barrier instead of a hardcoded
+/// +RR_RATIO win / -1.0 loss. False = research STEP 5 parity (default);
+/// True = honest forward-testing R. Timeout exits always use real move/bp.
+pub const SCORE_BARRIER_AS_RR: bool = false;
 
 /// Volatility-normalized position sizing: fraction of CURRENT equity risked
 /// per trade (1R = equity × this, in USD — identical on every symbol and every
@@ -157,6 +161,10 @@ pub struct StrategyConfig {
     /// (unclipped) R is always recorded as `TradeRecord::r_raw`, and the
     /// dual-pass data-driven cap lives in `research/parity_diagnostics.py`.
     pub r_clip_cap: f64,
+    /// Whether to score barrier exits by real move / barrier (honest live R)
+    /// instead of the hardcoded +RR/-1 research convention. See
+    /// [`SCORE_BARRIER_AS_RR`].
+    pub score_barrier_as_rr: bool,
     /// Whether the model was exported with the orderflow block (see
     /// `lgb_model.features.json` `includes_orderflow`). When off, the 8
     /// orderflow accumulators are skipped (fallback/proxy mode).
@@ -202,6 +210,7 @@ impl Default for StrategyConfig {
             r_clip_cap: R_CLIP_CAP,
             use_orderflow_features: USE_ORDERFLOW_FEATURES,
             hysteresis_buffer: HYSTERESIS_BUFFER,
+            score_barrier_as_rr: SCORE_BARRIER_AS_RR,
             require_fold_coverage: false,
             one_candidate_per_bar: false,
             starting_equity: 10_000.0,
@@ -281,6 +290,9 @@ pub struct Feature {
     pub bar_vol_std: f64,
     /// Model-free P(WIN) ≥ 0.50 gate (LightGBM stand-in). See module docs.
     pub win_prob: f64,
+    /// Meta-labeller P(take) for the same bar (research/ofmr/meta_labeller.py
+    /// contract). 0.0 when no labeller is installed (gate OPEN).
+    pub meta_pwin: f64,
     /// Traded base-asset volume of this 1 s bar (research `volume` column;
     /// zero-volume rows sit outside the research trade universe).
     pub volume: f64,
@@ -416,6 +428,13 @@ pub struct MomentumStrategy {
     /// rows outside every window score -1.0 (untradable) -- mirroring
     /// research's fold-local out-of-sample evaluation.
     fold_models: Vec<FoldModel>,
+    /// Per-asset meta-labeller (take/avoid gate over the executor's own
+    /// candidates; research/ofmr/meta_labeller.py). `None` = gate OPEN —
+    /// the engine trades exactly as without it.
+    labeller: Option<crate::lgbm::LightGbm>,
+    /// Take/avoid threshold (from `build/meta_labeller_manifest.json`). 0.0 = the
+    /// gate never fires even when a labeller is installed.
+    meta_threshold: f64,
 
     // --- orderflow accumulation (mirrors features.py, reset per composite bar) ---
     ofi_prev_bid_price: Option<f64>,
@@ -534,6 +553,8 @@ impl MomentumStrategy {
             }),
             model: None,
             fold_models: Vec::new(),
+            labeller: None,
+            meta_threshold: 0.0,
             ofi_prev_bid_price: None,
             ofi_prev_bid_amount: 0.0,
             ofi_prev_ask_price: None,
@@ -604,8 +625,9 @@ impl MomentumStrategy {
 
     /// Which entry gate rejected the most recent bar-close evaluation:
     /// `"in_position"`, `"lockout"`, `"vol_filter"`, `"hunting_zone"`,
-    /// `"confidence"`, or `""` when nothing blocked (an entry fired or no
-    /// candidate was evaluated). Observational only — never gates behavior.
+    /// `"confidence"`, `"meta_filter"`, or `""` when nothing blocked (an
+    /// entry fired or no candidate was evaluated). Observational only —
+    /// never gates behavior.
     pub fn entry_gate(&self) -> &'static str {
         self.last_entry_block
     }
@@ -929,6 +951,26 @@ impl MomentumStrategy {
             }
         };
 
+        // Meta-labeller P(take) over the SAME 15 features (order =
+        // research/ofmr/meta_labeller.py LABELLER_FEATURES) + UTC hour-of-day
+        // (hour + minute/60, matching the research `hour_of_day` column).
+        // Computed on every bar so it always stays in sync with `win_prob`;
+        // the gate itself only fires inside `try_enter` when a labeller AND a
+        // threshold are installed. 0.0 = no labeller (gate OPEN).
+        let meta_pwin = match self.labeller.as_ref() {
+            Some(lab) => {
+                let sod = (close_ms / 1000).rem_euclid(86_400);
+                let hour = (sod / 3600) as f64 + ((sod % 3600) / 60) as f64 / 60.0;
+                let v: Vec<f64> = features
+                    .iter()
+                    .copied()
+                    .chain(std::iter::once(hour))
+                    .collect();
+                lab.predict_proba(&v)
+            }
+            None => 0.0,
+        };
+
         let feat = Feature {
             ts: close_ms,
             close,
@@ -943,6 +985,7 @@ impl MomentumStrategy {
             sma_14: m.sma_14,
             bar_vol_std: m.bar_vol_std,
             win_prob,
+            meta_pwin,
             volume: self.micro_volume,
         };
         self.last_features = Some(feat);
@@ -996,12 +1039,16 @@ impl MomentumStrategy {
             return;
         }
 
-        // Vol filter mirrors `_passes_vol_filter` (MIN/MAX_BARRIER_PCT).
-        let bp = self.barrier_pct();
-        if bp < self.cfg.min_barrier_pct || bp > self.cfg.max_barrier_pct {
+        // Vol filter mirrors `_passes_vol_filter` (MIN/MAX_BARRIER_PCT). Uses the
+        // RAW (unfloored) vol-scaled barrier so the filter can actually fire when
+        // volatility collapses below min_barrier_pct. The floored value is used
+        // for sizing/TP below — this check is purely a reject filter.
+        let bp_raw = self.barrier_pct_raw();
+        if bp_raw < self.cfg.min_barrier_pct || bp_raw > self.cfg.max_barrier_pct {
             self.last_entry_block = "vol_filter";
             return;
         }
+        let bp = self.barrier_pct();
 
         let (in_zone, side) = self.resolve_zone_side(&feat);
         if !in_zone {
@@ -1012,6 +1059,19 @@ impl MomentumStrategy {
         if feat.win_prob + 1e-12 < self.cfg.confidence_threshold {
             self.last_entry_block = "confidence";
             return; // LOW_CONFIDENCE (also rejects the -1 no-fold sentinel)
+        }
+
+        // Meta-labeller take/avoid gate — PURE ADDITION over the executor's
+        // own pipeline: it can only FURTHER filter candidates that already
+        // passed every research gate (research/ofmr/meta_labeller.py). A
+        // missing/un-deployed labeller leaves `meta_threshold` at 0.0 and the
+        // gate can never fire (gate OPEN).
+        if self.labeller.is_some()
+            && self.meta_threshold > 0.0
+            && feat.meta_pwin + 1e-12 < self.meta_threshold
+        {
+            self.last_entry_block = "meta_filter";
+            return;
         }
 
         self.last_entry_block = "";
@@ -1137,8 +1197,11 @@ impl MomentumStrategy {
         true
     }
 
-    /// Vol-scaled stop distance: `bar_vol_std × BARRIER_MULTIPLIER`, with the
-    /// bootstrap floor `0.001 × BARRIER_MULTIPLIER` (research + PositionTracker).
+    /// Vol-scaled stop distance for SIZING/TP: `bar_vol_std × BARRIER_MULTIPLIER`,
+    /// with the bootstrap floor `0.001 × BARRIER_MULTIPLIER` (research +
+    /// PositionTracker). This is the value stored on every Position and used to
+    /// compute the actual stop/target distances. TP = entry × (1 + bp × RR_RATIO)
+    /// so the profit target is always a constant multiple of the stop distance.
     fn barrier_pct(&self) -> f64 {
         let vol = self.last_features.map(|f| f.bar_vol_std).unwrap_or(0.0);
         let bp = vol * self.cfg.barrier_multiplier;
@@ -1146,6 +1209,20 @@ impl MomentumStrategy {
             bp
         } else {
             0.001 * self.cfg.barrier_multiplier
+        }
+    }
+
+    /// Raw (unfloored) vol-scaled barrier for the MIN/MAX reject filter. Returns
+    /// `bar_vol_std × BARRIER_MULTIPLIER` with NO floor, so the filter can
+    /// actually fire when volatility collapses below `min_barrier_pct`. When vol
+    /// is 0/NaN, returns 0.0 (always rejected — no data, no trade).
+    fn barrier_pct_raw(&self) -> f64 {
+        let vol = self.last_features.map(|f| f.bar_vol_std).unwrap_or(0.0);
+        let bp = vol * self.cfg.barrier_multiplier;
+        if bp > EPS && bp.is_finite() {
+            bp
+        } else {
+            0.0
         }
     }
 
@@ -1241,6 +1318,12 @@ impl MomentumStrategy {
         };
         let base_r = if is_timeout {
             (theoretical_exit - p.entry_price) / p.entry_price * side_sign / bp
+        } else if self.cfg.score_barrier_as_rr {
+            // Honest forward-testing R: score the barrier exit by the REAL
+            // move / barrier (actual overshoot included), not a hardcoded
+            // +RR. This is what live should evaluate on — a tiny +0.3%
+            // target on a collapsed barrier no longer books a fake +10R.
+            (theoretical_exit - p.entry_price) / p.entry_price * side_sign / bp
         } else {
             let favourable = (theoretical_exit - p.entry_price) * side_sign > 0.0;
             if favourable {
@@ -1319,6 +1402,19 @@ impl MomentumStrategy {
     /// fold's test window score -1.0 (research never evaluates them).
     pub fn set_fold_models(&mut self, models: Vec<FoldModel>) {
         self.fold_models = models;
+    }
+
+    /// Install the per-asset meta-labeller + its take/avoid threshold
+    /// (research/ofmr/meta_labeller.py export, loaded from the manifest by
+    /// live-trade's model loader). Passing `None` or a non-positive threshold
+    /// keeps the gate OPEN (executor behaviour unchanged).
+    pub fn set_labeller(&mut self, labeller: Option<crate::lgbm::LightGbm>, threshold: f64) {
+        self.labeller = labeller;
+        self.meta_threshold = if self.labeller.is_some() && threshold > 0.0 {
+            threshold
+        } else {
+            0.0
+        };
     }
 
     /// True if a real LightGBM model is installed and will be scored on the
@@ -1748,8 +1844,9 @@ mod tests {
         assert_eq!(RR_RATIO, 10.0, "config RR_RATIO");
         assert_eq!(RSI_FILTER_THRESHOLD, 30.0, "config RSI_FILTER_THRESHOLD");
         assert_eq!(LOCKOUT_SECONDS, 1000, "config LOCKOUT_SECONDS (on/off only)");
-        assert_eq!(MIN_BARRIER_PCT, 0.0001, "config MIN_BARRIER_PCT");
+        assert_eq!(MIN_BARRIER_PCT, 0.00015, "config MIN_BARRIER_PCT (0.015%)");
         assert_eq!(MAX_BARRIER_PCT, 0.05, "config MAX_BARRIER_PCT");
+        assert!(!SCORE_BARRIER_AS_RR, "config SCORE_BARRIER_AS_RR = False (research parity)");
         assert_eq!(FEE_BPS, 0.1, "config FEE_BPS");
         assert_eq!(BARRIER_VOL_WINDOW, 20, "config BARRIER_VOL_BAR_WINDOW = 20 (research feature_builder rolling_std)");
         assert_eq!(R_CLIP_CAP, 0.0, "config R_CLIP_CAP = off (dual-pass cap used for parity instead)");

@@ -9,7 +9,7 @@ strategy-state predictability tests, drawdown attribution and asset analysis,
 then writes `build/regime_study/regime_research_report.md` answering the ten
 study questions with actual measured numbers.
 
-Run:  python -m research.regime_report
+Run:  python -m research.ofmr.regime_report
 
 Note: This still makes some assumptions (Long only in MAE/MFE calc, perform full correlation
 which is an information that doesn't exist so this needs to be a static study)
@@ -22,18 +22,18 @@ import sys
 import numpy as np
 import pandas as pd
 
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from research.regime_data import (  # noqa: E402
+from research.ofmr.regime_data import (  # noqa: E402
     load_study_frame, ret_metrics, fmt_metrics, ensure_out, THRESHOLD, TRADE_LOG,
     FOLD_MODE, FOLD_N_SAMPLES, FOLD_BLOCK_SIZE, FOLD_HORIZON_SECONDS,
     FOLD_EMBARGO_SECONDS,
 )
-from research.regime_buckets import run_buckets_all  # noqa: E402
-from research.regime_trees import run_trees, evaluate_filter, stability_of_filter  # noqa: E402
-from research.regime_hmm import (  # noqa: E402
+from research.ofmr.regime_buckets import run_buckets_all  # noqa: E402
+from research.ofmr.regime_trees import run_trees, evaluate_filter, stability_of_filter  # noqa: E402
+from research.ofmr.regime_hmm import (  # noqa: E402
     run_hmm_study, summarize_hmm, summarize_hmm_aligned, transition_persistence,
     hmm_state_prob_predicts_ret, hmm_confidence_filter,
 )

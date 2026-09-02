@@ -108,7 +108,7 @@ impl Strategy {
     let strategy_config = config_path
         .as_deref()
         .map(std::path::Path::new)
-        .and_then(strategy_config_loader::load_strategy_config);
+        .and_then(|p| strategy_config_loader::load_strategy_config(p, &ticker));
         Ok(Self {
             stats: Arc::new(Mutex::new(RunStats {
                 capital_usd: capital,
@@ -199,6 +199,7 @@ impl Strategy {
                             persist: true,
                             strategy_config,
                             walkforward_dir: None,
+                            meta_gate: live_trade::execution::MetaGate::Auto,
                             report_scope: live_trade::report::ReportScope::default(),
                         },
                         LoopContext {

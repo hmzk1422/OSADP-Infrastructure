@@ -77,6 +77,18 @@ pub enum ExecutionMode {
     Live,
 }
 
+/// Meta-labeller gate switch for one run: `Auto` follows the manifest's
+/// `gate_deployed` flag; `On`/`Off` override it in-memory for THIS run only
+/// (the manifest is never rewritten), so a test can A/B the filter without
+/// touching `build/meta_labeller_manifest.json`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MetaGate {
+    #[default]
+    Auto,
+    On,
+    Off,
+}
+
 /// Static configuration for one execution loop.
 #[derive(Debug, Clone)]
 pub struct ExecutionConfig {
@@ -93,7 +105,7 @@ pub struct ExecutionConfig {
     /// Persist market data + PnL to RocksDB.
     pub persist: bool,
     /// Optional strategy-parameter override (single source of truth: the
-    /// `build/live_test_config.json` exported by `unified_runner.py` from
+    /// `build/strategy_config.json` exported by `unified_runner.py` from
     /// `main/config.py`). When `None` the engine falls back to its built-in
     /// `Default`, which mirrors `main/config.py`.
     pub strategy_config: Option<StrategyConfig>,
@@ -101,6 +113,8 @@ pub struct ExecutionConfig {
     /// When set, each 1 s row is scored with the fold model whose OOS test
     /// window covers it (live-legal equivalent of periodic retrain+deploy).
     pub walkforward_dir: Option<String>,
+    /// Portfolio meta-labeller gate switch (see [`MetaGate`]).
+    pub meta_gate: MetaGate,
     /// Which persisted runs the HTML report shows (defaults to `latest`,
     /// matching the terminal session counters).
     pub report_scope: crate::report::ReportScope,
@@ -295,6 +309,25 @@ pub async fn run_execution_loop(cfg: ExecutionConfig, mut ctx: LoopContext) {
         println!("[model] no research model found ??? using proxy logit (P(WIN) gate only)");
     }
 
+    // -- portfolio meta-labeller gate (PURE ADDITION over the executor:
+    //    a missing or un-deployed labeller leaves the gate OPEN and the
+    //    strategy trades exactly as before) -------------------------------
+    match cfg.meta_gate {
+        MetaGate::Off => {
+            println!("[meta] {ticker}: labeller gate OFF (--meta-gate off)")
+        }
+        MetaGate::On => match model::load_labeller(&ticker, true) {
+            Some(l) => strategy.set_labeller(Some(l.model), l.threshold),
+            None => println!(
+                "[meta] {ticker}: --meta-gate on but no labeller export — gate OPEN"
+            ),
+        },
+        MetaGate::Auto => match model::load_labeller(&ticker, false) {
+            Some(l) => strategy.set_labeller(Some(l.model), l.threshold),
+            None => println!("[meta] {ticker}: labeller gate OPEN (no deployed labeller)"),
+        },
+    }
+
     // -- warm feature rings from history -------------------------------------
     match ctx.feed.historical_closes(&ticker, cfg.seed_bars).await {
         Ok(closes) if !closes.is_empty() => {
@@ -461,57 +494,64 @@ pub async fn run_execution_loop(cfg: ExecutionConfig, mut ctx: LoopContext) {
                 s.last_event_instant = Some(feed_recv);
                 s.last_event_latency_ms = feed_recv.elapsed().as_secs_f64() * 1000.0;
             }
-            if let Some(trade_ts) = batch_last_trade_ts {
-                let raw_skew = clock_skew_ms(trade_ts);
-                let floor = skew_floor.push(raw_skew);
-                s.clock_skew_ms = raw_skew;
-                s.skew_floor_ms = floor;
-                s.relative_staleness_ms = raw_skew - floor;
-            }
+            // Local loop timing is measured on EVERY iteration (pure code
+            // latency, meaningful in live AND replay) — outside the net gate.
             s.loop_cadence_ms = iter_started.elapsed().as_secs_f64() * 1000.0;
             s.batch_process_ms = batch_started.elapsed().as_secs_f64() * 1000.0;
 
-            // Feed-health / outage tracking. The DEVLOG standard marks a feed
-            // stale (network outage or illiquid market) once the newest event
-            // ages past 1000 ms; consecutive ticks past the threshold are ONE
-            // episode, so `n_outages` counts distinct events, not ticks.
-            let feed_staleness_ms = s
-                .last_event_instant
-                .map(|t| t.elapsed().as_secs_f64() * 1000.0)
-                .unwrap_or(0.0);
-            if feed_staleness_ms > NET_OUTAGE_STALENESS_MS {
-                if !s.outage_active {
-                    s.outage_active = true;
-                    s.n_outages += 1;
+            // Network diagnostics are LIVE-TRADE ONLY. A replay (live-test)
+            // has no network: staleness/latency/skew against historical
+            // timestamps are meaningless, and the per-tick diag RocksDB write
+            // would dominate the hot loop. A replay records trades ONLY and
+            // runs as fast as possible.
+            if cfg.feed != ExchangeKind::Parquet {
+                if let Some(trade_ts) = batch_last_trade_ts {
+                    let raw_skew = clock_skew_ms(trade_ts);
+                    let floor = skew_floor.push(raw_skew);
+                    s.clock_skew_ms = raw_skew;
+                    s.skew_floor_ms = floor;
+                    s.relative_staleness_ms = raw_skew - floor;
                 }
-            } else {
-                s.outage_active = false;
-            }
-            if feed_staleness_ms > s.max_staleness_ms {
-                s.max_staleness_ms = feed_staleness_ms;
-            }
 
-            // Persist a latency / feed-health sample to RocksDB every tick so
-            // the HTML report's diagnostics pane can show latency / skew /
-            // staleness aligned with the price tape (previously only surfaced by
-            // a Python poller writing CSVs into build/).
-            if let Some(dbw) = db.as_ref() {
-                let ts_ms = s.last_event_ts_ms.unwrap_or_else(|| {
-                    std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map(|d| d.as_millis() as i64)
-                        .unwrap_or(0)
-                });
-                dbw.record_diag(
-                    &cfg.ticker,
-                    &crate::db::DiagSample {
+                // Feed-health / outage tracking. The DEVLOG standard marks a
+                // feed stale (network outage or illiquid market) once the
+                // newest event ages past 1000 ms; consecutive ticks past the
+                // threshold are ONE episode, so `n_outages` counts distinct
+                // events, not ticks.
+                let feed_staleness_ms = s
+                    .last_event_instant
+                    .map(|t| t.elapsed().as_secs_f64() * 1000.0)
+                    .unwrap_or(0.0);
+                if feed_staleness_ms > NET_OUTAGE_STALENESS_MS {
+                    if !s.outage_active {
+                        s.outage_active = true;
+                        s.n_outages += 1;
+                    }
+                } else {
+                    s.outage_active = false;
+                }
+                if feed_staleness_ms > s.max_staleness_ms {
+                    s.max_staleness_ms = feed_staleness_ms;
+                }
+
+                // Persist a latency / feed-health sample to RocksDB every
+                // tick so the HTML report's diagnostics pane can show latency
+                // / skew / staleness aligned with the price tape.
+                if let Some(dbw) = db.as_ref() {
+                    let ts_ms = s.last_event_ts_ms.unwrap_or_else(|| {
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| d.as_millis() as i64)
+                            .unwrap_or(0)
+                    });
+                    dbw.record_diag(&crate::db::DiagSample {
                         ts_ms,
                         latency_ms: s.last_event_latency_ms,
                         clock_skew_ms: s.clock_skew_ms,
                         feed_staleness_ms,
                         relative_staleness_ms: s.relative_staleness_ms,
-                    },
-                );
+                    });
+                }
             }
         }
 
@@ -536,7 +576,9 @@ pub async fn run_execution_loop(cfg: ExecutionConfig, mut ctx: LoopContext) {
         // this line is what carries staleness / latency / clock skew / outage
         // counts into the dashboard (the same numbers latency_diag.py samples
         // via PyO3 status(), and the same ones persisted to RocksDB above).
-        if last_net_print.elapsed().as_secs() >= NET_PRINT_SECS {
+        if cfg.feed != ExchangeKind::Parquet
+            && last_net_print.elapsed().as_secs() >= NET_PRINT_SECS
+        {
             last_net_print = std::time::Instant::now();
             if let Ok(s) = ctx.stats.lock() {
                 let staleness_ms = s

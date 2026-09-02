@@ -40,11 +40,13 @@ CLI
     python unified_runner.py backtest
     python unified_runner.py live-trade --exchange bitfinex --feed bybit \
         --mode paper --capital 10000
-    # Multi-asset portfolio: one live-trade PROCESS per asset from a master
-    # table (see portfolio.example.json), with total PnL tracking, per-asset
-    # RocksDB stores, a tabbed dashboard (build/portfolio_dashboard.html) and
-    # crash alerts:
-    python unified_runner.py portfolio --config portfolio.json --restart
+    # Multi-asset portfolio: one live-trade PROCESS per asset from the unified
+    # config (portfolio.json = layout + strategy params, per-ticker strategy
+    # overrides), with a VIM-style terminal dashboard (PnL / trades / RR /
+    # Sortino, live config reload), per-asset RocksDB stores, tabbed HTML
+    # dashboard and crash alerts:
+    python unified_runner.py portfolio --config config/portfolio.json --restart
+    python unified_runner.py portfolio --no-vim    # legacy plain console table
     # Inspect / delete RocksDB stores:
     python unified_runner.py db --list
     python unified_runner.py db --clean-ticker btcusdt --yes
@@ -77,10 +79,12 @@ from typing import Any, Dict, Iterator, Optional, Sequence
 
 REPO_ROOT = Path(__file__).resolve().parent
 
-# Canonical strategy config: the Python source of truth (repo-root level,
-# outside the legacy `main/` package) that gets exported to JSON for the
-# Rust engine on every run.
-STRATEGY_CONFIG_PY = REPO_ROOT / "config" / "strategy.py"
+# Canonical strategy config: the unified portfolio JSON (config/portfolio.json)
+# is the single source of truth for BOTH portfolio layout and strategy
+# parameters. It is handed DIRECTLY to every engine process — the Rust side
+# resolves its own ticker (`_strategy_defaults` + per-asset `strategy`
+# overrides, deep-merged in-memory). No per-ticker config file is generated.
+DEFAULT_PORTFOLIO_CONFIG = REPO_ROOT / "config" / "portfolio.json"
 
 # Must match `[tool.maturin] module-name` in pyproject.toml.
 NATIVE_MODULE = "engine"
@@ -338,13 +342,20 @@ def cmd_live_trade(args: argparse.Namespace) -> int:
         print("       Run `maturin develop --release` from the repo root, then retry.", file=sys.stderr)
         return 1
 
-    # Materialize the strategy config (single source of truth: config/strategy.py)
-    # and hand it to every strategy, so live-trade runs the exact parameters
-    # research/live-test use — e.g. a CONFIDENCE_THRESHOLD edit in
-    # config/strategy.py applies on the next launch WITHOUT a Rust rebuild.
-    trade_config_path = _export_strategy_config()
-    if trade_config_path is None:
-        print(f"ERROR: {STRATEGY_CONFIG_PY} not found — required for config export", file=sys.stderr)
+    # The unified config (config/portfolio.json) is handed DIRECTLY to each
+    # native strategy — the Rust binding resolves its own ticker's parameters
+    # (`_strategy_defaults` + per-asset `strategy` overrides, deep-merged
+    # in-memory), so an edit in the config applies on the next launch WITHOUT
+    # a Rust rebuild and without generating any intermediate file.
+    from portfolio_supervisor import load_portfolio_config
+
+    try:
+        pc = load_portfolio_config(args.portfolio_config)
+    except Exception as exc:  # noqa: BLE001 — any parse/validation failure is fatal here
+        print(
+            f"ERROR: cannot load portfolio config {args.portfolio_config}: {exc}",
+            file=sys.stderr,
+        )
         return 1
 
     pf = Portfolio()
@@ -376,15 +387,17 @@ def cmd_live_trade(args: argparse.Namespace) -> int:
 
     atexit.register(_stop_all)
 
+    asset_by_ticker = {a["ticker"]: a for a in pc["assets"]}
     for ticker in args.tickers:
+        asset = asset_by_ticker[ticker.lower()]
         try:
             pf.add(
                 ticker,
-                exchange=args.exchange,
-                feed=args.feed,
-                mode=args.mode,
-                capital=args.capital,
-                config_path=trade_config_path,
+                exchange=args.exchange or asset["exchange"],
+                feed=args.feed or asset["feed"],
+                mode=args.mode or asset["mode"],
+                capital=args.capital if args.capital is not None else asset["capital"],
+                config_path=str(args.portfolio_config),
             )
         except ValueError as exc:
             print(f"ERROR: {exc}", file=sys.stderr)
@@ -425,28 +438,20 @@ def cmd_live_trade(args: argparse.Namespace) -> int:
             stamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
             for ticker, st in pf.status().items():
                 mid = f'{st["mid"]:.2f}' if st["mid"] else "—"
-                stal = st.get("feed_staleness_ms")
-                lat = st.get("last_event_latency_ms")
-                sk = st.get("clock_skew_ms")
                 # Gate telemetry from the newest closed 1-second bar:
                 # rsi_2 drives the hunting zone (<30 for long-only), win_prob
                 # is the model P(WIN) vs the confidence gate (>= 0.5).
                 rsi = st.get("rsi_2")
                 pwin = st.get("win_prob")
                 gate = st.get("gate") or ""
-                outages = st.get("n_outages")
                 logger.info(
                     "  %-10s %s  eq=%9.2f tr=%d r=%+.2f mid=%s "
-                    "rsi=%5.1f p_win=%.2f gate=%s stal=%7.1fms lat=%6.2fms sk=%+8.1fms out=%d",
+                    "rsi=%5.1f p_win=%.2f gate=%s",
                     ticker, stamp,
                     st["equity"], st["n_trades"], st["total_r"], mid,
                     rsi if isinstance(rsi, (int, float)) else -1.0,
                     pwin if isinstance(pwin, (int, float)) else 0.0,
                     gate,
-                    stal if isinstance(stal, (int, float)) else -1.0,
-                    lat if isinstance(lat, (int, float)) else -1.0,
-                    sk if isinstance(sk, (int, float)) else 0.0,
-                    outages if isinstance(outages, (int, float)) else 0,
                 )
                 if dashboard is not None:
                     # Push the latest snapshot so the browser page updates live.
@@ -676,40 +681,18 @@ def cmd_live_test(args: argparse.Namespace) -> int:
             print(f"ERROR: {err}", file=sys.stderr)
             return 1
 
-    # 2. Materialize strategy config (single source: config/strategy.py) unless
-    # the caller passed an explicit --config, then hand it to the engine.
-    config_path = args.config or str(REPO_ROOT / "build" / "live_test_config.json")
-    if not STRATEGY_CONFIG_PY.exists():
-        raise RuntimeError(f"{STRATEGY_CONFIG_PY} not found — required for --config export")
-
-    if args.config:
-        config_path = args.config
-        logger.info("using explicit strategy config -> %s", config_path)
-    else:
-        config_path = _export_strategy_config()
-        if config_path is None:
-            raise RuntimeError(
-                f"{STRATEGY_CONFIG_PY} not found — required for config export"
-            )
-    logger.info("exported strategy config -> %s", config_path)
+    # 2. The unified config (config/portfolio.json) is passed DIRECTLY to the
+    # engine — the Rust side resolves the replayed ticker's parameters
+    # (`_strategy_defaults` + per-asset `strategy` overrides).
+    config_path = str(args.config or args.portfolio_config)
+    logger.info("using strategy config -> %s", config_path)
 
     # Walk-forward parity mode: when --wf-dir is given, flip the two research-
-    # universe gates in the exported config so live-test (a) scores each second
-    # with the fold model whose OOS test window covers it and (b) restricts
-    # entries to one volume>0 candidate per composite bar -- exactly the
-    # research trade universe.
-    if getattr(args, "wf_dir", None):
-        import json as _json
-
-        with open(config_path, "r", encoding="utf-8") as fh:
-            _cfg_json = _json.load(fh)
-        _cfg_json["require_fold_coverage"] = True
-        _cfg_json["one_candidate_per_bar"] = True
-        with open(config_path, "w", encoding="utf-8") as fh:
-            _json.dump(_cfg_json, fh, indent=2)
-        logger.info(
-            "walk-forward parity gates ON (fold models from %s)", args.wf_dir
-        )
+    # universe gates inside the engine (via the --parity flag) so live-test
+    # (a) scores each second with the fold model whose OOS test window covers
+    # it and (b) restricts entries to one volume>0 candidate per composite bar
+    # — exactly the research trade universe. The config file itself is never
+    # modified.
 
     # 3. Kick off the replay through the identical live-trade execution loop.
     cmd = ["cargo", "run", "-p", LIVE_TEST_BIN]
@@ -734,7 +717,10 @@ def cmd_live_test(args: argparse.Namespace) -> int:
     if args.limit is not None:
         cmd += ["--limit", str(args.limit)]
     if getattr(args, "wf_dir", None):
+        cmd += ["--parity"]
         cmd += ["--wf-dir", str(args.wf_dir)]
+    if getattr(args, "meta_gate", "auto") != "auto":
+        cmd += ["--meta-gate", str(args.meta_gate)]
     logger.info("running historical replay: %s", " ".join(cmd))
     return subprocess.call(cmd)
 
@@ -791,86 +777,17 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     return 0 if ok else 1
 
 
-def _export_strategy_config() -> Optional[str]:
-    """Materialize config/strategy.py -> build/live_trade_config.json.
-
-    Also verify that the generated JSON actually contains the fields Rust
-    needs for position sizing. Fail immediately rather than letting Rust
-    silently fall back to defaults.
-    """
-    if not STRATEGY_CONFIG_PY.exists():
-        return None
-
-    import importlib.util as _ilu
-    import json as _json
-
-    spec = _ilu.spec_from_file_location("_strategy_config", STRATEGY_CONFIG_PY)
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"cannot load strategy config: {STRATEGY_CONFIG_PY}")
-
-    mod = _ilu.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-
-    trade_config_path = REPO_ROOT / "build" / "live_trade_config.json"
-
-    # ALWAYS regenerate. Never trust an existing/stale JSON file.
-    mod.export_strategy_config(str(trade_config_path))
-
-    # Read back what was actually written.
-    with open(trade_config_path, "r", encoding="utf-8") as fh:
-        generated = _json.load(fh)
-
-    # These are critical runtime sizing/execution parameters.
-    required = {
-        "risk_pct_per_trade": getattr(mod, "RISK_PCT_PER_TRADE"),
-        "max_leverage": getattr(mod, "MAX_LEVERAGE"),
-        "rr_ratio": getattr(mod, "RR_RATIO"),
-        "fee_bps": getattr(mod, "FEE_BPS"),
-        "max_position_usd": getattr(mod, "MAX_POSITION_USD"),
-    }
-
-    missing = [k for k in required if k not in generated]
-    if missing:
-        raise RuntimeError(
-            "Generated strategy config is missing required fields: "
-            + ", ".join(missing)
-        )
-
-    mismatches = []
-    for key, expected in required.items():
-        actual = generated[key]
-        if actual != expected:
-            mismatches.append(
-                f"{key}: expected {expected!r}, generated {actual!r}"
-            )
-
-    if mismatches:
-        raise RuntimeError(
-            "Generated strategy config does not match config/strategy.py:\n  "
-            + "\n  ".join(mismatches)
-        )
-
-    logger.info(
-        "strategy config -> %s | risk_pct_per_trade=%s max_leverage=%s "
-        "rr_ratio=%s fee_bps=%s max_position_usd=%s",
-        trade_config_path,
-        generated["risk_pct_per_trade"],
-        generated["max_leverage"],
-        generated["rr_ratio"],
-        generated["fee_bps"],
-        generated["max_position_usd"],
-    )
-
-    return str(trade_config_path)
-
-
 def cmd_portfolio(args: argparse.Namespace) -> int:
-    """Supervise one `live-trade` process per asset from a master JSON table."""
-    from portfolio_supervisor import run_portfolio
+    """Supervise one `live-trade` process per asset from the unified JSON."""
+    from portfolio_supervisor import load_portfolio_config, run_portfolio
 
-    cfg = _export_strategy_config()
-    if cfg is None:
-        print(f"ERROR: {STRATEGY_CONFIG_PY} not found — required for config export", file=sys.stderr)
+    # Fail fast on a bad config before any child process is spawned. The
+    # supervisor + VIM dashboard re-parse config/portfolio.json themselves
+    # whenever it changes on disk — nothing is ever generated.
+    try:
+        load_portfolio_config(args.config)
+    except Exception as exc:  # noqa: BLE001
+        print(f"ERROR: cannot load portfolio config {args.config}: {exc}", file=sys.stderr)
         return 1
     return run_portfolio(
         args.config,
@@ -878,6 +795,7 @@ def cmd_portfolio(args: argparse.Namespace) -> int:
         restart=args.restart,
         status_interval=args.status_interval,
         no_dashboard=args.no_dashboard,
+        vim=not args.no_vim,
     )
 
 
@@ -967,9 +885,10 @@ def build_parser() -> argparse.ArgumentParser:
             "OSADP-Core unified runner - orchestration for the hybrid Python/Rust "
             "quant stack (backtest, replay, live paper/live execution, HTML reports).\n"
             "\n"
-            "Every command below auto-exports the strategy parameters from "
-            "config/strategy.py into a JSON the Rust engine reads, so editing "
-            "parameters does NOT need a Rust rebuild.\n"
+            "Every command reads the strategy parameters directly from "
+            "config/portfolio.json — the Rust engine resolves each ticker's "
+            "parameters from the same JSON, so editing "
+            "parameters does NOT need a Rust rebuild and no config files are generated.\n"
             "\n"
             "COMMANDS (run '<command> -h' for full options of one):\n"
             "  doctor      check the environment / repo / native Rust binding\n"
@@ -990,7 +909,7 @@ def build_parser() -> argparse.ArgumentParser:
             "  python unified_runner.py live-trade --exchange bitfinex \\\n"
             "      --feed binance --mode live\n"
             "  # multi-asset portfolio (one OS process per asset) + tabbed dashboard:\n"
-            "  python unified_runner.py portfolio --config portfolio.json --restart\n"
+            "  python unified_runner.py portfolio --config config/portfolio.json --restart\n"
             "  # replay history deterministically (to reproduce the backtest):\n"
             "  python unified_runner.py live-test --ticker btcusdt --release\n"
             "  # manage the RocksDB stores:\n"
@@ -1000,7 +919,7 @@ def build_parser() -> argparse.ArgumentParser:
             "OUTPUTS\n"
             "  build/pnl_report_<symbol>.html   per-symbol TradingView-style report\n"
             "  build/portfolio_dashboard.html   multi-asset tabbed dashboard\n"
-            "  build/live_trade_config.json     strategy params the Rust engine uses\n"
+            "  build/strategy_config.json      strategy params the Rust engine uses\n"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -1043,19 +962,28 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     p_trade.add_argument(
-        "--tickers", nargs="+", default=list(DEFAULT_TICKERS),
-        help="symbols to run concurrently, e.g. btcusdt ethusdt solusdt",
+        "--portfolio-config", default=str(DEFAULT_PORTFOLIO_CONFIG),
+        help="unified portfolio + strategy config (JSON); per-ticker exchange, "
+             "feed, mode, capital and strategy parameters all come from here "
+             "(default: config/portfolio.json)",
     )
     p_trade.add_argument(
-        "--exchange", default=DEFAULT_EXCHANGE, choices=SUPPORTED_EXCHANGES,
-        help="venue orders are routed to (execution). Choices: "
+        "--tickers", nargs="+", default=list(DEFAULT_TICKERS),
+        help="symbols to run concurrently, e.g. btcusdt ethusdt solusdt "
+             "(must be present in the portfolio-config assets list)",
+    )
+    p_trade.add_argument(
+        "--exchange", default=None, choices=SUPPORTED_EXCHANGES,
+        help="venue orders are routed to (execution). Overrides the per-asset "
+             "value from the portfolio config. Choices: "
              + ", ".join(SUPPORTED_EXCHANGES),
     )
     p_trade.add_argument(
         "--feed", default=None, choices=SUPPORTED_FEEDS,
-        help="market-data feed venue (orderflow source); defaults to --exchange. "
-             "e.g. --exchange bitfinex --feed binance streams Binance tape while "
-             "executing on Bitfinex. Choices: " + ", ".join(SUPPORTED_FEEDS),
+        help="market-data feed venue (orderflow source); defaults to the "
+             "per-asset feed from the portfolio config. e.g. --exchange "
+             "bitfinex --feed binance streams Binance tape while executing on "
+             "Bitfinex. Choices: " + ", ".join(SUPPORTED_FEEDS),
     )
     p_trade.add_argument(
         "--dashboard", action="store_true",
@@ -1063,14 +991,15 @@ def build_parser() -> argparse.ArgumentParser:
              "executed, equity, wins/losses and feed freshness per ticker",
     )
     p_trade.add_argument(
-        "--mode", default="paper", choices=SUPPORTED_MODES,
+        "--mode", default=None, choices=SUPPORTED_MODES,
         help="execution mode: paper (simulated fills, no orders) or live (real "
-             "orders). Default: paper. Choices: " + ", ".join(SUPPORTED_MODES),
+             "orders). Overrides the per-asset value from the portfolio "
+             "config. Choices: " + ", ".join(SUPPORTED_MODES),
     )
     p_trade.add_argument(
-        "--capital", type=float, default=DEFAULT_CAPITAL_USD,
-        help="capital (USD) allocated to EACH ticker "
-             "(default: %d)" % DEFAULT_CAPITAL_USD,
+        "--capital", type=float, default=None,
+        help="capital (USD) allocated to EACH ticker. Overrides the per-asset "
+             "value from the portfolio config",
     )
     p_trade.add_argument(
         "--status-interval", type=float, default=2.0,
@@ -1096,9 +1025,9 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     p_port.add_argument(
-        "--config", default="portfolio.json",
-        help="master portfolio table (JSON); see portfolio.example.json "
-             "(default: portfolio.json)",
+        "--config", default=str(DEFAULT_PORTFOLIO_CONFIG),
+        help="master portfolio table (JSON); see config/portfolio.example.json "
+             "(default: config/portfolio.json)",
     )
     p_port.add_argument(
         "--release", action="store_true",
@@ -1116,6 +1045,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_port.add_argument(
         "--no-dashboard", action="store_true",
         help="skip writing build/portfolio_dashboard.html",
+    )
+    p_port.add_argument(
+        "--no-vim", action="store_true",
+        help="skip the VIM-style terminal dashboard and use the legacy plain "
+             "console table. By default the terminal becomes a live dashboard "
+             "(metrics + trades view + config view, VIM keys, live config "
+             "reload).",
     )
     p_port.set_defaults(func=cmd_portfolio)
 
@@ -1217,9 +1153,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="build/use the release replay binary instead of debug",
     )
     p_test.add_argument(
+        "--portfolio-config", default=str(DEFAULT_PORTFOLIO_CONFIG),
+        help="unified portfolio + strategy config (JSON) passed directly to the "
+             "engine, which resolves the replayed ticker's parameters "
+             "(default: config/portfolio.json)",
+    )
+    p_test.add_argument(
         "--config", default=None,
-        help="path to a StrategyConfig JSON (default: build/live_test_config.json "
-             "exported from config/strategy.py)",
+        help="explicit flat StrategyConfig JSON (overrides --portfolio-config; "
+             "default: the unified config/portfolio.json)",
     )
     p_test.add_argument(
         "--wf-dir", default=None,
@@ -1228,6 +1170,13 @@ def build_parser() -> argparse.ArgumentParser:
              "window covers it and restricts entries to research's trade universe "
              "(one volume>0 candidate per composite bar) so the replay reproduces "
              "the walk-forward backtest.",
+    )
+    p_test.add_argument(
+        "--meta-gate", choices=("auto", "on", "off"), default="auto",
+        help="portfolio meta-labeller gate for THIS run: auto = honour the "
+             "manifest's gate_deployed flag (default); on = force the gate on "
+             "(overrides gate_deployed=false for this run only); off = force it "
+             "off. The manifest is never rewritten.",
     )
     p_test.set_defaults(func=cmd_live_test)
 

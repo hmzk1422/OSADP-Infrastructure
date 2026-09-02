@@ -1,0 +1,27 @@
+{
+  "train_symbol": "btcusdt",
+  "features": [
+    "spread_bps_z_open",
+    "ma_slope_5_open",
+    "rsi_x_ma_open",
+    "ma_accel_open",
+    "price_roc_3_open",
+    "rsi_2_open",
+    "sma_14_open",
+    "ofi_z_open",
+    "cvd_delta_z_open",
+    "cvd_slope_z_open",
+    "absorption_z_open",
+    "tick_autocorr_open",
+    "inst_ratio_open",
+    "delta_divergence_z_open",
+    "depth_imbalance_z_open",
+    "hour_of_day"
+  ],
+  "includes_orderflow": true,
+  "version": 1,
+  "model": "lgb_labeller.txt",
+  "meta_threshold": 0.55,
+  "n_trades": 6789,
+  "trained_at": "2026-08-31T14:40:14.664774+00:00"
+}

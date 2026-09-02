@@ -125,8 +125,8 @@ auto-restarts it, and writes a tabbed dashboard
 (`build/portfolio_dashboard.html`: overview tab + one tab per asset).
 
 ```bash
-copy portfolio.example.json portfolio.json    # then edit tickers/capital
-python unified_runner.py portfolio --config portfolio.json --restart
+copy config/portfolio.example.json config/portfolio.json    # then edit tickers/capital
+python unified_runner.py portfolio --config config/portfolio.json --restart
 ```
 
 Master table format:

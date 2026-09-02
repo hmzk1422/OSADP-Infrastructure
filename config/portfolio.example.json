@@ -1,0 +1,98 @@
+{
+    "_comment": "Unified portfolio + strategy config. Top-level keys are DEFAULTS; per-asset entries inherit and can override any field — including the entire 'strategy' block. Edit this file live while unified_runner.py --vim is running: the dashboard auto-reloads on save.",
+  "mode": "paper",
+  "exchange": "bitfinex",
+  "feed": "bybit",
+  "capital": 10000,
+  "restart": true,
+  "status_interval": 5.0,
+  "strategy_path": "build/strategy_config.json",
+
+  "_strategy_defaults": {
+    "_comment": "Strategy parameters — single source of truth. The snake_case keys matching engine::StrategyConfig names are read DIRECTLY by the Rust engine (per-ticker: _strategy_defaults + this asset's strategy overrides). Research-only parameters (feature windows, columns, model path) are kept here so there is a single source of truth for the whole stack.",
+
+    "micro_barrier_secs": 1,
+    "timeframe_barrier_secs": 300,
+    "lookahead_seconds": 6000,
+    "barrier_multiplier": 0.3,
+    "rr_ratio": 10,
+    "rsi_filter_threshold": 30,
+    "enable_rsi_accel_filter": false,
+    "trade_direction_is_long": true,
+    "confidence_threshold": 0.2,
+    "lockout_seconds": 1000,
+    "max_position_usd": 100,
+    "min_order_size": 0.001,
+    "fee_bps": 0.0,
+    "enable_slippage": false,
+    "slippage_bps_fallback": 0,
+    "min_barrier_pct": 0.00015,
+    "max_barrier_pct": 0.05,
+    "risk_pct_per_trade": 0.002,
+    "max_leverage": 100.0,
+    "r_clip_cap": 0.0,
+    "use_orderflow_features": true,
+    "hysteresis_buffer": 0,
+    "score_barrier_as_rr": false,
+    "require_fold_coverage": false,
+    "one_candidate_per_bar": false,
+
+    "rsi_filter_column": "rsi_2",
+    "stop_loss_bps": 5,
+    "take_profit_bps": 5,
+
+    "rsi_14_window": 14,
+    "rsi_2_window": 2,
+    "sma_14_window": 14,
+    "ofi_lookback": 60,
+    "cvd_rolling": 10,
+    "barrier_vol_window": 100,
+    "barrier_vol_bar_window": 20,
+    "deeplob_z_window": 10,
+    "rsi_z_window": 20,
+    "ma_slope_window": 5,
+    "price_roc_window_3": 3,
+    "price_roc_window_5": 5,
+    "rsi_roc_window_3": 3,
+    "rsi_roc_window_5": 5,
+
+    "label_loss": 0,
+    "label_win": 1,
+    "eps": 1e-9,
+
+    "feature_columns": [
+      "spread_bps_z",
+      "ma_slope_5",
+      "rsi_x_ma",
+      "ma_accel",
+      "price_roc_3",
+      "rsi_2",
+      "sma_14"
+    ],
+
+    "use_orderflow_features_python": false,
+    "orderflow_feature_columns": [
+      "ofi_z", "cvd_delta_z", "cvd_slope_z", "absorption_z",
+      "tick_autocorr", "inst_ratio", "delta_divergence_z", "depth_imbalance_z"
+    ],
+    "orderflow_z_window": 10,
+    "retail_threshold": 0.05,
+    "vpin_target_buckets_per_session": 50,
+    "vpin_window_buckets": 10,
+    "vpin_min_periods": 5,
+    "vpin_session_lookback_seconds": 86400,
+
+    "replay_feed": "",
+    "train_on_startup": true,
+    "n_historical_bars": 5000,
+    "model_path": "uets_rs/models/lgb_model.txt",
+    "dry_run": true,
+    "max_trades_per_hour": 300
+  },
+
+  "assets": [
+    { "ticker": "btcusdt", "feed": "bybit",   "capital": 5000 },
+    { "ticker": "ethusdt", "feed": "binance", "capital": 3000 },
+    { "ticker": "solusdt", "feed": "bybit",   "capital": 2000 }
+  ]
+}

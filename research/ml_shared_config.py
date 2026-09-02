@@ -1,8 +1,58 @@
+"""OFMR strategy research config (+ compatibility re-exports).
+
+Platform-level constants — paths, data-source selection, session bounds, the
+universal walk-forward fold scheme, shared sampling defaults — live in
+`config/platform.json` (plain JSON, previously `config/platform.py`), the
+single source of truth for EVERY strategy. New code should read that file.
+
+This module loads the platform JSON once and re-exports its values as module
+constants so all existing importers keep working unchanged, and keeps the
+OFMR-strategy-specific constants (feature lists, model windows, VPIN
+diagnostics, legacy engine knobs).
+"""
+import json
 import os
+
+PROJECT_ROOT = os.path.abspath(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
+)
+
+with open(os.path.join(PROJECT_ROOT, "config", "platform.json"),
+          "r", encoding="utf-8-sig") as _pf:
+    _PLATFORM = json.load(_pf)
+
+BUILD_DIR = os.path.join(PROJECT_ROOT, _PLATFORM["build_dir"])
+STATE_SPACE_DIR = os.path.join(PROJECT_ROOT, _PLATFORM["state_space_dir"])
+
+DATA_FORMAT = _PLATFORM["data_format"]
+DATA_DIR = _PLATFORM["data_dir"]
+CHUNK_SESSIONS = _PLATFORM["chunk_sessions"]
+N_CHUNKS_PER_SESSION = _PLATFORM["n_chunks_per_session"]
+AUTO_CONVERT_CSV_TO_PARQUET = _PLATFORM["auto_convert_csv_to_parquet"]
+
+SESSION_BOUNDS = [tuple(b) for b in _PLATFORM["session_bounds"]]
+SESSION_ORDER = [b[0] for b in SESSION_BOUNDS]
+
+REGIME_FOLD_MODE = _PLATFORM["regime_fold_mode"]
+REGIME_FOLD_N_SAMPLES = _PLATFORM["regime_fold_n_samples"]
+REGIME_FOLD_BLOCK_SIZE = _PLATFORM["regime_fold_block_size"]
+REGIME_FOLD_HORIZON_SECONDS = _PLATFORM["regime_fold_horizon_seconds"]
+REGIME_FOLD_EMBARGO_SECONDS = _PLATFORM["regime_fold_embargo_seconds"]
+
+BARRIER_CHUNK_SIZE = _PLATFORM["barrier_chunk_size"]
+N_RANDOM_SAMPLES = _PLATFORM["n_random_samples"]
+TEST_BLOCK_SIZE = _PLATFORM["test_block_size"]
+
+
+def ensure_dir(path: str) -> str:
+    """Create `path` (and parents) if needed, then return it."""
+    os.makedirs(path, exist_ok=True)
+    return path
+
 from uets_legacy.config import (
     LOOKAHEAD_SECONDS, BARRIER_MULTIPLIER, RSI_FILTER_COLUMN, RSI_FILTER_THRESHOLD,
     ENABLE_RSI_ACCEL_FILTER,
-    RR_RATIO, TRADE_DIRECTION, TIMEFRAME_BARRIER,
+    RR_RATIO, TRADE_DIRECTION, TIMEFRAME_BARRIER, SYMBOL, TICKER,
     RSI_14_WINDOW, RSI_2_WINDOW, SMA_14_WINDOW, DEEPLOB_Z_WINDOW, RSI_Z_WINDOW,
     MA_SLOPE_WINDOW, PRICE_ROC_WINDOW_3, LABEL_LOSS, LABEL_WIN, FEATURE_COLUMNS,
     FEE_BPS, ENABLE_SLIPPAGE, MIN_BARRIER_PCT, MAX_BARRIER_PCT, EPS,
@@ -16,25 +66,9 @@ except ImportError:
     BARRIER_VOL_BAR_WINDOW = 20
 
 # ============================================================================
-# OUTPUT DIRECTORY CONFIGURATION
-# ----------------------------------------------------------------------------
-# Every generated artifact (backtest reports, feature-importance CSVs, trade
-# logs, HTML charts) is written under the project's `build/` folder so the
-# working directory stays clean. Intermediate state-space parquet chunks are
-# written inside the research package (`research/state_space/`) instead of the
-# repository root.
+# OFMR-SPECIFIC CONSTANTS (platform paths/sessions/folds live in config/platform)
 # ============================================================================
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-BUILD_DIR = os.path.join(PROJECT_ROOT, "build")
-STATE_SPACE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "state_space")
-
-
-def ensure_dir(path: str) -> str:
-    """Create `path` (and parents) if needed, then return it."""
-    os.makedirs(path, exist_ok=True)
-    return path
-
-SYMBOL_HIST = "BTCUSDT"
+SYMBOL_HIST = TICKER.upper()  # btcusdt -> BTCUSDT (historical data-file prefix)
 BAR_FREQ = f"{TIMEFRAME_BARRIER}s"
 USE_ORDERFLOW_FEATURES = True
 EXPORT_PRODUCTION_MODEL = True
@@ -49,9 +83,7 @@ _CHUNK_WARMUP_SAFETY_BARS = 10  # extra margin on top of the largest window foun
 CHUNK_WARMUP_BARS = max(KNOWN_BAR_WINDOWS) + _CHUNK_WARMUP_SAFETY_BARS
 CHUNK_BUFFER_SECONDS = TIMEFRAME_BARRIER * CHUNK_WARMUP_BARS
 
-BARRIER_CHUNK_SIZE = 50_000
-N_RANDOM_SAMPLES = 400
-TEST_BLOCK_SIZE = 150
+BARRIER_CHUNK_SIZE = 50_000  # legacy re-export; canonical home: config/platform
 EMBARGO_SECONDS = LOOKAHEAD_SECONDS
 CLASS_NAMES = {LABEL_LOSS: 'LOSS', LABEL_WIN: 'WIN'}
 
@@ -65,30 +97,6 @@ ORDERFLOW_FEATURE_COLUMNS = [
         'ofi_z', 'cvd_delta_z', 'cvd_slope_z', 'absorption_z',
         'tick_autocorr', 'inst_ratio', 'delta_divergence_z', 'depth_imbalance_z',
     ]
-
-# ============================================================================
-# DATA SOURCE CONFIGURATION
-# ----------------------------------------------------------------------------
-# Flip DATA_FORMAT to switch the entire pipeline (both the time-bounds scan
-# and the per-chunk load) between parquet and csv input files, instead of
-# editing hardcoded paths in __main__.
-# ============================================================================
-DATA_FORMAT = "parquet"  # "parquet" or "csv"
-DATA_DIR = "./research/csv"
-CHUNK_SESSIONS = True
-N_CHUNKS_PER_SESSION = 24
-
-AUTO_CONVERT_CSV_TO_PARQUET = False  # see _ensure_parquet() below
-
-SESSION_BOUNDS = [
-    ("Asia (00:00-08:00)", 0, 480),
-    ("EU-Asia (08:00-09:00)", 480, 540),
-    ("EU (09:00-13:30)", 540, 810),
-    ("EU-US (13:30-16:00)", 810, 960),
-    ("US (16:00-20:00)", 960, 1200),
-    ("Pacific (20:00-00:00)", 1200, 1440),
-]
-SESSION_ORDER = [label for label, _, _ in SESSION_BOUNDS]
 
 # ============================================================================
 # TRADE LOG FEATURE WINDOWS (research walk-forward CSV enrichment)
@@ -106,35 +114,4 @@ SESSION_ORDER = [label for label, _, _ in SESSION_BOUNDS]
 # very long datasets (it materializes one numpy column per feature).
 # ============================================================================
 TRADE_FEATURE_WINDOWS = True
-
-# ============================================================================
-# REGIME STUDY FOLD SCHEME (research/regime_data.make_folds)
-# ----------------------------------------------------------------------------
-# Selects the walk-forward scheme used by EVERY learner in the regime study
-# (buckets, trees, HMM — they all pull their folds from regime_data.make_folds).
-# Edit the values here; no environment variables or code changes needed.
-#
-#   REGIME_FOLD_MODE:
-#     "monthly" -> expanding window, test = the following calendar month
-#                  (original regime-study scheme).
-#     "purged"  -> N-purged chronological walk-forward in the style of
-#                  ml_state_optimized.purged_chronological_splits: an initial
-#                  train block of 35% of the stream, then REGIME_FOLD_N_SAMPLES
-#                  non-overlapping test blocks of REGIME_FOLD_BLOCK_SIZE trades
-#                  spaced evenly over the remainder; every train trade whose
-#                  outcome horizon + embargo reaches into the test block is
-#                  purged from training. The fold count is auto-reduced (with a
-#                  [FOLD COUNT ADJUSTED] notice) if fewer independent windows
-#                  fit the stream.
-#
-# Purge parameters: `ret` is realized over the trade's own holding window
-# (research barrier horizon = 600 s, see config/strategy.py), and entries
-# within a threshold stream are non-overlapping (lockout), so a train trade is
-# purged when dt + horizon + embargo >= first test-trade dt.
-# ============================================================================
-REGIME_FOLD_MODE = "purged"           # "monthly" or "purged"
-REGIME_FOLD_N_SAMPLES = 2             # requested number of non-overlapping test folds
-REGIME_FOLD_BLOCK_SIZE = 1000          # trades per test fold
-REGIME_FOLD_HORIZON_SECONDS = 600     # trade outcome horizon used for purging
-REGIME_FOLD_EMBARGO_SECONDS = 600     # extra embargo on top of the horizon
  

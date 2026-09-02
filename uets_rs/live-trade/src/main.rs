@@ -99,7 +99,7 @@ async fn main() {
     let strategy_config = config_path
         .as_deref()
         .map(std::path::Path::new)
-        .and_then(live_trade::config::load_strategy_config);
+        .and_then(|p| live_trade::config::load_strategy_config(p, &ticker));
 
     let cfg = ExecutionConfig {
         ticker: ticker.clone(),
@@ -111,6 +111,7 @@ async fn main() {
         persist,
         strategy_config,
         walkforward_dir: None,
+        meta_gate: live_trade::execution::MetaGate::Auto,
         report_scope,
     };
     let ctx = LoopContext {
