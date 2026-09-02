@@ -29,11 +29,11 @@ import pandas as pd
 from hmmlearn.hmm import GaussianHMM
 from scipy import stats as sps
 
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from research.regime_data import (  # noqa: E402
+from research.ofmr.regime_data import (  # noqa: E402
     load_study_frame, make_folds, ret_metrics, bootstrap_ci, fmt_metrics,
     ensure_out,
 )

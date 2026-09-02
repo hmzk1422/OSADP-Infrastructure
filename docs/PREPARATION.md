@@ -131,8 +131,8 @@ its **own** `live-trade` OS process, its own RocksDB store
 the supervisor aggregates everything:
 
 ```powershell
-copy portfolio.example.json portfolio.json   # then edit tickers / capital / feeds
-python unified_runner.py portfolio --config portfolio.json --restart
+copy config/portfolio.example.json config/portfolio.json   # then edit tickers / capital / feeds
+python unified_runner.py portfolio --config config/portfolio.json --restart
 ```
 
 What you get:

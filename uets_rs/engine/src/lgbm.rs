@@ -364,4 +364,20 @@ shrinkage=1
             "leaf path mismatches: {leaf_mismatches}"
         );
     }
+
+    /// The exported per-asset meta-labeller (research/ofmr/meta_labeller.py)
+    /// must parse with the SAME reader used for the executor model and expose
+    /// exactly 16 features (the 15 executor features + hour_of_day), scoring
+    /// a valid probability. Skips gracefully when the export is absent.
+    #[test]
+    fn real_labeller_parses_with_16_features() {
+        let Some(path) = find_upwards(&["uets_rs/models/lgb_labeller.txt"]) else {
+            eprintln!("skipping: lgb_labeller.txt not found");
+            return;
+        };
+        let model = LightGbm::from_path(&path).expect("load labeller");
+        assert_eq!(model.num_features(), 16);
+        let p = model.predict_proba(&[0.0f64; 16]);
+        assert!((0.0..=1.0).contains(&p), "labeller prob out of range: {p}");
+    }
 }

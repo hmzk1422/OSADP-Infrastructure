@@ -1,22 +1,67 @@
-//! Strategy config loading — single source of truth from `main/config.py`.
+//! Strategy config loading — one JSON file, read directly by every process.
 //!
-//! `unified_runner.py live-test` exports `build/live_test_config.json` with
-//! the same field names as `engine::StrategyConfig`. This deliberately small,
-//! fully-typed loader applies only the keys present in the file on top of
-//! `StrategyConfig::default()`, so a partial (or missing) file degrades to the
-//! documented defaults instead of silently choosing an arbitrary config.
+//! `--config` accepts EITHER a flat StrategyConfig JSON (same field names as
+//! `engine::StrategyConfig`) OR the unified portfolio config
+//! (`config/portfolio.json`): in the unified case the engine resolves its own
+//! ticker — `_strategy_defaults` deep-merged with that asset's `strategy`
+//! overrides — so no intermediate per-ticker config file is ever generated.
+//! Unknown/missing keys are ignored (built-in defaults remain).
 
 use engine::lgbm::LightGbm;
 use engine::{FoldModel, StrategyConfig};
 use std::path::Path;
 
+/// Recursively merge `over` into `base` (override wins).
+fn deep_merge(
+    base: &mut serde_json::Map<String, serde_json::Value>,
+    over: &serde_json::Map<String, serde_json::Value>,
+) {
+    for (k, v) in over {
+        match (base.get_mut(k), v) {
+            (Some(serde_json::Value::Object(b)), serde_json::Value::Object(o)) => {
+                deep_merge(b, o)
+            }
+            _ => {
+                base.insert(k.clone(), v.clone());
+            }
+        }
+    }
+}
+
 /// Parse a flat JSON mapping onto [`StrategyConfig`]. Unknown/missing keys are
 /// ignored (the built-in defaults remain). Returns `None` when the file cannot
 /// be read or parsed — callers decide whether to fall back to defaults.
-pub fn load_strategy_config(path: &Path) -> Option<StrategyConfig> {
+pub fn load_strategy_config(path: &Path, ticker: &str) -> Option<StrategyConfig> {
     let text = std::fs::read_to_string(path).ok()?;
     let value: serde_json::Value = serde_json::from_str(&text).ok()?;
-    let obj = value.as_object()?;
+    let obj = if value.get("_strategy_defaults").is_some() || value.get("assets").is_some() {
+        // Unified portfolio config: resolve `_strategy_defaults` + this
+        // ticker's per-asset `strategy` overrides (deep merge, asset wins).
+        let mut merged = value
+            .get("_strategy_defaults")
+            .and_then(|v| v.as_object())
+            .cloned()
+            .unwrap_or_default();
+        if let Some(assets) = value.get("assets").and_then(|v| v.as_array()) {
+            let want = ticker.to_ascii_lowercase();
+            for a in assets {
+                let t = a
+                    .get("ticker")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_ascii_lowercase();
+                if t == want {
+                    if let Some(s) = a.get("strategy").and_then(|v| v.as_object()) {
+                        deep_merge(&mut merged, s);
+                    }
+                }
+            }
+        }
+        serde_json::Value::Object(merged)
+    } else {
+        value
+    };
+    let obj = obj.as_object()?;
     let mut cfg = StrategyConfig::default();
 
     macro_rules! g_f64 {
@@ -63,6 +108,7 @@ pub fn load_strategy_config(path: &Path) -> Option<StrategyConfig> {
     g_f64!(r_clip_cap);
     g_bool!(use_orderflow_features);
     g_f64!(hysteresis_buffer);
+    g_bool!(score_barrier_as_rr);
     g_bool!(require_fold_coverage);
     g_bool!(one_candidate_per_bar);
 

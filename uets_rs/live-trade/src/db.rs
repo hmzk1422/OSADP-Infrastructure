@@ -619,35 +619,47 @@ impl DbWriter {
 
     // ---- latency / feed-health diagnostics (report pane) ------------------
 
+    // ONE global series — stal/lat/sk is a single measurement of the
+    // algorithm's communication speed, NOT a per-asset track. Each asset
+    // already owns its own RocksDB store, so samples carry no symbol key.
+
     /// Persist one latency / feed-health sample. Fire-and-forget.
-    pub fn record_diag(&self, symbol: &str, sample: &DiagSample) {
-        if let Err(e) = self.try_record_diag(symbol, sample) {
-            eprintln!(
-                "[db] failed to write diag sample {symbol} @ {}: {e}",
-                sample.ts_ms
-            );
+    pub fn record_diag(&self, sample: &DiagSample) {
+        if let Err(e) = self.try_record_diag(sample) {
+            eprintln!("[db] failed to write diag sample @ {}: {e}", sample.ts_ms);
         }
     }
 
-    fn try_record_diag(&self, symbol: &str, sample: &DiagSample) -> Result<(), DbError> {
+    fn try_record_diag(&self, sample: &DiagSample) -> Result<(), DbError> {
         let cf = self.cf(CF_DIAG)?;
-        let key = Self::diag_key(symbol, sample.ts_ms, self.next_seq());
+        let key = Self::diag_key(sample.ts_ms, self.next_seq());
         let value = serde_json::to_vec(sample)?;
         self.db.put_cf(cf, key, value)?;
         Ok(())
     }
 
-    /// Read all diag samples for `symbol`, oldest first (one per loop tick).
+    /// Read all diag samples, oldest first (one per loop tick). Reads the
+    /// global prefix; stores written by older builds used a symbol-prefixed
+    /// key, so fall back to that when no global samples exist.
     pub fn iter_diag(&self, symbol: &str) -> Result<Vec<DiagSample>, DbError> {
+        let global = self.iter_diag_prefix(Self::DIAG_PREFIX)?;
+        if !global.is_empty() {
+            return Ok(global);
+        }
+        self.iter_diag_prefix(&Self::diag_prefix_legacy(symbol))
+    }
+
+    const DIAG_PREFIX: &[u8] = b"diag\x00";
+
+    fn iter_diag_prefix(&self, prefix: &[u8]) -> Result<Vec<DiagSample>, DbError> {
         let cf = self.cf(CF_DIAG)?;
-        let prefix = Self::diag_prefix(symbol);
         let mut out = Vec::new();
         for item in self
             .db
-            .iterator_cf(cf, IteratorMode::From(&prefix, Direction::Forward))
+            .iterator_cf(cf, IteratorMode::From(prefix, Direction::Forward))
         {
             let (key, value) = item?;
-            if !key.starts_with(prefix.as_slice()) {
+            if !key.starts_with(prefix) {
                 break;
             }
             out.push(serde_json::from_slice(&value)?);
@@ -655,14 +667,14 @@ impl DbWriter {
         Ok(out)
     }
 
-    fn diag_prefix(symbol: &str) -> Vec<u8> {
+    fn diag_prefix_legacy(symbol: &str) -> Vec<u8> {
         let mut p = Self::symbol_prefix(symbol);
         p.extend_from_slice(b"diag\x00");
         p
     }
 
-    fn diag_key(symbol: &str, ts: i64, seq: u64) -> Vec<u8> {
-        let mut key = Self::diag_prefix(symbol);
+    fn diag_key(ts: i64, seq: u64) -> Vec<u8> {
+        let mut key = Self::DIAG_PREFIX.to_vec();
         key.extend_from_slice(&ts.to_be_bytes());
         key.push(0x00);
         key.extend_from_slice(&seq.to_be_bytes());

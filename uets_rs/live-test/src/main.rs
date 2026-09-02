@@ -16,14 +16,14 @@
 
 use live_trade::exchange::{ExchangeKind, create_broker, create_replay_feed};
 use live_trade::execution::{
-    ExecutionConfig, ExecutionMode, LoopContext, RunStats, run_execution_loop,
+    ExecutionConfig, ExecutionMode, LoopContext, MetaGate, RunStats, run_execution_loop,
 };
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 fn usage<T>() -> T {
     eprintln!(
-        "usage: live-test [ticker] [--feed PATH] [--capital USD] [--db PATH] [--no-db] [--seed BARS] [--loop] [--start-ms MS] [--end-ms MS] [--limit N] [--config PATH] [--wf-dir DIR]"
+        "usage: live-test [ticker] [--feed PATH] [--capital USD] [--db PATH] [--no-db] [--seed BARS] [--loop] [--start-ms MS] [--end-ms MS] [--limit N] [--config PATH] [--parity] [--wf-dir DIR] [--meta-gate auto|on|off]"
     );
     std::process::exit(2);
 }
@@ -41,7 +41,9 @@ async fn main() {
     let mut end_ms: Option<i64> = None;
     let mut limit: Option<usize> = None;
     let mut config_path: Option<String> = None;
+    let mut parity = false;
     let mut wf_dir: Option<String> = None;
+    let mut meta_gate = MetaGate::Auto;
 
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -64,6 +66,7 @@ async fn main() {
                     .unwrap_or_else(|_| usage())
             }
             "--config" => config_path = Some(args.next().unwrap_or_else(usage)),
+            "--parity" => parity = true,
             "--wf-dir" => wf_dir = Some(args.next().unwrap_or_else(usage)),
             "--loop" => loop_feed = true,
             "--start-ms" => {
@@ -89,6 +92,14 @@ async fn main() {
                         .parse()
                         .unwrap_or_else(|_| usage()),
                 )
+            }
+            "--meta-gate" => {
+                meta_gate = match args.next().unwrap_or_else(usage).as_str() {
+                    "auto" => MetaGate::Auto,
+                    "on" => MetaGate::On,
+                    "off" => MetaGate::Off,
+                    _ => usage(),
+                }
             }
             "--help" | "-h" => usage(),
             other if other.starts_with("--") => usage(),
@@ -124,7 +135,18 @@ async fn main() {
         let strategy_config = config_path
         .as_deref()
         .map(std::path::Path::new)
-        .and_then(live_trade::config::load_strategy_config);
+        .and_then(|p| live_trade::config::load_strategy_config(p, &ticker_lower));
+    // Walk-forward parity mode (--wf-dir implies --parity): flip the two
+    // research-universe gates so live-test scores each second with the fold
+    // model covering it and takes one volume>0 candidate per composite bar —
+    // exactly the research trade universe.
+    let mut strategy_config = strategy_config;
+    if parity {
+        if let Some(c) = strategy_config.as_mut() {
+            c.require_fold_coverage = true;
+            c.one_candidate_per_bar = true;
+        }
+    }
     if let Some(path) = &config_path {
         match &strategy_config {
             Some(cfg) => println!(
@@ -154,6 +176,7 @@ async fn main() {
         persist,
         strategy_config,
         walkforward_dir: wf_dir,
+        meta_gate,
         report_scope: live_trade::report::ReportScope::default(),
     };
     let ctx = LoopContext {

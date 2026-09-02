@@ -9,7 +9,7 @@
 //!   - [`db`]          — RocksDB persistence (trades, book, PnL)
 //!   - [`report`]      — HTML PnL report generation
 //!   - [`model`]       — research LightGBM model loading
-//!   - [`config`]      — strategy-parameter loader (`build/live_test_config.json`)
+//!   - [`config`]      — strategy-parameter loader (`build/strategy_config.json`)
 
 pub mod config;
 pub mod db;

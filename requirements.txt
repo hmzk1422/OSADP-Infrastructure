@@ -135,6 +135,7 @@ urllib3==2.7.0
 uvicorn==0.52.1
 watchfiles==1.2.0
 wcwidth==0.8.1
+windows-curses==2.4.1; sys_platform == "win32"
 webencodings==0.5.1
 websocket-client==1.9.0
 websockets==17.0.1

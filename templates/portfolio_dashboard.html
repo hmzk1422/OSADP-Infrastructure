@@ -81,14 +81,23 @@ iframe{width:100%;height:78vh;border:1px solid var(--border);border-radius:6px;
         {l:'Net PnL',v:(T.net>=0?'+':'')+money(T.net),c:cls(T.net)},
         {l:'Total R',v:(T.r>=0?'+':'')+T.r.toFixed(2)+'R',c:cls(T.r)},
         {l:'Trades',v:T.trades},
-        {l:'Assets Up',v:T.up+' / '+DATA.assets.length,c:T.up===DATA.assets.length?'up':'dn'},
-        {l:'Net Outages',v:T.outages||0,c:(T.outages||0)>0?'dn':'up'}
+        {l:'Assets Up',v:T.up+' / '+DATA.assets.length,c:T.up===DATA.assets.length?'up':'dn'}
+      ]);
+      // ONE singular network-health measurement for the whole portfolio
+      // (staleness/latency/skew = the algorithm's general communication
+      // speed, worst across assets — NOT a per-asset track).
+      var Nw=DATA.network||{};
+      h+=cards([
+        {l:'Feed Staleness',v:ms(Nw.stal_ms)+(Nw.outage_active?' !':''),c:stalCls(Nw.stal_ms)},
+        {l:'Proc Latency',v:ms(Nw.lat_ms,2)},
+        {l:'Clock Skew',v:Nw.skew_ms==null?'-':(Nw.skew_ms>=0?'+':'')+Nw.skew_ms.toFixed(0)+'ms',
+         c:Nw.skew_ms!=null&&Math.abs(Nw.skew_ms)>100?'dn':'up'},
+        {l:'Net Outages',v:Nw.outages||0,c:(Nw.outages||0)>0?'dn':'up'},
+        {l:'Max Staleness',v:ms(Nw.max_stal_ms),c:stalCls(Nw.max_stal_ms)}
       ]);
       h+='<table><thead><tr><th>Asset</th><th>Status</th><th>Feed</th><th>Eq ($)</th>'+
-         '<th>Net ($)</th><th>R</th><th>Trades</th><th>RSI</th><th>P(WIN)</th>'+
-         '<th>Stal</th><th>Lat</th><th>Skew</th><th>Outages</th><th></th></tr></thead><tbody>';
+         '<th>Net ($)</th><th>R</th><th>Trades</th><th>RSI</th><th>P(WIN)</th><th></th></tr></thead><tbody>';
       DATA.assets.forEach(function(a){
-        var stalTxt = a.stal_ms==null?'-':ms(a.stal_ms)+(a.outage_active?' !':'');
         h+='<tr><td><b>'+a.ticker.toUpperCase()+'</b><br><span class="mut" style="font-size:10px">'+
            'restarts '+a.restarts+'</span></td>'+
            '<td><span class="st '+esc(a.status)+'">'+esc(a.status)+'</span></td>'+
@@ -99,10 +108,6 @@ iframe{width:100%;height:78vh;border:1px solid var(--border);border-radius:6px;
            '<td class="num">'+a.trades+'</td>'+
            '<td class="num">'+(a.rsi==null?'-':a.rsi.toFixed(1))+'</td>'+
            '<td class="num">'+(a.pwin==null?'-':(a.pwin*100).toFixed(0)+'%')+'</td>'+
-           '<td class="num '+stalCls(a.stal_ms)+'" title="max '+ms(a.max_stal_ms)+'">'+stalTxt+'</td>'+
-           '<td class="num">'+ms(a.lat_ms,2)+'</td>'+
-           '<td class="num">'+(a.skew_ms==null?'-':(a.skew_ms>=0?'+':'')+a.skew_ms.toFixed(0)+'ms')+'</td>'+
-           '<td class="num '+((a.outages||0)>0?'dn':'')+'">'+(a.outages||0)+'</td>'+
            '<td>'+(a.has_report?'<a class="rep" href="'+esc(a.report)+'">report &#8599;</a>':'<span class="mut" style="font-size:10px">ended</span>')+'</td></tr>';
       });
       h+='</tbody></table>';
@@ -131,19 +136,9 @@ iframe{width:100%;height:78vh;border:1px solid var(--border);border-radius:6px;
       {l:'Mid',v:a.mid==null?'-':money(a.mid)},
       {l:'Restarts',v:a.restarts}
     ]);
-    // ---- network diagnostics (from the child's periodic [net] line) ----
-    h+='<h1 style="font-size:13px;margin-top:4px">NETWORK DIAGNOSTICS <em>'+
-       'staleness &gt; 1000ms = outage (DEVLOG standard) - full history in the '+
-       'chart below + RocksDB diag samples</em></h1>';
-    h+=cards([
-      {l:'Feed Staleness',v:a.stal_ms==null?'-':ms(a.stal_ms)+(a.outage_active?' !':''),c:stalCls(a.stal_ms)},
-      {l:'Max Staleness',v:ms(a.max_stal_ms),c:stalCls(a.max_stal_ms)},
-      {l:'Proc Latency',v:ms(a.lat_ms,2)},
-      {l:'Clock Skew',v:a.skew_ms==null?'-':(a.skew_ms>=0?'+':'')+a.skew_ms.toFixed(0)+'ms',
-       c:a.skew_ms!=null&&Math.abs(a.skew_ms)>100?'dn':'up'},
-      {l:'Net Outages',v:a.outages||0,c:(a.outages||0)>0?'dn':'up'},
-      {l:'Feed / Exchange',v:esc(a.feed)+' / '+esc(a.exchange)}
-    ]);
+    // Network health is ONE global measurement (see the Overview tab) —
+    // staleness / latency / skew are the algorithm's general communication
+    // speed, not a per-asset property.
     if(a.lastEvent) h+='<div class="alerts mut">last event: '+esc(a.lastEvent)+'</div>';
     if(a.has_report) h+='<iframe src="'+esc(a.report)+'"></iframe>';
     else h+='<div class="alerts mut">session report removed at session end - '+

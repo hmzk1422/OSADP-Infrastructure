@@ -51,7 +51,7 @@ python3 unified_runner.py doctor --require-native
 python3 unified_runner.py live-trade --exchange bitfinex --feed bybit --mode paper
 
 # or supervise a whole portfolio of assets from one master table:
-python3 unified_runner.py portfolio --config portfolio.json --restart
+python3 unified_runner.py portfolio --config config/portfolio.json --restart
 ```
 
 Market data persists to `./data/marketdata.rocksdb` (relative paths work
