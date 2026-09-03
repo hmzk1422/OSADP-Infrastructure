@@ -1,239 +1,179 @@
-# OSADP-Core (OrderFlow Systematic Alpha Discovery Pipeline)
+# Intraday Momentum Composite
 
-[![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg)](https://www.python.org/)
-[![Rust](https://img.shields.io/badge/rust-1.97.1-orange.svg)](https://www.rust-lang.org/)
-[![Status](https://img.shields.io/badge/status-production-green.svg)]()
-
-**OSADP-Core** is a hybrid Python/Rust systematic-trading framework for crypto
-orderflow and price action. **Python** is the control plane and research lab
-(feature engineering, walk-forward LightGBM training); **Rust** is the hot
-path — market-data ingestion, 1-second micro-bar aggregation, 15-feature
-scoring, dry-run fill simulation and order routing — running on its own tokio
-runtime thread per asset.
+A hybrid Python/Rust quant stack that trades intraday momentum on crypto perpetuals. One JSON file (`config/portfolio.json`) drives everything — strategy parameters, which tickers to trade, how much capital each gets, and which exchange/feed to use. Edit that file, save it, and the running system picks up the changes live. No Rust rebuild, no generated config files.
 
 ---
 
-## Architecture
-
-```
-research/ofmr/ml_state_optimized.py   research backtest (features -> walk-forward -> model)
-main/                            live Python packages (config, executor, dashboard)
-uets_rs/engine/        Rust strategy engine (venue-agnostic)
-uets_rs/live-trade/    real execution: WS/REST venues + RocksDB + HTML report
-uets_rs/live-test/     historical replay (paper) runner
-uets_rs/bindings/      PyO3 bindings -> the `engine` Python module
-scripts/ingestion/               Binance caching / CCXT conversion
-build/                           reports, configs, walk-forward models
-```
-
-* **Storage:** embedded RocksDB - trade tape, L1 book, equity snapshots,
-  closed trades and per-second strategy features. No external DB server.
-* **Feeds & venues:** `bybit` / `binance` (spot market data) / `bitfinex`
-  (market data + order routing). Read orderflow from one venue while
-  executing on another (`--feed` != `--exchange`).
-* **Report:** every session writes `build/pnl_report_<symbol>.html` - a
-  TradingView-style candle chart with the full RSI(2)/P(WIN) history, equity
-  curve, trade markers and a sortable trade list. It regenerates every 30 s
-  while a session runs; an open tab auto-refreshes every 15 s.
-
-## Timeframes (how they relate)
-
-| Layer           | Size    | Purpose                                            |
-|-----------------|---------|----------------------------------------------------|
-| Micro bars      | 1 s     | feature evaluation + fill simulation every second  |
-| Macro composite | 300 s   | regime features: Wilder RSI(2), MA slope/accel, .. |
-| Report candles  | 1 s x N | client-side aggregation; chip shows grouping       |
-
-The RSI plotted in the report is the exact macro value the strategy gates on,
-forward-filled to every second.
-
----
-
-## Getting Started
-
-### Prerequisites
-- Python **3.11**
-- Rust **1.97+** (rustup) and **LIBCLANG** (required by RocksDB bindgen):
-
-  ```powershell
-  [System.Environment]::SetEnvironmentVariable('LIBCLANG_PATH','C:\LLVM\clang+llvm-18.1.8-x86_64-pc-windows-msvc\bin','User')
-  Test-Path "$env:LIBCLANG_PATH\libclang.dll"   # must print True
-  ```
-
-### Setup
+## 1. Install
 
 ```bash
+# 1. clone
+git clone https://github.com/hmzk1422/intraday-momentum-composite.git
+cd intraday-momentum-composite
+
+# 2. Python deps (3.11 recommended)
 python -m venv venv
-venv\Scripts\activate              # Linux/macOS: source venv/bin/activate
+source venv/bin/activate          # Windows: venv\Scripts\activate
 pip install -r requirements.txt
-cargo build --workspace            # build the Rust workspace
-maturin develop --release          # build + install the `engine` Python module
+
+# 3. Rust engine (one-time native build)
+pip install maturin
+maturin develop --release
+
+# 4. verify
+python unified_runner.py doctor --require-native
 ```
 
 ---
 
-## Terminal Instructions
+## 2. Configure
 
-All orchestration goes through one entry point:
-
-```text
-python unified_runner.py <command> [options]
-```
-
-| Command      | What it does                                                     |
-|--------------|------------------------------------------------------------------|
-| `live-trade` | run the live/paper strategy loop (requires the `engine` module)  |
-| `live-test`  | replay recorded parquet/replay tapes through the engine          |
-| `backtest`   | full research backtest + walk-forward evaluation                 |
-| `doctor`     | validate environment, repo layout, native module                 |
-
-Add `--help` to any command for the full option list.
-
-### RocksDB maintenance (`db`)
-
-```bash
-python unified_runner.py db --list                        # list stores + sizes
-python unified_runner.py db --clean-ticker btcusdt        # delete one asset's store
-python unified_runner.py db --clean-all --yes             # delete EVERYTHING under data/
-```
-
-Deletion prompts for confirmation unless `--yes` is passed. Stop any running
-session first - a store that is open cannot be deleted.
-
-
-### Paper-trade with a Bybit feed (recommended first run)
-
-```bash
-python unified_runner.py live-trade --exchange bitfinex --feed bybit --mode paper
-```
-
-- `--exchange bitfinex` - where orders would route in `--mode live`
-- `--feed bybit`        - where market data comes from (bybit / binance / bitfinex)
-- `--mode paper`        - simulates fills; `--mode live` routes real orders
-- `--capital 10000`     - USD allocated to position sizing
-- `--dashboard`         - serve a browser page of executed trades
-
-While it runs, open `build/pnl_report_btcusdt.html` in a browser for the live
-TradingView-style report.
-
-#### Multi-asset portfolio (`portfolio`)
-
-One `live-trade` **process per asset** from a master JSON table - each asset
-gets its own RocksDB store and its own auto-refreshing report, while the
-supervisor tracks total PnL, raises alerts when a child crashes, optionally
-auto-restarts it, and writes a tabbed dashboard
-(`build/portfolio_dashboard.html`: overview tab + one tab per asset).
-
-```bash
-copy config/portfolio.example.json config/portfolio.json    # then edit tickers/capital
-python unified_runner.py portfolio --config config/portfolio.json --restart
-```
-
-Master table format:
+Everything lives in **`config/portfolio.json`** — there is no other config file.
 
 ```json
 {
-  "mode": "paper",
   "exchange": "bitfinex",
+  "feed": "bybit",
+  "mode": "paper",
+  "capital": 10000,
   "restart": true,
   "status_interval": 5.0,
+  "_strategy_defaults": {
+    "rr_ratio": 10,
+    "confidence_threshold": 0.2,
+    "risk_pct_per_trade": 0.002,
+    "max_position_usd": 100,
+    "lookahead_seconds": 6000,
+    "lockout_seconds": 1000,
+    "rsi_filter_threshold": 30,
+    "trade_direction_is_long": true,
+    "use_orderflow_features": true
+  },
   "assets": [
-    { "ticker": "btcusdt", "feed": "bybit",   "capital": 5000 },
-    { "ticker": "ethusdt", "feed": "binance", "capital": 3000 }
+    { "ticker": "btcusdt", "feed": "bybit",   "exchange": "bitfinex", "capital": 5000 },
+    { "ticker": "ethusdt", "feed": "binance", "exchange": "bitfinex", "capital": 3000,
+      "strategy": { "rr_ratio": 5, "confidence_threshold": 0.35 }
+    }
   ]
 }
 ```
 
-Per-asset overrides: `exchange`, `feed`, `capital`, `config` (strategy JSON),
-`db`. Flags: `--release` (prefer release binary), `--no-dashboard`.
+**Rules:**
+- `_strategy_defaults` — strategy parameters shared by every ticker. The Rust engine reads these directly; edit them live (see below).
+- `assets` — one entry per ticker. Each inherits `_strategy_defaults` and can override any parameter with its own `strategy` block (only the keys you want to change).
+- `mode` — `"paper"` (fake orders, real tape) or `"live"` (real orders on the exchange).
+- `feed` — where the market data comes from (`bybit`, `binance`, `bitfinex`).
+- `exchange` — where orders are routed (can differ from feed).
 
-### More examples
+---
+
+## 3. Run — Headless (no GUI)
+
+`unified_runner.py` is the only entry point. Every command works headless — the VIM dashboard is optional.
 
 ```bash
-# Binance spot feed, paper trading, $5k capital:
-python unified_runner.py live-trade --exchange bitfinex --feed binance --mode paper --capital 5000
+# single ticker, paper
+python unified_runner.py live-trade --ticker btcusdt --exchange bitfinex --feed bybit --mode paper --capital 10000
 
-# Replay a recorded tape against the engine (paper):
+# single ticker, LIVE ORDERS
+python unified_runner.py live-trade --ticker btcusdt --exchange bitfinex --feed bybit --mode live --capital 10000
+
+# multi-asset portfolio (one OS process per ticker, all from config/portfolio.json)
+python unified_runner.py portfolio --config config/portfolio.json --restart
+
+# replay historical data through the Rust engine
 python unified_runner.py live-test --ticker btcusdt --release
-python unified_runner.py live-test --ticker btcusdt --start-ms 1709344800000 --end-ms 1709431200000
 
-# Environment sanity check:
+# research walk-forward backtest
+python unified_runner.py backtest
+
+# manage RocksDB stores
+python unified_runner.py db --list
+python unified_runner.py db --clean-ticker btcusdt --yes
+
+# environment / setup self-check
 python unified_runner.py doctor --require-native
 ```
 
-### Environment variables
+---
 
-| Variable           | Used by   | Purpose                                  |
-|--------------------|-----------|------------------------------------------|
-| `BYBIT_API_KEY`    | bybit v5  | only needed for `--mode live`            |
-| `BYBIT_API_SECRET` | bybit v5  |                                          |
-| `BFX_API_KEY`      | bitfinex  | order routing in `--mode live`           |
-| `BFX_API_SECRET`   | bitfinex  |                                          |
+## 4. Run — VIM Dashboard
 
-Market-data feeds are public and need no keys.
+```bash
+python unified_runner.py portfolio --config config/portfolio.json --restart
+```
+
+This launches a curses terminal dashboard (the supervisor keeps running on a background thread). Three views, toggled with **1 / 2 / 3** or **Tab**:
+
+| View      | Key | What you see |
+|-----------|-----|--------------|
+| Dashboard | 1   | PnL, equity, trades, win rate, RR, Sortino, MDD-R, RSI, P(WIN) — one row per asset |
+| Trades    | 2   | The event stream (entries/exits) for the **selected** asset, plus LAT/STAL/SK stats |
+| Config    | 3   | The raw `config/portfolio.json` with a vim-style cursor |
+
+**Navigation:**
+
+| Key | Action |
+|-----|--------|
+| `j` / `k` | move down / up (assets in dashboard, lines in config) |
+| `g` / `G` | jump to top / bottom |
+| `Ctrl-d` / `Ctrl-u` | page down / up |
+| `Tab` / `h` / `l` | cycle views |
+| `Enter` or `i` | edit the config line under the cursor |
+| `R` / `F5` | restart the selected asset with the latest config |
+| `q` | quit |
+
+**Editing config live:**
+1. Switch to Config view (`3`).
+2. Move to any line, press **Enter** or **i**.
+3. For a parameter line like `"rr_ratio": 10,` the editor prefills just the value (`10`). Type the new value, **Enter** to save, **Esc** to cancel.
+4. The save is validated — invalid JSON or a broken config structure is rejected (disk untouched). A valid save writes the file, auto-reloads, and restarts only the assets whose effective config changed.
+
+**:commands** (type `:` in any view, then the command + Enter):
+
+| Command | Action |
+|---------|--------|
+| `:q` | quit |
+| `:w` | reload config from disk |
+| `:view dashboard` / `:view trades` / `:view config` | switch view |
+| `:restart [ticker]` | restart an asset (no arg = selected asset) |
+| `:stop [ticker]` | stop an asset |
+| `:start [ticker]` | start a stopped asset |
+| `:flatten [ticker]` | close any open position + pause entries |
+| `:pause [ticker]` | pause entries (keep monitoring) |
+| `:resume [ticker]` | resume a paused asset |
+
+All commands work with no argument (acts on the selected asset) or with a ticker prefix (`:flatten eth` matches `ethusdt`).
+
+**Status indicators:**
+
+| Status   | Meaning |
+|----------|---------|
+| running  | connected to feed, receiving data, trading |
+| outage   | feed staleness > 1000ms (network problem or illiquid market) |
+| paused   | entries paused (via `:pause` or `:flatten`) |
+| DOWN     | the child process exited (auto-restarts if `restart: true`) |
+---
+
+## 5. Outputs
+
+- `build/pnl_report_<ticker>.html` — per-ticker report (equity curve, R-multiple histogram, latency/skew charts, trade table with LAT/STAL/SK columns).
+- `build/portfolio_dashboard.html` — multi-asset tabbed dashboard (open in browser; auto-refreshes). Same data as the terminal dashboard plus sparkline charts for latency/staleness/skew.
 
 ---
 
-## Troubleshooting
+## 6. Termux / Docker (legacy)
 
-| Symptom | Cause / fix |
-|---|---|
-| `No such host is known (os error 11001)` | Your network/VPN DNS cannot resolve an exchange host. The Bybit feed already falls back between `stream.bybit.com` and `ws.bybit.com`; if both fail, switch VPN node or use `--feed binance`. |
-| `[seed] historical fetch failed` | Seed klines failed; features warm live and RSI reads its placeholder until the next 300 s boundary. |
-| RSI line missing for old sessions | Per-second feature history is persisted since this build; older tape has none. Run a session to fill it. |
-| Binance futures streams silent | Some VPN exits receive degraded `fstream` data (`@aggTrade` empty). The binance feed uses **spot** endpoints, which are unaffected. |
-| `engine module is not built` | Run `maturin develop --release`, then retry. |
+See `docs/TERMUX.md` for the Android/Termux setup (runs the same stack inside a Docker container on a phone/tablet).
 
 ---
 
-## Docker
-```
-# Pull your newly built image
-docker pull ghcr.io/yourusername/osadp-core:latest
+## 7. Troubleshooting
 
-# Run a backtest interactively
-docker run --rm -it ghcr.io/yourusername/osadp-core:latest backtest
-
-# Run the live trader in the background
-docker run -d --name live-bot ghcr.io/yourusername/osadp-core:latest live-trade
-
-docker run -d \
-  --name live-trader \
-  --restart unless-stopped \
-  -v $(pwd)/config.json:/app/config.json \
-  ghcr.io/yourusername/osadp-core:latest live-trade
-
-docker run --rm -it \
-  -v $(pwd)/config.json:/app/config.json \
-  ghcr.io/yourusername/osadp-core:latest backtest
-
-# Stream live execution logs in real-time
-docker logs -f live-trader
-
-# Check resource utilization (CPU/Memory usage on your Oracle ARM instance)
-docker stats live-trader
-
-# Stop or restart the bot
-docker stop live-trader
-docker start live-trader
-```
-## Edge: Android (Termux / proot-distro)
-```javascript
-pkg install proot-distro && proot-distro install ubuntu   # glibc only!
-proot-distro login ubuntu
-apt install python3 python3-pip
-pip install <linux-aarch64 wheel>                          # self-contained:
-                                                           # rustls TLS + bundled RocksDB
-python3 unified_runner.py doctor --require-native
-python3 unified_runner.py live-trade --tickers btcusd --exchange bitfinex --mode paper
-```
-
-## extract_rocksDB
-```
-python research\extract_rocksdb.py --db data\portfolio_solusdt.rocksdb --cf trades        --out-dir research\replay\sol
-python research\extract_rocksdb.py --db data\portfolio_solusdt.rocksdb --cf orderbook_top --out-dir research\replay\sol
-```
-## Regime-Detection Research
-```
-python -m research.regime_report
-```
+| Problem | Fix |
+|---------|-----|
+| `doctor --require-native` fails | Run `maturin develop --release` |
+| `ModuleNotFoundError: uets_rs` | Same — native binding not built |
+| Dashboard shows all DOWN | Check exchange/feed names; check network |
+| Config edit rejected | Check JSON syntax; the validator tells you what's wrong |
+| `live-trade` crashes on start | Check `config/portfolio.json` has an `assets` list with valid tickers |

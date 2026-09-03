@@ -16,7 +16,7 @@ use std::sync::{Arc, Mutex};
 
 fn usage<T>() -> T {
     eprintln!(
-        "usage: live-trade [ticker] [--exchange bybit|bitfinex] [--feed bybit|bitfinex|binance] [--mode paper|live] [--capital USD] [--db PATH] [--no-db] [--seed N] [--config PATH] [--session latest|all]"
+        "usage: live-trade [ticker] [--exchange bybit|bitfinex] [--feed bybit|bitfinex|binance] [--mode paper|live] [--capital USD] [--db PATH] [--no-db] [--seed N] [--config PATH] [--control PATH] [--session latest|all]"
     );
     std::process::exit(2);
 }
@@ -35,6 +35,7 @@ async fn main() {
     let mut persist = true;
     let mut seed_bars = 150u32;
     let mut config_path: Option<String> = None;
+    let mut control_path: Option<String> = None;
     let mut report_scope = ReportScope::Latest;
 
     let mut args = std::env::args().skip(1);
@@ -73,6 +74,7 @@ async fn main() {
                     .unwrap_or_else(|_| usage())
             }
             "--config" => config_path = Some(args.next().unwrap_or_else(usage)),
+            "--control" => control_path = Some(args.next().unwrap_or_else(usage)),
             "--session" => {
                 let v = args.next().unwrap_or_else(usage).to_ascii_lowercase();
                 report_scope = match v.as_str() {
@@ -113,6 +115,7 @@ async fn main() {
         walkforward_dir: None,
         meta_gate: live_trade::execution::MetaGate::Auto,
         report_scope,
+        control_path,
     };
     let ctx = LoopContext {
         feed: create_feed(feed),

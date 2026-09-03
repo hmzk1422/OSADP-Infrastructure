@@ -36,6 +36,7 @@ td.num{text-align:right}
 .st.DOWN{background:rgba(239,83,80,.15);color:var(--dn)}
 .st.starting{background:rgba(240,185,11,.15);color:#f0b90b}
 .st.outage{background:rgba(239,83,80,.25);color:var(--dn);animation:pulse 1s infinite}
+.st.stalled{background:rgba(240,185,11,.18);color:#f0b90b;animation:pulse 1s infinite}
 @keyframes pulse{50%{opacity:.55}}
 a.rep{color:var(--acc);text-decoration:none;font-size:11px}
 iframe{width:100%;height:78vh;border:1px solid var(--border);border-radius:6px;
@@ -44,6 +45,12 @@ iframe{width:100%;height:78vh;border:1px solid var(--border);border-radius:6px;
         border-radius:6px;padding:10px 14px;font-size:11px;line-height:1.7}
 .alerts b{color:#f0b90b}
 .mut{color:var(--mut)}
+.charts{margin-top:14px}
+.spark{background:var(--panel);border:1px solid var(--border);border-radius:6px;
+       padding:10px 12px;margin-bottom:10px}
+.spark .l{font-size:10px;color:var(--mut);text-transform:uppercase;
+          letter-spacing:.6px;margin-bottom:6px}
+.spark svg{width:100%;height:90px;display:block}
 </style></head>
 <body>
 <div class="sidebar">
@@ -68,6 +75,26 @@ iframe{width:100%;height:78vh;border:1px solid var(--border);border-radius:6px;
       return '<div class="card"><div class="l">'+c.l+'</div><div class="v '+
              (c.c||'')+'">'+c.v+'</div>'+'</div>';
     }).join('')+'</div>';
+  }
+  // Sparkline chart (inline SVG) for a network-metric series.
+  function spark(label, series, dec){
+    var W=680,H=90,P=4;
+    var head='<div class="spark"><div class="l">'+label+' - session'+
+      (series&&series.length?' ('+series.length+' samples)':' (no data yet)')+
+      (series&&series.length?' | last '+series[series.length-1].toFixed(dec)+'ms':'')+
+      '</div>';
+    if(!series||series.length<2) return head+'<div class="mut" style="padding:20px 0">collecting samples...</div></div>';
+    var mn=Infinity,mx=-Infinity;
+    series.forEach(function(v){ if(v<mn)mn=v; if(v>mx)mx=v; });
+    if(mx===mn){ mx=mn+1; }
+    var pts=series.map(function(v,i){
+      var x=P+i*(W-2*P)/(series.length-1);
+      var y=H-P-(v-mn)/(mx-mn)*(H-2*P);
+      return x.toFixed(1)+','+y.toFixed(1);
+    }).join(' ');
+    return head+'<svg viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none">'+
+      '<polyline points="'+pts+'" fill="none" stroke="#2962ff" stroke-width="1.5"/>'+
+      '</svg></div>';
   }
   function show(id){
     // Remember the active tab so the 15s auto-refresh doesn't kick you back
@@ -96,7 +123,7 @@ iframe{width:100%;height:78vh;border:1px solid var(--border);border-radius:6px;
         {l:'Max Staleness',v:ms(Nw.max_stal_ms),c:stalCls(Nw.max_stal_ms)}
       ]);
       h+='<table><thead><tr><th>Asset</th><th>Status</th><th>Feed</th><th>Eq ($)</th>'+
-         '<th>Net ($)</th><th>R</th><th>Trades</th><th>RSI</th><th>P(WIN)</th><th></th></tr></thead><tbody>';
+         '<th>Net ($)</th><th>R</th><th>Trades</th><th>RSI</th><th>P(WIN)</th><th>LAT(ms)</th><th></th></tr></thead><tbody>';
       DATA.assets.forEach(function(a){
         h+='<tr><td><b>'+a.ticker.toUpperCase()+'</b><br><span class="mut" style="font-size:10px">'+
            'restarts '+a.restarts+'</span></td>'+
@@ -108,6 +135,7 @@ iframe{width:100%;height:78vh;border:1px solid var(--border);border-radius:6px;
            '<td class="num">'+a.trades+'</td>'+
            '<td class="num">'+(a.rsi==null?'-':a.rsi.toFixed(1))+'</td>'+
            '<td class="num">'+(a.pwin==null?'-':(a.pwin*100).toFixed(0)+'%')+'</td>'+
+           '<td class="num">'+(a.net&&a.net.lat_ms!=null?a.net.lat_ms.toFixed(2)+'ms':'-')+'</td>'+
            '<td>'+(a.has_report?'<a class="rep" href="'+esc(a.report)+'">report &#8599;</a>':'<span class="mut" style="font-size:10px">ended</span>')+'</td></tr>';
       });
       h+='</tbody></table>';
@@ -134,11 +162,32 @@ iframe{width:100%;height:78vh;border:1px solid var(--border);border-radius:6px;
       {l:'RSI(2)',v:a.rsi==null?'-':a.rsi.toFixed(1)},
       {l:'P(WIN)',v:a.pwin==null?'-':(a.pwin*100).toFixed(0)+'%'},
       {l:'Mid',v:a.mid==null?'-':money(a.mid)},
+      {l:'MDD (R)',v:a.mdd_r==null?'-':a.mdd_r.toFixed(2)+'R'},
       {l:'Restarts',v:a.restarts}
     ]);
-    // Network health is ONE global measurement (see the Overview tab) —
-    // staleness / latency / skew are the algorithm's general communication
-    // speed, not a per-asset property.
+    // Per-asset network diagnostics (the [net] telemetry the Rust loop prints
+    // every 5s and the supervisor parses): current value + session
+    // avg/max/min + sparkline chart over the last two hours.
+    var N=a.net||{}, S=N.stats||{};
+    function stat3(k){
+      var s=S[k]; if(!s) return '-';
+      return s.avg.toFixed(1)+' / '+s.max.toFixed(1)+' / '+s.min.toFixed(1)+'ms';
+    }
+    h+=cards([
+      {l:'Latency now',v:ms(N.lat_ms,2)},
+      {l:'LAT avg/max/min',v:stat3('lat')},
+      {l:'Staleness now',v:ms(N.stal_ms),c:stalCls(N.stal_ms)},
+      {l:'STAL avg/max/min',v:stat3('stal')},
+      {l:'Clock skew now',v:N.skew_ms==null?'-':(N.skew_ms>=0?'+':'')+N.skew_ms.toFixed(0)+'ms',
+       c:N.skew_ms!=null&&Math.abs(N.skew_ms)>100?'dn':'up'},
+      {l:'SK avg/max/min',v:stat3('sk')},
+      {l:'Feed outages',v:N.outages||0,c:(N.outages||0)>0?'dn':'up'},
+      {l:'Outage now',v:N.outage_active?'YES':'no',c:N.outage_active?'dn':'up'}
+    ]);
+    // Sparkline charts (SVG) for LAT / STAL / SK over the session.
+    h+='<div class="charts">'+spark('LATENCY (ms)',N.series&&N.series.lat,1)+
+       spark('STALENESS (ms)',N.series&&N.series.stal,0)+
+       spark('CLOCK SKEW (ms)',N.series&&N.series.sk,0)+'</div>';
     if(a.lastEvent) h+='<div class="alerts mut">last event: '+esc(a.lastEvent)+'</div>';
     if(a.has_report) h+='<iframe src="'+esc(a.report)+'"></iframe>';
     else h+='<div class="alerts mut">session report removed at session end - '+

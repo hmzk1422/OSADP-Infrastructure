@@ -38,7 +38,7 @@ pip install uets_rs
 ## 3. Run the runner
 
 ```bash
-git clone https://github.com/hmzak1422/intraday-momentum-composite.git
+git clone https://github.com/hmzk1422/intraday-momentum-composite.git
 cd intraday-momentum-composite
 
 # environment check (validates native module end-to-end):

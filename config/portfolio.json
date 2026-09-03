@@ -1,5 +1,5 @@
 {
-    "_comment": "Unified portfolio + strategy config. Top-level keys are DEFAULTS; per-asset entries inherit and can override any field — including the entire 'strategy' block. Edit this file live while unified_runner.py --vim is running: the dashboard auto-reloads on save.",
+  "_comment": "Unified portfolio + strategy config. Top-level keys are DEFAULTS; per-asset entries inherit and can override any field — including the entire 'strategy' block. Edit this file live while unified_runner.py --vim is running: the dashboard auto-reloads on save.",
   "mode": "paper",
   "exchange": "bitfinex",
   "feed": "bybit",
@@ -70,7 +70,7 @@
       "sma_14"
     ],
 
-    "use_orderflow_features_python": false,
+    "use_orderflow_features_python": true,
     "orderflow_feature_columns": [
       "ofi_z", "cvd_delta_z", "cvd_slope_z", "absorption_z",
       "tick_autocorr", "inst_ratio", "delta_divergence_z", "depth_imbalance_z"
@@ -91,7 +91,7 @@
   },
 
   "assets": [
-    { "ticker": "btcusdt", "feed": "bybit",   "capital": 5000 },
+    { "ticker": "btcusdt", "feed": "bybit",   "capital": 2000 },
     { "ticker": "ethusdt", "feed": "binance", "capital": 3000 },
     { "ticker": "solusdt", "feed": "bybit",   "capital": 2000 }
   ]

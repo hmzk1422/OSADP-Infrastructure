@@ -623,6 +623,17 @@ impl MomentumStrategy {
         self.position.as_ref()
     }
 
+    /// Force-close the open position immediately at `price` (manual flatten /
+    /// emergency exit). Reasons are `&'static str` (e.g. `"flatten"`); the
+    /// PnL/barrier accounting is identical to a timeout exit. Returns the
+    /// closed trade, or `None` when no position is open.
+    pub fn force_close(&mut self, ts: i64, reason: &'static str, price: f64) -> Option<TradeRecord> {
+        if self.position.is_none() {
+            return None;
+        }
+        Some(self.close_position(ts, reason, price))
+    }
+
     /// Which entry gate rejected the most recent bar-close evaluation:
     /// `"in_position"`, `"lockout"`, `"vol_filter"`, `"hunting_zone"`,
     /// `"confidence"`, `"meta_filter"`, or `""` when nothing blocked (an

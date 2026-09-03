@@ -61,6 +61,11 @@ DASHBOARD_TEMPLATE = (REPO_ROOT / "templates" / "portfolio_dashboard.html").read
 
 CREATE_NEW_PROCESS_GROUP = 0x200  # Windows-only process-group flag
 
+# Per-asset network-metric history kept for the HTML dashboard's LAT/SK/STAL
+# charts. One sample per monitor tick (status_interval, default 5s), so 1440
+# points spans two hours — downsampling to this window keeps the payload lean.
+NET_HIST_MAX = 1440
+
 
 # ---- unified config parsing (JSON -> JSON; nothing is ever written) --------
 def _strip_comments(obj: Any) -> Any:
@@ -148,8 +153,9 @@ class AssetHandle:
         self.feed = spec.get("feed", defaults.get("feed", self.exchange))
         self.mode = spec.get("mode", defaults.get("mode", "paper"))
         self.capital = float(spec.get("capital", defaults.get("capital", 10_000.0)))
-        self.config = spec.get("config", str(DEFAULT_CONFIG_PATH))
-        self.db = spec.get("db", str(DATA_DIR / f"portfolio_{self.ticker}.rocksdb"))
+        self.config = spec.get("config") or str(DEFAULT_CONFIG_PATH)
+        self.db = spec.get("db") or str(DATA_DIR / f"portfolio_{self.ticker}.rocksdb")
+        self.control_path = spec.get("control", str(BUILD_DIR / f"control_{self.ticker}.json"))
 
         self.cmd = [
             bin_path,
@@ -160,6 +166,7 @@ class AssetHandle:
             "--capital", str(self.capital),
             "--db", self.db,
             "--config", self.config,
+            "--control", self.control_path,
         ]
         self.proc: Optional[subprocess.Popen] = None
         self.exit_code: Optional[int] = None
@@ -174,6 +181,7 @@ class AssetHandle:
         self.rsi: Optional[float] = None
         self.pwin: Optional[float] = None
         self.status = "starting"
+        self.paused: bool = False
         self.last_event = ""
         self.alerts: list[str] = []
         # Ring buffer of economically meaningful child lines ([exit]/[bar]/
@@ -188,6 +196,7 @@ class AssetHandle:
         self.outages: int = 0
         self.max_stal_ms: Optional[float] = None
         self.outage_active: bool = False
+        self.last_net_time: float = 0.0  # epoch of the last [net] line seen
         self.started_at: float = 0.0  # wall-clock epoch when the asset was spawned
         self.stop_requested: bool = False  # True once we've asked the child to stop
 
@@ -204,8 +213,14 @@ class AssetHandle:
         )
         if sys.platform == "win32":
             kwargs["creationflags"] = CREATE_NEW_PROCESS_GROUP
+        # Drop any stale control command so a restart never re-triggers it.
+        try:
+            Path(self.control_path).unlink()
+        except OSError:
+            pass
         self.proc = subprocess.Popen(self.cmd, **kwargs)
         self.status = "running"
+        self.paused = False
         self.started_at = datetime.now()
         threading.Thread(target=self._pump, daemon=True).start()
 
@@ -267,6 +282,18 @@ class AssetHandle:
             self.event_lines.append(f"{datetime.now():%H:%M:%S} {line.strip()}")
         elif line.startswith("[entry] "):
             self.event_lines.append(f"{datetime.now():%H:%M:%S} {line.strip()}")
+        elif line.startswith("[paused] "):
+            self.paused = True
+            if self.status != "DOWN":
+                self.status = "paused"
+            self.event_lines.append(f"{datetime.now():%H:%M:%S} {line.strip()}")
+        elif line.startswith("[resumed] "):
+            self.paused = False
+            if self.status != "DOWN":
+                self.status = "running"
+            self.event_lines.append(f"{datetime.now():%H:%M:%S} {line.strip()}")
+        elif line.startswith("[flatten] "):
+            self.event_lines.append(f"{datetime.now():%H:%M:%S} {line.strip()}")
         elif line.startswith("[net] "):
             # [net] btcusdt stal=12ms lat=0.45ms sk=+2ms outages=1
             #       max_stal=1500ms [OUTAGE]
@@ -303,10 +330,11 @@ class AssetHandle:
                 )
             self.outages = n
             self.outage_active = "[OUTAGE]" in line
+            self.last_net_time = time.time()
             if self.outage_active:
                 self.status = "outage"
-            elif self.status == "outage":
-                self.status = "running"  # episode ended
+            elif self.status in ("outage", "stalled"):
+                self.status = "running"  # episode ended / child responsive again
         elif line.startswith("[seed] warmed"):
             self.last_event = "features seeded"
         elif "connect failed" in line or "stream error" in line:
@@ -361,6 +389,196 @@ class PortfolioSupervisor:
         # print its plain status table (it would corrupt the curses screen).
         self.quiet = quiet
         self.stop_requested = False
+        # MDD tracking: cumulative R (and equity) samples so the dashboards can
+        # show max drawdown in RR terms (resetting peak -> trough of the curve).
+        self.r_hist: deque = deque(maxlen=20_000)
+        self.eq_hist: deque = deque(maxlen=20_000)
+        self.r_hist_by_ticker: Dict[str, deque] = {
+            a.ticker: deque(maxlen=20_000) for a in self.assets
+        }
+        # Per-asset network-metric history (lat / stal / clock-skew, one sample
+        # per monitor tick) so the HTML dashboard can chart LAT/SK/STAL over
+        # the session and show their avg/max/min.
+        self.net_hist_by_ticker: Dict[str, Dict[str, deque]] = {
+            a.ticker: {
+                "lat": deque(maxlen=NET_HIST_MAX),
+                "stal": deque(maxlen=NET_HIST_MAX),
+                "sk": deque(maxlen=NET_HIST_MAX),
+            }
+            for a in self.assets
+        }
+        self._control_server = None
+
+    # ---- external control (flatten / pause / resume) ------------------------------
+
+    def _write_control(self, a: AssetHandle, cmd: str) -> None:
+        try:
+            Path(a.control_path).write_text(json.dumps({"cmd": cmd}), encoding="utf-8")
+            logger.info("[control] %s -> %s", a.ticker, cmd)
+        except OSError as exc:
+            logger.warning("[control] write failed for %s: %s", a.ticker, exc)
+
+    def send_control(self, ticker: str, cmd: str) -> None:
+        """Drop a control command for one asset or all (flatten / pause / resume)."""
+        if cmd not in ("flatten", "pause", "resume"):
+            logger.warning("[control] unknown command: %s", cmd)
+            return
+        if ticker.strip().lower() == "all":
+            for a in self.assets:
+                self._write_control(a, cmd)
+        else:
+            for a in self.assets:
+                if a.ticker == ticker.strip().lower():
+                    self._write_control(a, cmd)
+                    return
+            logger.warning("[control] unknown asset: %s", ticker)
+
+    # ---- MDD (in RR terms) ------------------------------------------------------
+
+    @staticmethod
+    def _mdd_from_series(values) -> float:
+        """Max peak-to-trough drawdown of a cumulative series (positive value)."""
+        peak: Optional[float] = None
+        mdd = 0.0
+        for v in values:
+            if peak is None or v > peak:
+                peak = v
+            dd = (peak - v) if peak is not None else 0.0
+            if dd > mdd:
+                mdd = dd
+        return mdd
+
+    def mdd_r(self) -> float:
+        """Portfolio-level max drawdown in R-multiples (from cumulative R curve)."""
+        return self._mdd_from_series(self.r_hist)
+
+    def mdd_pct(self) -> float:
+        """Portfolio-level max drawdown as a fraction of peak equity."""
+        peak: Optional[float] = None
+        mdd = 0.0
+        for v in self.eq_hist:
+            if peak is None or v > peak:
+                peak = v
+            if peak is not None and peak > 0.0:
+                dd = (peak - v) / peak
+                if dd > mdd:
+                    mdd = dd
+        return mdd
+
+    def asset_mdd_r(self, ticker: str) -> float:
+        """Per-asset max drawdown in R-multiples (from that asset's R curve)."""
+        return self._mdd_from_series(self.r_hist_by_ticker.get(ticker, deque()))
+
+    def _record_metrics(self) -> None:
+        """Sample cumulative R / equity so MDD can be computed across the session."""
+        tt = self.totals()
+        self.r_hist.append(tt["r"])
+        self.eq_hist.append(tt["equity"])
+        for a in self.assets:
+            self.r_hist_by_ticker.setdefault(a.ticker, deque(maxlen=20_000)).append(a.total_r)
+            # Network metrics for the HTML charts (skip pre-first-[net] ticks).
+            h = self.net_hist_by_ticker.setdefault(
+                a.ticker, {
+                    "lat": deque(maxlen=NET_HIST_MAX),
+                    "stal": deque(maxlen=NET_HIST_MAX),
+                    "sk": deque(maxlen=NET_HIST_MAX),
+                })
+            if a.lat_ms is not None:
+                h["lat"].append(a.lat_ms)
+            if a.stal_ms is not None:
+                h["stal"].append(a.stal_ms)
+            if a.skew_ms is not None:
+                h["sk"].append(a.skew_ms)
+
+    @staticmethod
+    def _stats_from(values) -> dict:
+        vals = list(values)
+        if not vals:
+            return None
+        return {"avg": sum(vals) / len(vals), "max": max(vals), "min": min(vals)}
+
+    def asset_net_stats(self, ticker: str) -> dict:
+        """Session avg/max/min for LAT / STAL / SK of one asset (None if no data)."""
+        h = self.net_hist_by_ticker.get(ticker, {})
+        return {
+            "lat": self._stats_from(h.get("lat", ())),
+            "stal": self._stats_from(h.get("stal", ())),
+            "sk": self._stats_from(h.get("sk", ())),
+        }
+
+    @staticmethod
+    def _downsample(values, target: int = 180) -> list:
+        """Downsample a deque to ~`target` points for the HTML chart payload."""
+        vals = list(values)
+        if len(vals) <= target:
+            return vals
+        step = len(vals) / target
+        return [vals[int(i * step)] for i in range(target)]
+
+    # ---- local HTTP control endpoint (used by the HTML dashboard buttons) ----------
+
+    def _start_control_server(self, port: int = 8899) -> None:
+        """Serve POST /api/control/<ticker|all>/<flatten|pause|resume> locally.
+
+
+        The HTML dashboard is a static auto-refreshing file; a browser button
+        cannot write to disk, so this tiny loopback endpoint bridges them.
+"""
+        from http.server import BaseHTTPRequestHandler, HTTPServer
+
+        class _Handler(BaseHTTPRequestHandler):
+            def _send(self, code: int, body: str = "ok") -> None:
+                payload = body.encode("utf-8")
+                self.send_response(code)
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.send_header("Content-Type", "text/plain; charset=utf-8")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+
+            def do_OPTIONS(self) -> None:  # CORS preflight
+                self.send_response(204)
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
+                self.send_header("Access-Control-Allow-Headers", "*")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+
+            def do_POST(self) -> None:
+                parts = self.path.strip("/").split("/")
+                if (
+                    len(parts) == 4
+                    and parts[0] == "api"
+                    and parts[1] == "control"
+                    and parts[3] in ("flatten", "pause", "resume")
+                ):
+                    try:
+                        self.server.owner.send_control(parts[2], parts[3])
+                        self._send(200, "ok")
+                    except Exception as exc:  # noqa: BLE001
+                        self._send(500, f"error: {exc}")
+                else:
+                    self._send(400, "bad request")
+
+            def log_message(self, *args) -> None:  # silence access logs
+                pass
+
+        try:
+            srv = HTTPServer(("127.0.0.1", port), _Handler)
+            srv.owner = self
+            self._control_server = srv
+            threading.Thread(target=srv.serve_forever, daemon=True).start()
+            logger.info("control endpoint: http://127.0.0.1:%d/api/control/<ticker|all>/<flatten|pause|resume>", port)
+        except OSError as exc:
+            logger.warning("control endpoint unavailable (port %d busy?): %s", port, exc)
+
+    def _stop_control_server(self) -> None:
+        if self._control_server is not None:
+            try:
+                self._control_server.shutdown()
+            except Exception:  # noqa: BLE001
+                pass
+            self._control_server = None
 
     # ---- supervision ----------------------------------------------------------
 
@@ -375,6 +593,7 @@ class PortfolioSupervisor:
 
     def monitor(self) -> None:
         while not self.stop_requested:
+            now = time.time()
             for a in self.assets:
                 if a.proc is None or a.status == "DOWN":
                     continue
@@ -383,7 +602,18 @@ class PortfolioSupervisor:
                     a.mark_down(code)
                     if self.restart_enabled:
                         self._restart(a)
+                    continue
+                # Child process alive but silent: [net] telemetry arrives every
+                # 5s, so >20s of silence means the child is hung (not a network
+                # outage — that shows as "outage"). Surfaced as "stalled".
+                if (
+                    a.status in ("running", "outage")
+                    and a.last_net_time
+                    and now - a.last_net_time > 20.0
+                ):
+                    a.status = "stalled"
             self._print_table()
+            self._record_metrics()
             if self.dashboard_enabled:
                 self.write_dashboard()
             waited = 0.0
@@ -419,6 +649,7 @@ class PortfolioSupervisor:
 
     def stop_all(self) -> None:
         self.stop_requested = True
+        self._stop_control_server()
         logger.info("stopping %d asset(s)...", len(self.assets))
         threads = []
         for a in self.assets:
@@ -503,9 +734,14 @@ class PortfolioSupervisor:
     # ---- dashboard --------------------------------------------------------------
 
     def write_dashboard(self) -> None:
+        tt = self.totals()
         data = {
             "generatedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "totals": self.totals(),
+            "totals": {
+                **tt,
+                "mdd_r": self.mdd_r(),
+                "mdd_pct": self.mdd_pct(),
+            },
             # ONE singular network-health measurement (not per-asset)
             "network": self.network(),
             "assets": [
@@ -515,6 +751,7 @@ class PortfolioSupervisor:
                     "exchange": a.exchange,
                     "mode": a.mode,
                     "status": a.status,
+                    "paused": a.paused,
                     "capital": a.capital,
                     "equity": a.equity,
                     "net": a.equity - a.capital,
@@ -523,6 +760,25 @@ class PortfolioSupervisor:
                     "mid": a.mid,
                     "rsi": a.rsi,
                     "pwin": a.pwin,
+                    # per-asset network diagnostics (the [net] telemetry the
+                    # supervisor parses from each child) + session
+                    # avg/max/min + a downsampled series for the charts
+                    "net": {
+                        "lat_ms": a.lat_ms,
+                        "stal_ms": a.stal_ms,
+                        "skew_ms": a.skew_ms,
+                        "outages": a.outages,
+                        "outage_active": a.outage_active,
+                        "stats": self.asset_net_stats(a.ticker),
+                        "series": {
+                            k: self._downsample(
+                                self.net_hist_by_ticker.get(a.ticker, {}).get(k, ())
+                            )
+                            for k in ("lat", "stal", "sk")
+                        },
+                    },
+                    # per-asset max drawdown in R-multiples
+                    "mdd_r": self.asset_mdd_r(a.ticker),
                     # network diagnostics are ONE global measurement in
                     # data["network"] (worst across assets) — not per-asset.
                     # the session report is deleted at session end (data lives

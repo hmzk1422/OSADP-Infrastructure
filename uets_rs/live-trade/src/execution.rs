@@ -118,6 +118,12 @@ pub struct ExecutionConfig {
     /// Which persisted runs the HTML report shows (defaults to `latest`,
     /// matching the terminal session counters).
     pub report_scope: crate::report::ReportScope,
+    /// Optional external-control file (JSON, e.g. `build/control_<ticker>.json`).
+    /// Polled by the loop every ~100 ms; a `{"cmd":"flatten|pause|resume"}`
+    /// object is consumed (file deleted) after being acted on. Lets a parent
+    /// supervisor (portfolio dashboard / VIM GUI) pause an asset and close its
+    /// position without killing the process.
+    pub control_path: Option<String>,
 }
 
 /// Cheap shared snapshot of loop state (read by CLI / PyO3 `status()`).
@@ -374,9 +380,18 @@ pub async fn run_execution_loop(cfg: ExecutionConfig, mut ctx: LoopContext) {
     let mut last_report_wake = std::time::Instant::now();
     // Periodic [net] telemetry cadence (see the print block inside the loop).
     let mut last_net_print = std::time::Instant::now();
+    // External-control-file poll cadence (flatten/pause/resume from the parent).
+    let mut last_control_poll = std::time::Instant::now() - std::time::Duration::from_millis(100);
     loop {
         if ctx.stop.load(Ordering::SeqCst) {
             break;
+        }
+        if last_control_poll.elapsed() >= std::time::Duration::from_millis(100) {
+            poll_control(
+                &cfg, &ctx, &mut strategy, &db, &last_exit_ms,
+                &native_symbol, &mut bar_print, run_session_id,
+            ).await;
+            last_control_poll = std::time::Instant::now();
         }
         let iter_started = std::time::Instant::now();
 
@@ -940,5 +955,73 @@ async fn route_exit(broker: &dyn Broker, symbol: &str, rec: &engine::TradeRecord
             resp.exchange_order_id, resp.status
         ),
         Err(e) => eprintln!("[order] FAILED to place exit order: {e}"),
+    }
+}
+
+/// Poll the external control file (`--control <path>`) and act on its command.
+/// Supported payloads: `{"cmd":"flatten"}` (pause + close any open position
+/// at the current mid), `{"cmd":"pause"}`, `{"cmd":"resume"}`. The file is
+/// consumed (deleted) after being acted on, so a restart never re-triggers
+/// a stale command and the supervisor stays idempotent.
+
+async fn poll_control(
+    cfg: &ExecutionConfig,
+    ctx:&LoopContext,
+    strategy:&mut MomentumStrategy,
+    db:&Option<Arc<DbWriter>>,
+    last_exit_ms:&AtomicI64,
+    native_symbol:&str,
+    bar_print:&mut (f64,f64),
+    run_session_id: u64,
+) {
+    let Some(path) = cfg.control_path.as_deref() else { return; };
+    let Ok(text) = std::fs::read_to_string(path) else { return; };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
+        // Malformed control payload: drop it so it can't wedge the loop.
+
+        let _ = std::fs::remove_file(path);
+        return;
+    };
+    let cmd = value
+        .get("cmd")
+        .and_then(|c| c.as_str())
+        .unwrap_or("")
+        .to_string();
+    let _ = std::fs::remove_file(path);
+    match cmd.as_str() {
+        "" => {}
+        "pause" => {
+            ctx.paused.store(true, Ordering::SeqCst);
+            println!("[paused] {} (external control) - entries paused", cfg.ticker);
+        }
+        "resume" => {
+            ctx.paused.store(false, Ordering::SeqCst);
+            println!("[resumed] {} (external control) - entries active", cfg.ticker);
+        }
+        "flatten" => {
+            ctx.paused.store(true, Ordering::SeqCst);
+            let now_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as i64)
+                .unwrap_or(0);
+            match strategy.force_close(now_ms, "flatten", strategy.mid()) {
+                Some(rec) => {
+                    println!(
+                        "[flatten] {} closed @ {:.2} r={:+.2} (entries paused)",
+                        cfg.ticker, rec.exit_price, rec.r_multiple
+                    );
+                    handle_engine_events(
+                        cfg, ctx, strategy, db, last_exit_ms, native_symbol,
+                        bar_print, run_session_id,
+                        vec![EngineEvent::Exited(rec)],
+                    ).await;
+                }
+                None => println!(
+                    "[paused] {} flatten - flat (no open position), entries paused",
+                    cfg.ticker
+                ),
+            }
+        }
+        other => eprintln!("[control] unknown command {other:?}"),
     }
 }
