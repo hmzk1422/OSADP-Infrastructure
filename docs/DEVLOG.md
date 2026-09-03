@@ -4,23 +4,29 @@ Documenting architectural planning and engineering hurdles.
 # Unified Backtest/Live Architecture System
 Reference: feature/unified-trading-system
 ```
-          +---------------------------------+
-          |        Trading Strategy         |
-          |       (Agnostic Core Logic)     |
-          +---------------------------------+
-                           │ model.txt
-                           ▼
-          +---------------------------------+
-          |         Execution Layer         |
-          |     (Shared Engine / Core)      |
-          +---------------------------------+
-                           │
-            ┌──────────────┴──────────────┐
-            ▼                             ▼
-    +---------------+             +---------------+
-    | Histbacktest  |             |Live Execution |
-    | (Parquet/CSV) |             | (WebSockets)  |
-    +---------------+             +---------------+
+RESEARCH                    EXECUTION
+
+[Feature Builder]
+       ↓
+[ML State Builder]
+       ↓
+[ML State Optimized]
+       ↓
+ ┌─────┴──────┐
+ ▼            ▼
+trade.txt   results.csv
+ │            │
+ │       [Meta-labeller]
+ │            │
+ └──────┬─────┘
+        ▼
+   [engine.rs]
+        ↓
+ [Meta-labeller]
+        ↓
+ ┌──────┴───────┐
+ ▼              ▼
+live-test    live-trade
 ```
 Two systems, one strategy. Using shared architecture prevents inconsistency between backtest and live executions.
 - **Trading Strategy**: Purely for defining the strategy code. 

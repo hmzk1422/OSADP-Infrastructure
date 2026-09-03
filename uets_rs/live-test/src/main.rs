@@ -178,6 +178,7 @@ async fn main() {
         walkforward_dir: wf_dir,
         meta_gate,
         report_scope: live_trade::report::ReportScope::default(),
+        control_path: None,
     };
     let ctx = LoopContext {
         feed: create_replay_feed(
