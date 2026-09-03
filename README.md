@@ -1,6 +1,11 @@
-# Intraday Momentum Composite
+# OSADP-Core
+[![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![Rust](https://img.shields.io/badge/Rust-1.80%2B-000000?logo=rust&logoColor=white)](https://www.rust-lang.org/)
+[![CI](https://github.com/YOUR_USERNAME/YOUR_REPO/actions/workflows/ci.yml/badge.svg)](https://github.com/YOUR_USERNAME/YOUR_REPO/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)](#)
 
-A hybrid Python/Rust quant stack that trades intraday momentum on crypto perpetuals. One JSON file (`config/portfolio.json`) drives everything — strategy parameters, which tickers to trade, how much capital each gets, and which exchange/feed to use. Edit that file, save it, and the running system picks up the changes live. No Rust rebuild, no generated config files.
+A hybrid Python/Rust production grade framework specifically for alpha research and multi-strategy live trading. One JSON file (`config/portfolio.json`) drives everything — strategy parameters, which tickers to trade, how much capital each gets, and which exchange/feed to use. Edit that file, save it, and the running system picks up the changes live. No Rust rebuild, no generated config files.
 
 ---
 
