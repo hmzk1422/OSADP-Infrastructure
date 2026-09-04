@@ -1,0 +1,22 @@
+﻿354: pub struct ShadowPosition {
+374: pub struct VoidedTrade {
+431:     VoidClosed(VoidedTrade),
+547:     // `VoidClosed(VoidedTrade)` for persistence.
+548:     shadows: Vec<ShadowPosition>,
+589:     pub fn new(symbol: &str, cfg: StrategyConfig) -> Self {
+655:             shadows: Vec::new(),
+661:     pub fn restore(&mut self, equity: f64, last_exit_ms: i64) {
+706:     pub fn snapshot(&self) -> StrategySnapshot {
+1077:     fn evaluate_entry(&mut self, events: &mut Vec<EngineEvent>) {
+1103:     fn try_enter(&mut self, feat: Feature, fill_price: f64, events: &mut Vec<EngineEvent>) {
+1188:     /// is computed and emitted as `VoidClosed` for persistence + labeller
+1254:         self.shadows.push(ShadowPosition {
+1269:     /// 1-second close series (same semantics as `check_exit`). Closed shadows
+1270:     /// are converted to `VoidedTrade` records and emitted as `VoidClosed`
+1272:     fn check_shadow_exits(&mut self, ts: i64, close: f64, events: &mut Vec<EngineEvent>) {
+1275:         self.shadows.retain(|sp| {
+1366:                 events.push(EngineEvent::VoidClosed(vt));
+1410:     fn enter_position(&mut self, ts: i64, side: Side, mid: f64, bp: f64) -> bool {
+1512:     fn check_exit(&mut self, ts: i64, close: f64) -> Option<TradeRecord> {
+1546:     fn close_position(
+2163:     fn close_position_applies_fixed_r_clip() {

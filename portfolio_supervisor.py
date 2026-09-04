@@ -91,9 +91,15 @@ def deep_merge(base: dict, override: dict) -> dict:
 def load_portfolio_config(path: str | Path) -> dict:
     """Parse `config/portfolio.json` into a plain dict (no files written).
 
-    Returns `{"mode", "exchange", "feed", "capital", "restart",
-    "status_interval", "strategy", "assets": [{"ticker", "exchange", "feed",
-    "mode", "capital", "db", "strategy_merged"}, ...]}`.
+    Returns `{"mode", "exchange", "feed", "capital", "meta_gate", "restart",
+    "status_interval", "strategy", "assets": [{"id", "ticker", "exchange",
+    "feed", "mode", "capital", "db", "meta_gate", "strategy_merged"}, ...]}`.
+
+    Each asset carries a unique `id` (defaults to its ticker) so the SAME
+    ticker can appear multiple times with different configs — e.g. a gate-off
+    recorder twin (id "eth-rec") and a gate-on execution twin (id "eth-exec").
+    `meta_gate` (auto|on|off) is the per-asset portfolio meta-labeller gate and
+    is inherited from the top level when omitted.
     """
     p = Path(path)
     if not p.exists():
@@ -106,6 +112,7 @@ def load_portfolio_config(path: str | Path) -> dict:
         "feed": raw.get("feed", "bitfinex"),
         "mode": raw.get("mode", "paper"),
         "capital": float(raw.get("capital", 10_000.0)),
+        "meta_gate": str(raw.get("meta_gate", "auto")).lower(),
     }
 
     assets_raw = raw.get("assets") or []
@@ -118,17 +125,20 @@ def load_portfolio_config(path: str | Path) -> dict:
         ticker = str(spec.get("ticker", "")).lower()
         if not ticker:
             raise ValueError("an asset entry is missing 'ticker'")
-        if ticker in seen:
-            raise ValueError(f"duplicate ticker in assets: {ticker}")
-        seen.add(ticker)
+        asset_id = str(spec.get("id") or ticker).strip().lower() or ticker
+        if asset_id in seen:
+            raise ValueError(f"duplicate asset id in assets: {asset_id}")
+        seen.add(asset_id)
         overrides = spec.get("strategy") or {}
         assets.append({
+            "id": asset_id,
             "ticker": ticker,
             "exchange": spec.get("exchange", pc_defaults["exchange"]),
             "feed": spec.get("feed", pc_defaults["feed"]),
             "mode": spec.get("mode", pc_defaults["mode"]),
             "capital": float(spec.get("capital", pc_defaults["capital"])),
             "db": spec.get("db"),
+            "meta_gate": str(spec.get("meta_gate", pc_defaults["meta_gate"])).lower(),
             "strategy_merged": deep_merge(defaults, overrides),
         })
 
@@ -137,6 +147,7 @@ def load_portfolio_config(path: str | Path) -> dict:
         "exchange": pc_defaults["exchange"],
         "feed": pc_defaults["feed"],
         "capital": pc_defaults["capital"],
+        "meta_gate": pc_defaults["meta_gate"],
         "restart": bool(raw.get("restart", True)),
         "status_interval": float(raw.get("status_interval", 5.0)),
         "strategy": defaults,
@@ -149,13 +160,23 @@ class AssetHandle:
 
     def __init__(self, spec: dict[str, Any], defaults: dict[str, Any], bin_path: str):
         self.ticker = str(spec["ticker"]).lower()
+        # Unique per-asset id (defaults to the ticker). Allows the same ticker
+        # to run multiple times with different configs (twins), each with its
+        # own RocksDB store, control file and HTML report.
+        self.asset_id = str(spec.get("id") or self.ticker).strip().lower() or self.ticker
         self.exchange = spec.get("exchange", defaults.get("exchange", "bitfinex"))
         self.feed = spec.get("feed", defaults.get("feed", self.exchange))
         self.mode = spec.get("mode", defaults.get("mode", "paper"))
         self.capital = float(spec.get("capital", defaults.get("capital", 10_000.0)))
         self.config = spec.get("config") or str(DEFAULT_CONFIG_PATH)
-        self.db = spec.get("db") or str(DATA_DIR / f"portfolio_{self.ticker}.rocksdb")
-        self.control_path = spec.get("control", str(BUILD_DIR / f"control_{self.ticker}.json"))
+        self.db = spec.get("db") or str(DATA_DIR / f"portfolio_{self.asset_id}.rocksdb")
+        self.control_path = spec.get("control", str(BUILD_DIR / f"control_{self.asset_id}.json"))
+        # Portfolio meta-labeller gate (auto|on|off) forwarded to the child as
+        # `--meta-gate <value>`. "auto" honours the deployed labeller manifest.
+        self.meta_gate = str(spec.get("meta_gate", defaults.get("meta_gate", "auto"))).lower()
+        # Effective strategy parameters (defaults + this asset's overrides),
+        # used by the dashboard to detect config changes on live reload.
+        self.strategy_merged: Optional[dict] = spec.get("strategy_merged")
 
         self.cmd = [
             bin_path,
@@ -167,6 +188,8 @@ class AssetHandle:
             "--db", self.db,
             "--config", self.config,
             "--control", self.control_path,
+            "--meta-gate", self.meta_gate,
+            "--report-tag", self.asset_id,
         ]
         self.proc: Optional[subprocess.Popen] = None
         self.exit_code: Optional[int] = None
@@ -199,6 +222,7 @@ class AssetHandle:
         self.last_net_time: float = 0.0  # epoch of the last [net] line seen
         self.started_at: float = 0.0  # wall-clock epoch when the asset was spawned
         self.stop_requested: bool = False  # True once we've asked the child to stop
+        self.stopped_by_user: bool = False  # user asked to stop → monitor must NOT auto-restart it
 
     # ---- lifecycle ----------------------------------------------------------
 
@@ -219,6 +243,7 @@ class AssetHandle:
         except OSError:
             pass
         self.proc = subprocess.Popen(self.cmd, **kwargs)
+        self.stopped_by_user = False
         self.status = "running"
         self.paused = False
         self.started_at = datetime.now()
@@ -346,16 +371,48 @@ class AssetHandle:
         del self.alerts[:-20]  # keep only the last 20
 
     def mark_down(self, exit_code: int) -> None:
-        self.status = "DOWN"
         self.exit_code = exit_code
-        msg = f"[{self.ticker}] PROCESS DOWN (exit code {exit_code})"
-        logger.warning("*** ALERT *** %s", msg)
-        self._alert(msg)
+        if self.stopped_by_user:
+            # User asked to stop (:stop / :restart) — dim, no alert, no auto-restart.
+            self.status = "STOPPED"
+            logger.info("[%s] STOPPED by user (exit code %d)", self.ticker, exit_code)
+        else:
+            # Crash or signal — red alert + auto-restart (if enabled).
+            self.status = "DOWN"
+            msg = f"[{self.ticker}] PROCESS DOWN (exit code {exit_code})"
+            logger.warning("*** ALERT *** %s", msg)
+            self._alert(msg)
+
+    def _flatten_and_wait(self) -> None:
+        """Send flatten command and wait for the close to complete.
+
+        The child polls the control file every 100ms and flattens at mid,
+        printing ``[flatten] ... closed`` when done. We wait up to 1.2s
+        for that to happen so no open trade is ever abandoned.
+        """
+        try:
+            Path(self.control_path).write_text(
+                json.dumps({"cmd": "flatten"}), encoding="utf-8"
+            )
+            logger.info("[control] %s -> flatten", self.ticker)
+        except OSError as exc:
+            logger.warning("[control] write failed for %s: %s", self.ticker, exc)
+            return
+        deadline = time.time() + 1.2
+        while time.time() < deadline:
+            if self.proc is None or self.proc.poll() is not None:
+                return
+            time.sleep(0.1)
 
     def graceful_stop(self, grace_s: float = 12.0) -> None:
-        """Ask the child to flush RocksDB and exit; kill only as last resort."""
+        """Ask the child to flush RocksDB and exit; kill only as last resort.
+
+        Flattens any open position FIRST so no trade is ever abandoned
+        (crucial for live). Then sends SIGINT / CTRL_BREAK_EVENT.
+        """
         if not self.proc or self.proc.poll() is not None:
             return
+        self._flatten_and_wait()
         try:
             if sys.platform == "win32":
                 self.proc.send_signal(signal.CTRL_BREAK_EVENT)
@@ -393,14 +450,16 @@ class PortfolioSupervisor:
         # show max drawdown in RR terms (resetting peak -> trough of the curve).
         self.r_hist: deque = deque(maxlen=20_000)
         self.eq_hist: deque = deque(maxlen=20_000)
-        self.r_hist_by_ticker: Dict[str, deque] = {
-            a.ticker: deque(maxlen=20_000) for a in self.assets
+        # Keyed by per-asset `id` (not ticker) so duplicate-ticker twins each get
+        # their own curve.
+        self.r_hist_by_asset: Dict[str, deque] = {
+            a.asset_id: deque(maxlen=20_000) for a in self.assets
         }
         # Per-asset network-metric history (lat / stal / clock-skew, one sample
         # per monitor tick) so the HTML dashboard can chart LAT/SK/STAL over
         # the session and show their avg/max/min.
-        self.net_hist_by_ticker: Dict[str, Dict[str, deque]] = {
-            a.ticker: {
+        self.net_hist_by_asset: Dict[str, Dict[str, deque]] = {
+            a.asset_id: {
                 "lat": deque(maxlen=NET_HIST_MAX),
                 "stal": deque(maxlen=NET_HIST_MAX),
                 "sk": deque(maxlen=NET_HIST_MAX),
@@ -427,8 +486,9 @@ class PortfolioSupervisor:
             for a in self.assets:
                 self._write_control(a, cmd)
         else:
+            target = ticker.strip().lower()
             for a in self.assets:
-                if a.ticker == ticker.strip().lower():
+                if a.asset_id == target or a.ticker == target:
                     self._write_control(a, cmd)
                     return
             logger.warning("[control] unknown asset: %s", ticker)
@@ -465,9 +525,9 @@ class PortfolioSupervisor:
                     mdd = dd
         return mdd
 
-    def asset_mdd_r(self, ticker: str) -> float:
+    def asset_mdd_r(self, asset_id: str) -> float:
         """Per-asset max drawdown in R-multiples (from that asset's R curve)."""
-        return self._mdd_from_series(self.r_hist_by_ticker.get(ticker, deque()))
+        return self._mdd_from_series(self.r_hist_by_asset.get(asset_id, deque()))
 
     def _record_metrics(self) -> None:
         """Sample cumulative R / equity so MDD can be computed across the session."""
@@ -475,10 +535,10 @@ class PortfolioSupervisor:
         self.r_hist.append(tt["r"])
         self.eq_hist.append(tt["equity"])
         for a in self.assets:
-            self.r_hist_by_ticker.setdefault(a.ticker, deque(maxlen=20_000)).append(a.total_r)
+            self.r_hist_by_asset.setdefault(a.asset_id, deque(maxlen=20_000)).append(a.total_r)
             # Network metrics for the HTML charts (skip pre-first-[net] ticks).
-            h = self.net_hist_by_ticker.setdefault(
-                a.ticker, {
+            h = self.net_hist_by_asset.setdefault(
+                a.asset_id, {
                     "lat": deque(maxlen=NET_HIST_MAX),
                     "stal": deque(maxlen=NET_HIST_MAX),
                     "sk": deque(maxlen=NET_HIST_MAX),
@@ -497,9 +557,9 @@ class PortfolioSupervisor:
             return None
         return {"avg": sum(vals) / len(vals), "max": max(vals), "min": min(vals)}
 
-    def asset_net_stats(self, ticker: str) -> dict:
+    def asset_net_stats(self, asset_id: str) -> dict:
         """Session avg/max/min for LAT / STAL / SK of one asset (None if no data)."""
-        h = self.net_hist_by_ticker.get(ticker, {})
+        h = self.net_hist_by_asset.get(asset_id, {})
         return {
             "lat": self._stats_from(h.get("lat", ())),
             "stal": self._stats_from(h.get("stal", ())),
@@ -600,7 +660,8 @@ class PortfolioSupervisor:
                 code = a.proc.poll()
                 if code is not None:
                     a.mark_down(code)
-                    if self.restart_enabled:
+                    # A user-driven :stop must NOT auto-restart; only crashes do.
+                    if self.restart_enabled and not a.stopped_by_user:
                         self._restart(a)
                     continue
                 # Child process alive but silent: [net] telemetry arrives every
@@ -746,7 +807,9 @@ class PortfolioSupervisor:
             "network": self.network(),
             "assets": [
                 {
+                    "id": a.asset_id,
                     "ticker": a.ticker,
+                    "meta_gate": a.meta_gate,
                     "feed": a.feed,
                     "exchange": a.exchange,
                     "mode": a.mode,
@@ -769,16 +832,16 @@ class PortfolioSupervisor:
                         "skew_ms": a.skew_ms,
                         "outages": a.outages,
                         "outage_active": a.outage_active,
-                        "stats": self.asset_net_stats(a.ticker),
+                        "stats": self.asset_net_stats(a.asset_id),
                         "series": {
                             k: self._downsample(
-                                self.net_hist_by_ticker.get(a.ticker, {}).get(k, ())
+                                self.net_hist_by_asset.get(a.asset_id, {}).get(k, ())
                             )
                             for k in ("lat", "stal", "sk")
                         },
                     },
                     # per-asset max drawdown in R-multiples
-                    "mdd_r": self.asset_mdd_r(a.ticker),
+                    "mdd_r": self.asset_mdd_r(a.asset_id),
                     # network diagnostics are ONE global measurement in
                     # data["network"] (worst across assets) — not per-asset.
                     # the session report is deleted at session end (data lives
@@ -864,6 +927,7 @@ def run_portfolio(
                 "capital": a["capital"],
                 "db": a["db"],
                 "config": unified_cfg,
+                "strategy_merged": a["strategy_merged"],
             },
             {"exchange": pc["exchange"], "feed": pc["feed"], "mode": pc["mode"],
              "capital": pc["capital"]},

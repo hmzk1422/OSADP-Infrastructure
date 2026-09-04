@@ -124,6 +124,26 @@ pub struct ExecutionConfig {
     /// supervisor (portfolio dashboard / VIM GUI) pause an asset and close its
     /// position without killing the process.
     pub control_path: Option<String>,
+    /// When true, do NOT restore equity from the last persisted RocksDB snapshot
+    /// (used by the supervisor when the operator edits an asset's capital in
+    /// portfolio.json — so the restart reports the NEW capital, not the old equity).
+    pub fresh_equity: bool,
+    /// Optional per-asset report tag (the portfolio supervisor passes each
+    /// asset's unique `id`). When set, the HTML report is written to
+    /// `build/pnl_report_{tag}.html` instead of `build/pnl_report_{ticker}.html`
+    /// so portfolio twins (same ticker, different id) never clobber each other's
+    /// report file. Data lookups inside the report still use `ticker` (each twin
+    /// has its own RocksDB store).
+    pub report_tag: Option<String>,
+}
+
+/// HTML report file name for a run: `build/pnl_report_{tag}.html` when a
+/// per-asset `--report-tag` is configured, else `build/pnl_report_{ticker}.html`.
+fn report_out_path(cfg: &ExecutionConfig) -> String {
+    match cfg.report_tag.as_deref() {
+        Some(tag) => format!("build/pnl_report_{tag}.html"),
+        None => format!("build/pnl_report_{}.html", cfg.ticker),
+    }
 }
 
 /// Cheap shared snapshot of loop state (read by CLI / PyO3 `status()`).
@@ -315,6 +335,17 @@ pub async fn run_execution_loop(cfg: ExecutionConfig, mut ctx: LoopContext) {
         println!("[model] no research model found ??? using proxy logit (P(WIN) gate only)");
     }
 
+    // -- REGIME-DETECTION GATE (checked FIRST inside the engine — the model
+    //    that sits between the main executor and execution). Loaded per
+    //    symbol; missing export = gate OPEN (pure addition, never blocks). --
+    match cfg.meta_gate {
+        MetaGate::Off => println!("[regime] {ticker}: regime gate OFF (--meta-gate off)"),
+        _ => match model::load_regime_gate(&ticker) {
+            Some(g) => strategy.set_regime_gate(Some(g)),
+            None => println!("[regime] {ticker}: no regime_gate export — regime gate OPEN"),
+        },
+    }
+
     // -- portfolio meta-labeller gate (PURE ADDITION over the executor:
     //    a missing or un-deployed labeller leaves the gate OPEN and the
     //    strategy trades exactly as before) -------------------------------
@@ -352,7 +383,9 @@ pub async fn run_execution_loop(cfg: ExecutionConfig, mut ctx: LoopContext) {
     let last_exit_ms = AtomicI64::new(i64::MIN);
     let mut skew_floor = SkewFloor::new(120); // 2-minute trailing window
     let mut bar_print = (f64::NAN, f64::NAN); // [bar] telemetry throttle state
-    if let Some(db) = &db {
+    if !cfg.fresh_equity {
+
+        if let Some(db) = &db {
         if let Ok(snaps) = db.iter_pnl_snapshots(&ticker) {
             if let Some(last) = snaps.last() {
                 strategy.restore(last.equity, last.last_exit_ms);
@@ -360,6 +393,38 @@ pub async fn run_execution_loop(cfg: ExecutionConfig, mut ctx: LoopContext) {
                 println!(
                     "[restore] equity={:.2} USD n_trades={}",
                     last.equity, last.n_trades
+                );
+            }
+        }
+    }
+
+        // Restore any open position so an in-flight trade survives a restart/crash.
+        if let Some(db) = &db {
+            if let Ok(Some(pos)) = db.restore_open_position(&ticker) {
+                let side = match pos.side.as_str() {
+                    "long" => engine::Side::Long,
+                    "short" => engine::Side::Short,
+                    _ => {
+                        eprintln!("[restore] open position has invalid side '{}' — ignoring", pos.side);
+                        engine::Side::Long // fallback, will be caught by the check below
+                    }
+                };
+                strategy.restore_position(
+                    side,
+                    pos.entry_ms,
+                    pos.entry_mid,
+                    pos.entry_price,
+                    pos.qty,
+                    pos.notional,
+                    pos.barrier_pct,
+                    pos.stop,
+                    pos.target,
+                    pos.hi,
+                    pos.lo,
+                );
+                println!(
+                    "[restore] open position: {} {} @ {:.2} stop={:.2} target={:.2}",
+                    pos.side, pos.qty, pos.entry_price, pos.stop, pos.target
                 );
             }
         }
@@ -582,7 +647,14 @@ pub async fn run_execution_loop(cfg: ExecutionConfig, mut ctx: LoopContext) {
                     .as_ref()
                     .map(|c| c.rr_ratio)
                     .unwrap_or(engine::RR_RATIO);
-                crate::report::generate_html_report(db, &cfg.ticker, cfg.report_scope, rr).await;
+                crate::report::generate_html_report(
+                    db,
+                    &cfg.ticker,
+                    cfg.report_scope,
+                    rr,
+                    cfg.report_tag.as_deref(),
+                )
+                .await;
             }
         }
 
@@ -784,6 +856,25 @@ async fn handle_engine_events(
                         session_id: run_session_id,
                     };
                     db.record_pnl_snapshot(&snap.symbol, &pnl);
+                    // Persist the open position so it survives a restart/crash.
+                    if let Some(p) = strategy.open_position() {
+                        db.record_open_position(
+                            &snap.symbol,
+                            &crate::db::PersistPosition {
+                                side: p.side.as_str().to_string(),
+                                entry_ms: p.entry_ms,
+                                entry_mid: p.entry_mid,
+                                entry_price: p.entry_price,
+                                qty: p.qty,
+                                notional: p.notional,
+                                barrier_pct: p.barrier_pct,
+                                stop: p.stop,
+                                target: p.target,
+                                hi: p.hi,
+                                lo: p.lo,
+                            },
+                        );
+                    }
                 }
                 if let Ok(mut s) = ctx.stats.lock() {
                     s.last_event = format!("entry {} @ {:.2}", r.side.as_str(), r.entry_price);
@@ -858,9 +949,59 @@ async fn handle_engine_events(
                         stop_price,
                     };
                     db.record_closed_trade(&snap.symbol, &ct);
+                    // Clear the persisted open position — the trade is closed.
+                    db.clear_open_position(&snap.symbol);
                 }
                 if let Ok(mut s) = ctx.stats.lock() {
                     s.last_event = format!("exit {} r={:+.2}", rec.reason, rec.r_multiple);
+                }
+            }
+            // Voided (regime/labeller-rejected) candidate closed its shadow
+            // window. NEVER touches equity/stats — it is appended to the
+            // gate log so the regime research never loses the data.
+            EngineEvent::VoidClosed(vt) => {
+                println!(
+                    "[meta] VOIDED {} {} r={:+.2} pwin={:.3} ({}s, {})",
+                    cfg.ticker,
+                    vt.side.as_str(),
+                    vt.r_multiple,
+                    vt.meta_pwin,
+                    vt.duration_s,
+                    vt.reason
+                );
+                if let Ok(mut s) = ctx.stats.lock() {
+                    s.last_event = format!("voided r={:+.2}", vt.r_multiple);
+                }
+                if cfg.persist {
+                    let tag = cfg.report_tag.as_deref().unwrap_or(&cfg.ticker);
+                    let path = std::path::Path::new("build").join(format!("gate_log_{tag}.jsonl"));
+                    let record = serde_json::json!({
+                        "gate": "voided",
+                        "ticker": cfg.ticker,
+                        "entry_ms": vt.entry_ms,
+                        "exit_ms": vt.exit_ms,
+                        "side": vt.side.as_str(),
+                        "entry_price": vt.entry_price,
+                        "exit_price": vt.exit_price,
+                        "reason": vt.reason,
+                        "qty": vt.qty,
+                        "notional": vt.notional,
+                        "barrier_pct": vt.barrier_pct,
+                        "r_multiple": vt.r_multiple,
+                        "r_raw": vt.r_raw,
+                        "duration_s": vt.duration_s,
+                        "meta_pwin": vt.meta_pwin,
+                        "features": vt.feature_snapshot,
+                        "session_id": run_session_id,
+                    });
+                    if let Ok(mut f) = std::fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(&path)
+                    {
+                        use std::io::Write;
+                        let _ = writeln!(f, "{record}");
+                    }
                 }
             }
         }
@@ -881,7 +1022,14 @@ async fn finish(cfg: &ExecutionConfig, mut ctx: LoopContext, db: &Option<Arc<DbW
                 .as_ref()
                 .map(|c| c.rr_ratio)
                 .unwrap_or(engine::RR_RATIO);
-            crate::report::generate_html_report(db, &cfg.ticker, cfg.report_scope, rr).await;
+            crate::report::generate_html_report(
+                db,
+                &cfg.ticker,
+                cfg.report_scope,
+                rr,
+                cfg.report_tag.as_deref(),
+            )
+            .await;
         }
     }
     // The session report is transient by design: it exists only WHILE the
@@ -889,7 +1037,7 @@ async fn finish(cfg: &ExecutionConfig, mut ctx: LoopContext, db: &Option<Arc<DbW
     // removed at session end — every trade / equity snapshot / diag sample it
     // rendered is already persisted in RocksDB, so nothing is lost and build/
     // does not accumulate stale per-session HTML files.
-    let report_path = format!("build/pnl_report_{}.html", cfg.ticker);
+    let report_path = report_out_path(cfg);
     match std::fs::remove_file(&report_path) {
         Ok(_) => println!(
             "[report] session ended - removed {report_path} (data persists in RocksDB)"

@@ -1,0 +1,21 @@
+﻿cargo :     Checking engine v0.1.0 (C:\Users\Himaska\Documents\Projects\Business_Projects\intrada
+y-momentum-composite\uets_rs\engine)
+At line:1 char:97
++ ... raday-momentum-composite\uets_rs'; cargo check -p engine 2>&1 | Out-F ...
++                                        ~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (    Checking en...uets_rs\engine):String) [], Remot 
+   eException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+error: unexpected closing delimiter: `}`
+   --> uets_rs\engine\src\lib.rs:393:5
+    |
+380 |         events.push(EngineEvent::Entered(EntryReceipt {
+    |                                                       - this opening brace...
+...
+392 |         }));
+    |         - ...matches this closing brace
+393 |     }
+    |     ^ unexpected closing delimiter
+
+error: could not compile `engine` (lib) due to 1 previous error

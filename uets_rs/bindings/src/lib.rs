@@ -199,6 +199,8 @@ impl Strategy {
                             persist: true,
                             strategy_config,
                             control_path: None,
+                            fresh_equity: false,
+                            report_tag: None,
                             walkforward_dir: None,
                             meta_gate: live_trade::execution::MetaGate::Auto,
                             report_scope: live_trade::report::ReportScope::default(),

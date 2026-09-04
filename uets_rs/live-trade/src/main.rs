@@ -16,7 +16,7 @@ use std::sync::{Arc, Mutex};
 
 fn usage<T>() -> T {
     eprintln!(
-        "usage: live-trade [ticker] [--exchange bybit|bitfinex] [--feed bybit|bitfinex|binance] [--mode paper|live] [--capital USD] [--db PATH] [--no-db] [--seed N] [--config PATH] [--control PATH] [--session latest|all]"
+        "usage: live-trade [ticker] [--exchange bybit|bitfinex] [--feed bybit|bitfinex|binance] [--mode paper|live] [--capital USD] [--db PATH] [--no-db] [--seed N] [--config PATH] [--control PATH] [--session latest|all] [--meta-gate auto|on|off] [--report-tag ID] [--fresh-equity]"
     );
     std::process::exit(2);
 }
@@ -37,6 +37,12 @@ async fn main() {
     let mut config_path: Option<String> = None;
     let mut control_path: Option<String> = None;
     let mut report_scope = ReportScope::Latest;
+    let mut fresh_equity = false;               // --fresh-equity: skip RocksDB equity restore
+    let mut meta_gate = live_trade::execution::MetaGate::Auto;
+    // --report-tag <asset id>: the portfolio supervisor passes each asset's
+    // unique id so two twins with the SAME ticker (e.g. eth-rec / eth-exec)
+    // never clobber each other's HTML report file.
+    let mut report_tag: Option<String> = None;
 
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -75,6 +81,17 @@ async fn main() {
             }
             "--config" => config_path = Some(args.next().unwrap_or_else(usage)),
             "--control" => control_path = Some(args.next().unwrap_or_else(usage)),
+            "--fresh-equity" => fresh_equity = true,
+            "--meta-gate" => {
+                let v = args.next().unwrap_or_else(usage).to_ascii_lowercase();
+                meta_gate = match v.as_str() {
+                    "auto" => live_trade::execution::MetaGate::Auto,
+                    "on" => live_trade::execution::MetaGate::On,
+                    "off" => live_trade::execution::MetaGate::Off,
+                    _ => usage(),
+                };
+            }
+            "--report-tag" => report_tag = Some(args.next().unwrap_or_else(usage)),
             "--session" => {
                 let v = args.next().unwrap_or_else(usage).to_ascii_lowercase();
                 report_scope = match v.as_str() {
@@ -113,9 +130,11 @@ async fn main() {
         persist,
         strategy_config,
         walkforward_dir: None,
-        meta_gate: live_trade::execution::MetaGate::Auto,
+        meta_gate,
         report_scope,
         control_path,
+        fresh_equity,
+        report_tag,
     };
     let ctx = LoopContext {
         feed: create_feed(feed),

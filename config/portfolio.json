@@ -91,8 +91,8 @@
   },
 
   "assets": [
-    { "ticker": "btcusdt", "feed": "bybit",   "capital": 2000 },
-    { "ticker": "ethusdt", "feed": "binance", "capital": 3000 },
-    { "ticker": "solusdt", "feed": "bybit",   "capital": 2000 }
+    { "ticker": "btcusdt", "feed": "bybit",   "capital": 10000 },
+    { "ticker": "ethusdt", "feed": "binance", "capital": 10000 },
+    { "ticker": "solusdt", "feed": "bybit",   "capital": 10000 }
   ]
 }
