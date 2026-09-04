@@ -75,6 +75,106 @@ pub struct Labeller {
     pub threshold: f64,
 }
 
+// ============================================================================
+// Regime-detection gate loader (research regime_hmm.py / regime_trees.py
+// export → tools/export_regime_gate.py → build/regime_gate[_<sym>].json).
+// The gate is the model that sits between the main executor and execution.
+// ============================================================================
+
+/// Load the regime-detection gate for `symbol`. Per-symbol export
+/// (`build/regime_gate_<symbol>.json`) wins over the portfolio export
+/// (`build/regime_gate.json`). Any absence/failure returns `None` and the
+/// engine runs with the regime gate OPEN — pure addition, never blocks.
+pub fn load_regime_gate(symbol: &str) -> Option<engine::RegimeGate> {
+    let per_sym = format!("build/regime_gate_{symbol}.json");
+    let path = find_model_path(&[per_sym.as_str(), "build/regime_gate.json"])?;
+    let text = std::fs::read_to_string(&path).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&text).ok()?;
+    let features: Vec<String> = v
+        .get("features")?
+        .as_array()?
+        .iter()
+        .map(|x| x.as_str().unwrap_or("").to_string())
+        .collect();
+        let nodes: Vec<engine::GateNode> = v
+        .get("nodes")?
+        .as_array()?
+        .iter()
+        .map(|x| {
+            // Accept both object form ({"feature","threshold","left","right"})
+            // and legacy 4-element array form ([feature, threshold, left, right]).
+            if let Some(arr) = x.as_array() {
+                if arr.len() != 4 {
+                    return None;
+                }
+                Some(engine::GateNode {
+                    feature: arr[0].as_i64().unwrap_or(0) as i32,
+                    threshold: arr[1].as_f64().unwrap_or(0.0),
+                    left: arr[2].as_i64().unwrap_or(-1) as i32,
+                    right: arr[3].as_i64().unwrap_or(-1) as i32,
+                })
+            } else if let Some(obj) = x.as_object() {
+                Some(engine::GateNode {
+                    feature: obj.get("feature").and_then(|v| v.as_i64()).unwrap_or(-2) as i32,
+                    threshold: obj.get("threshold").and_then(|v| v.as_f64()).unwrap_or(0.0),
+                    left: obj.get("left").and_then(|v| v.as_i64()).unwrap_or(-1) as i32,
+                    right: obj.get("right").and_then(|v| v.as_i64()).unwrap_or(-1) as i32,
+                })
+            } else {
+                None
+            }
+        })
+        .collect::<Option<Vec<_>>>()?;
+    let favorable: Vec<bool> = v
+        .get("favorable")?
+        .as_array()?
+        .iter()
+        .map(|x| x.as_bool().unwrap_or(false))
+        .collect();
+        if features.len() != 28 {
+                eprintln!(
+            "[regime] {symbol}: expected 28 features in export, found {} — gate OPEN",
+            features.len()
+        );
+        return None;
+    }
+    if nodes.is_empty() || favorable.is_empty() || !nodes_are_consistent(&nodes, favorable.len()) {
+        eprintln!("[regime] {symbol}: empty or inconsistent nodes in {} — gate OPEN", path.display());
+        return None;
+    }
+    println!(
+        "[regime] {symbol}: regime gate loaded from {} ({} nodes, {} favorable)",
+        path.display(),
+        nodes.len(),
+        favorable.iter().filter(|&&t| t).count()
+    );
+    Some(engine::RegimeGate {
+        features,
+        nodes,
+        favorable,
+    })
+}
+fn nodes_are_consistent(nodes: &[engine::GateNode], n_leaves: usize) -> bool {
+    for (i, node) in nodes.iter().enumerate() {
+        // Leaf node: left or right is negative
+        if node.left < 0 || node.right < 0 {
+            if i >= n_leaves {
+                return false;
+            }
+        } else {
+            // Branching node: children must be valid and ordered (left <= parent index, right > parent)
+            let max_child = node.left.max(node.right);
+            if max_child as usize >= nodes.len() {
+                return false;
+            }
+            if node.left as usize > i {
+                return false;
+            }
+        }
+    }
+    true
+}
+
 /// Load the per-asset meta-labeller gate (research/ofmr/meta_labeller.py).
 ///
 /// `build/meta_labeller_manifest.json` — written by the research pipeline — is the

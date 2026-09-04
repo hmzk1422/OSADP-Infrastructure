@@ -52,6 +52,7 @@ pub async fn generate_html_report(
     symbol: &str,
     scope: ReportScope,
     rr_ratio: f64,
+    out_tag: Option<&str>,
 ) {
     let all_snaps = db.iter_pnl_snapshots(symbol).unwrap_or_default();
     let all_trades = db.iter_closed_trades(symbol).unwrap_or_default();
@@ -543,7 +544,12 @@ footer{{margin-top:22px;color:#5d606b;font-size:11px;padding-bottom:20px}}
     );
 
     let _ = std::fs::create_dir_all("build");
-    let out_path = format!("build/pnl_report_{}.html", symbol);
+    // When a per-asset report tag is set (portfolio twins), the output file
+    // uses the tag so two processes with the same ticker don't clobber each other.
+    let out_path = match out_tag {
+        Some(tag) => format!("build/pnl_report_{tag}.html"),
+        None => format!("build/pnl_report_{}.html", symbol),
+    };
     // Publish via tmp+rename so a browser auto-refresh can essentially never
     // load a half-written file (rename replaces atomically where supported;
     // on Windows we fall back to remove+rename across two adjacent syscalls).
@@ -646,7 +652,7 @@ mod tests {
             );
         }
 
-        generate_html_report(&db, "btcusdt", ReportScope::All, 10.0).await;
+        generate_html_report(&db, "btcusdt", ReportScope::All, 10.0, None).await;
 
         let html =
             std::fs::read_to_string("build/pnl_report_btcusdt.html").expect("report written");

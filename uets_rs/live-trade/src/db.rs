@@ -30,6 +30,7 @@ const CF_PNL: &str = "pnl";
 const CF_FEATURES: &str = "features";
 const CF_DIAG: &str = "diag";
 const CF_SESSIONS: &str = "sessions";
+const CF_OPENPOS: &str = "openpos";
 
 #[derive(Debug, thiserror::Error)]
 pub enum DbError {
@@ -157,6 +158,7 @@ impl DbWriter {
             ColumnFamilyDescriptor::new(CF_FEATURES, Options::default()),
             ColumnFamilyDescriptor::new(CF_DIAG, Options::default()),
             ColumnFamilyDescriptor::new(CF_SESSIONS, Options::default()),
+            ColumnFamilyDescriptor::new(CF_OPENPOS, Options::default()),
         ]
     }
 
@@ -498,6 +500,82 @@ impl DbWriter {
         self.db.put_cf(cf, key, value)?;
         Ok(())
     }
+}
+
+// ---- open-position persistence --------------------------------------------
+
+/// Serialize an open position so it survives a process restart.
+/// Mirrors `engine::Position` but with serde support.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct PersistPosition {
+    pub side: String,
+    pub entry_ms: i64,
+    pub entry_mid: f64,
+    pub entry_price: f64,
+    pub qty: f64,
+    pub notional: f64,
+    pub barrier_pct: f64,
+    pub stop: f64,
+    pub target: f64,
+    pub hi: f64,
+    pub lo: f64,
+}
+
+impl DbWriter {
+    /// Persist the currently-open position (called on Entered). Fire-and-forget.
+    pub fn record_open_position(&self, symbol: &str, pos: &PersistPosition) {
+        if let Err(e) = self.try_record_open_position(symbol, pos) {
+            eprintln!("[db] failed to write open position {symbol}: {e}");
+        }
+    }
+
+    /// Clear any persisted open position (called on Exited). Fire-and-forget.
+    pub fn clear_open_position(&self, symbol: &str) {
+        if let Err(e) = self.try_clear_open_position(symbol) {
+            eprintln!("[db] failed to clear open position {symbol}: {e}");
+        }
+    }
+
+    /// Restore the open position at startup, if any. Returns None if no position
+    /// was persisted (clean start) or the record is corrupt.
+    pub fn restore_open_position(
+        &self,
+        symbol: &str,
+    ) -> Result<Option<PersistPosition>, DbError> {
+        let cf = self.cf(CF_OPENPOS)?;
+        let key = Self::openpos_key(symbol);
+        match self.db.get_cf(cf, &key)? {
+            Some(bytes) => {
+                let pos: PersistPosition = serde_json::from_slice(&bytes)?;
+                Ok(Some(pos))
+            }
+            None => Ok(None),
+        }
+    }
+
+    fn try_record_open_position(
+        &self,
+        symbol: &str,
+        pos: &PersistPosition,
+    ) -> Result<(), DbError> {
+        let cf = self.cf(CF_OPENPOS)?;
+        let key = Self::openpos_key(symbol);
+        let value = serde_json::to_vec(pos)?;
+        self.db.put_cf(cf, key, value)?;
+        Ok(())
+    }
+
+    fn try_clear_open_position(&self, symbol: &str) -> Result<(), DbError> {
+        let cf = self.cf(CF_OPENPOS)?;
+        let key = Self::openpos_key(symbol);
+        self.db.delete_cf(cf, &key)?;
+        Ok(())
+    }
+
+    fn openpos_key(symbol: &str) -> Vec<u8> {
+        // Single row per symbol: "openpos_<symbol>"
+        format!("openpos_{symbol}").into_bytes()
+    }
 
     /// All registered sessions for `symbol`, oldest first.
     pub fn iter_sessions(&self, symbol: &str) -> Result<Vec<SessionMeta>, DbError> {
@@ -782,6 +860,101 @@ mod tests {
 
         let db = DbWriter::open(path).expect("open after repair fallback");
         drop(db);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Build a DbWriter from a path (sync, for tests only).
+    fn test_db_writer(path: &str) -> DbWriter {
+        let db = DbWriter::open(path).expect("open db");
+        DbWriter {
+            db,
+            seq: AtomicU64::new(0),
+        }
+    }
+
+    /// Round-trip: persist an open position, reopen the store, and restore it.
+    /// Verifies the open-position column family survives a process restart.
+    #[test]
+    fn open_position_persist_restore_roundtrip() {
+        let dir = temp_db_dir("openpos");
+        let path = dir.to_str().expect("temp path is utf8");
+
+        // Write an open position.
+        {
+            let db = test_db_writer(path);
+            let pos = PersistPosition {
+                side: "long".to_string(),
+                entry_ms: 1_700_000_000_000,
+                entry_mid: 100.0,
+                entry_price: 99.5,
+                qty: 0.5,
+                notional: 5000.0,
+                barrier_pct: 0.01,
+                stop: 98.5,
+                target: 110.0,
+                hi: 101.0,
+                lo: 99.0,
+            };
+            db.record_open_position("btcusdt", &pos);
+            db.flush().expect("flush");
+        }
+
+        // Reopen and restore.
+        {
+            let db = test_db_writer(path);
+            let restored = db
+                .restore_open_position("btcusdt")
+                .expect("restore")
+                .expect("position was persisted");
+            assert_eq!(restored.side, "long");
+            assert_eq!(restored.entry_ms, 1_700_000_000_000);
+            assert!((restored.entry_mid - 100.0).abs() < 1e-9);
+            assert!((restored.entry_price - 99.5).abs() < 1e-9);
+            assert!((restored.qty - 0.5).abs() < 1e-9);
+            assert!((restored.notional - 5000.0).abs() < 1e-9);
+            assert!((restored.barrier_pct - 0.01).abs() < 1e-12);
+            assert!((restored.stop - 98.5).abs() < 1e-9);
+            assert!((restored.target - 110.0).abs() < 1e-9);
+            assert!((restored.hi - 101.0).abs() < 1e-9);
+            assert!((restored.lo - 99.0).abs() < 1e-9);
+        }
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// After a trade closes, clearing the open position must remove the row.
+    #[test]
+    fn open_position_clear_removes_row() {
+        let dir = temp_db_dir("openpos_clear");
+        let path = dir.to_str().expect("temp path is utf8");
+
+        {
+            let db = test_db_writer(path);
+            let pos = PersistPosition {
+                side: "short".to_string(),
+                entry_ms: 1_700_000_000_000,
+                entry_mid: 200.0,
+                entry_price: 201.0,
+                qty: 0.1,
+                notional: 2000.0,
+                barrier_pct: 0.005,
+                stop: 202.0,
+                target: 190.0,
+                hi: 201.5,
+                lo: 199.0,
+            };
+            db.record_open_position("ethusdt", &pos);
+            db.flush().expect("flush");
+
+            // Clear it (simulating trade close).
+            db.clear_open_position("ethusdt");
+            db.flush().expect("flush after clear");
+
+            // Restore now returns None.
+            let restored = db.restore_open_position("ethusdt").expect("restore");
+            assert!(restored.is_none(), "cleared position must not be restored");
+        }
+
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

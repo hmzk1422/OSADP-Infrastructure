@@ -28,7 +28,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional
 
-from portfolio_supervisor import load_portfolio_config
+from portfolio_supervisor import DATA_DIR, load_portfolio_config
 
 try:
     import curses
@@ -134,7 +134,10 @@ class VimDashboard:
                 or abs(a.capital - spec["capital"]) > 1e-9
             )
             if cfg_changed or venue_changed:
-                a.strategy_merged = spec["strategy_merged"]
+                # Apply the NEW venue/capital/config to the handle FIRST so the
+                # restart spawns the child with the updated values (and the equity
+                # display doesn't stay stuck on the old capital).
+                self._apply_spec_to_handle(a, spec)
                 self._restart_asset(a)
                 restarted.append(spec["ticker"])
 
@@ -142,6 +145,38 @@ class VimDashboard:
             "reloaded - restarted: " + ", ".join(restarted)
             if restarted else "config reloaded - no effective changes"
         )
+
+    def _apply_spec_to_handle(self, a, spec) -> None:
+        """Push a freshly-parsed portfolio spec onto an existing AssetHandle so the
+        restarted child spawns with the NEW capital/venue/config, not the stale
+        values from when the handle was first created."""
+        old_cap = a.capital
+        a.exchange = spec.get("exchange", a.exchange)
+        a.feed = spec.get("feed", a.feed)
+        a.mode = spec.get("mode", a.mode)
+        a.capital = float(spec.get("capital", a.capital))
+        a.config = spec.get("config") or str(self.config_path.resolve())
+        a.db = spec.get("db") or str(DATA_DIR / f"portfolio_{a.ticker}.rocksdb")
+        a.strategy_merged = spec.get("strategy_merged", getattr(a, "strategy_merged", None))
+        # Rebuild the child command line so it uses the NEW values.
+
+        a.cmd = [
+            a.cmd[0],  # bin_path
+            a.ticker,
+            "--exchange", a.exchange,
+            "--feed", a.feed,
+            "--mode", a.mode,
+            "--capital", str(a.capital),
+            "--db", a.db,
+            "--config", a.config,
+            "--control", a.control_path,
+        ]
+        # The restarted child starts fresh at the new capital; don't show stale eq.
+        a.equity = a.capital
+        # When the capital changed, tell the Rust engine to skip the RocksDB
+        # equity restore so it reports the NEW capital instead of the old equity.
+        if abs(old_cap - a.capital) > 1e-9:
+            a.cmd.append("--fresh-equity")
 
     def _spawn_new_asset(self, spec, pc) -> None:
         try:
@@ -165,6 +200,7 @@ class VimDashboard:
 
     def _restart_asset(self, a) -> None:
         def _worker():
+            a.stopped_by_user = True   # monitor must NOT auto-restart mid-restart
             try:
                 a.graceful_stop()
             except Exception:  # noqa: BLE001
@@ -172,19 +208,37 @@ class VimDashboard:
             if not self.sup.stop_requested:
                 a.status = "starting"
                 a.spawn()
+                a.stopped_by_user = False
         threading.Thread(target=_worker, daemon=True).start()
 
+    def _force_restart(self, a) -> None:
+        """Re-read the latest portfolio.json spec for this asset, apply it to the
+        handle (capital/venue/config) and restart — so `R` / `:restart`
+        actually pick up config edits, not just re-spawn with stale values."""
+        try:
+            pc = load_portfolio_config(self.config_path)
+            spec = next(
+                (s for s in pc["assets"] if s["ticker"] == a.ticker), None
+            )
+            if spec is not None:
+                self._apply_spec_to_handle(a, spec)
+        except Exception as exc:  # noqa: BLE001
+            self._flash(f"restart: could not re-read config: {exc}")
+        self._restart_asset(a)
+
     def _stop_asset(self, a) -> None:
+        a.stopped_by_user = True   # user asked to stop → monitor won't auto-restart it
         threading.Thread(target=a.graceful_stop, daemon=True).start()
 
         # ------------------------------------------------------------- metrics
     def _sample(self) -> None:
         for a in self.sup.assets:
-            hist = self.asset_hist.setdefault(a.ticker, deque(maxlen=HISTORY_MAX))
+            # Keyed by asset_id (not ticker) so twins don't contaminate each other.
+            hist = self.asset_hist.setdefault(a.asset_id, deque(maxlen=HISTORY_MAX))
             hist.append((a.equity / a.capital - 1.0) if a.capital else 0.0)
-            m = self.asset_metrics.setdefault(a.ticker, {"lat": deque(maxlen=HISTORY_MAX),
-                                                         "stal": deque(maxlen=HISTORY_MAX),
-                                                         "sk": deque(maxlen=HISTORY_MAX)})
+            m = self.asset_metrics.setdefault(a.asset_id, {"lat": deque(maxlen=HISTORY_MAX),
+                                                           "stal": deque(maxlen=HISTORY_MAX),
+                                                           "sk": deque(maxlen=HISTORY_MAX)})
             if a.lat_ms is not None:
                 m["lat"].append(a.lat_ms)
             if a.stal_ms is not None:
@@ -216,9 +270,9 @@ class VimDashboard:
             "outages": totals["outages"],
         }
 
-    def _metric_stats(self, ticker: str, key: str) -> dict:
+    def _metric_stats(self, asset_id: str, key: str) -> dict:
         """avg/max/min over the session for one metric ('lat'|'stal'|'sk')."""
-        vals = list(self.asset_metrics.get(ticker, {}).get(key, ()))
+        vals = list(self.asset_metrics.get(asset_id, {}).get(key, ()))
         if not vals:
             return {"avg": None, "max": None, "min": None}
         return {"avg": sum(vals) / len(vals), "max": max(vals), "min": min(vals)}
@@ -302,8 +356,8 @@ class VimDashboard:
             4 if s["up"] < s["n_assets"] else 0)
         # Portfolio-wide network metrics (worst across assets) with session
         # avg/max/min, plus max drawdown in RR terms.
-        lat_all = [self._metric_stats(a.ticker, "lat") for a in self.sup.assets]
-        sk_all = [self._metric_stats(a.ticker, "sk") for a in self.sup.assets]
+        lat_all = [self._metric_stats(a.asset_id, "lat") for a in self.sup.assets]
+        sk_all = [self._metric_stats(a.asset_id, "sk") for a in self.sup.assets]
         lats = [m["max"] for m in lat_all if m["max"] is not None]
         lat_avgs = [m["avg"] for m in lat_all if m["avg"] is not None]
         sks = [m["max"] for m in sk_all if m["max"] is not None]
@@ -342,11 +396,13 @@ class VimDashboard:
                    f"{a.last_event[:40]}")
             if not sel:
                 if a.status == "DOWN":
-                    attr = curses.color_pair(3)
+                    attr = curses.color_pair(3)  # red alert
+                elif a.status == "STOPPED":
+                    attr = curses.A_DIM  # user asked to stop — dim, no alarm
                 elif a.status in ("outage", "stalled"):
-                    attr = curses.color_pair(4)
+                    attr = curses.color_pair(4)  # yellow
                 elif a.status == "running":
-                    attr = curses.color_pair(2)
+                    attr = curses.color_pair(2)  # green
             stdscr.addnstr(y, 0, txt[:w - 1], w - 1, attr)
 
     def _draw_trades(self, stdscr, top: int, bot: int, w: int) -> None:
@@ -357,13 +413,13 @@ class VimDashboard:
         stdscr.addnstr(top, 0,
                        f" {a.ticker} trades: {a.n_trades}  (W {a.n_wins} / "
                        f"L {a.n_losses}, {a.total_r:+.2f}R)   "
-                       f"MDD-R {self.sup.asset_mdd_r(a.ticker):.2f}",
+                       f"MDD-R {self.sup.asset_mdd_r(a.asset_id):.2f}",
                        w - 1, curses.A_BOLD)
         # Network metrics with session avg/max/min (LAT & SK are the important
         # ones; STAL completes the picture). Sampled every REFRESH_SECS tick.
-        lat = self._metric_stats(a.ticker, "lat")
-        sk = self._metric_stats(a.ticker, "sk")
-        stal = self._metric_stats(a.ticker, "stal")
+        lat = self._metric_stats(a.asset_id, "lat")
+        sk = self._metric_stats(a.asset_id, "sk")
+        stal = self._metric_stats(a.asset_id, "stal")
 
         def _fmt3(avg, mx, mn, spec: str) -> str:
             if avg is None:
@@ -451,7 +507,7 @@ class VimDashboard:
             if a is None:
                 self._flash(f"unknown asset: {' '.join(args) or '(none selected)'}")
             elif op == "restart":
-                self._restart_asset(a)
+                self._force_restart(a)
                 self._flash(f"restarting {a.ticker} with its latest config...")
             elif op == "stop":
                 self._stop_asset(a)
@@ -459,6 +515,7 @@ class VimDashboard:
             elif a.proc and a.proc.poll() is None:
                 self._flash(f"{a.ticker} already running")
             else:
+                a.stopped_by_user = False
                 a.spawn()
                 self._flash(f"started {a.ticker}")
         elif op in ("pause", "resume", "flatten"):
@@ -550,7 +607,7 @@ class VimDashboard:
         elif key in (ord("R"), curses.KEY_F5):
             a = self._selected()
             if a:
-                self._restart_asset(a)
+                self._force_restart(a)
                 self._flash(f"restarting {a.ticker} with its latest config...")
         elif key == ord("o"):                             # open HTML dashboard
             _open_html_dashboard(self)

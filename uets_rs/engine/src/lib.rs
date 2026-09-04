@@ -346,6 +346,74 @@ pub struct EntryReceipt {
     pub win_prob: f64,
 }
 
+#[derive(Debug, Clone)]
+pub struct ShadowPosition {
+    pub side: Side,
+    pub entry_ms: i64,
+    pub entry_price: f64,
+    pub qty: f64,
+    pub notional: f64,
+    pub barrier_pct: f64,
+    pub stop: f64,
+    pub target: f64,
+    pub meta_pwin: f64,
+    pub feature_snapshot: Vec<f64>,
+}
+#[derive(Debug, Clone)]
+pub struct VoidedTrade {
+    pub entry_ms: i64,
+    pub exit_ms: i64,
+    pub side: Side,
+    pub entry_price: f64,
+    pub exit_price: f64,
+    pub reason: String,
+    pub qty: f64,
+    pub notional: f64,
+    pub barrier_pct: f64,
+    pub r_multiple: f64,
+    pub r_raw: f64,
+    pub duration_s: f64,
+    pub meta_pwin: f64,
+    pub feature_snapshot: Vec<f64>,
+}
+#[derive(Debug, Clone)]
+pub struct GateNode {
+    pub feature: i32,
+    pub threshold: f64,
+    pub left: i32,
+    pub right: i32,
+}
+#[derive(Debug, Clone)]
+pub struct RegimeGate {
+    pub features: Vec<String>,
+    pub nodes: Vec<GateNode>,
+    pub favorable: Vec<bool>,
+}
+impl RegimeGate {
+    pub fn classify(&self, x: &[f64]) -> Option<usize> {
+        let mut node: i32 = 0;
+        loop {
+            let n = self.nodes.get(node as usize)?;
+            if n.left < 0 || n.right < 0 { return Some(node as usize); }
+            let v = x.get(n.feature as usize).copied()?;
+            // sklearn NaN routing: NaN goes to RIGHT child (NaN <= threshold is False)
+            node = if v.is_nan() { n.right } else if v <= n.threshold { n.left } else { n.right };
+        }
+    }
+    pub fn is_tradeable(&self, leaf: usize) -> bool {
+        self.favorable.get(leaf).copied().unwrap_or(false)
+    }
+}
+#[derive(Debug, Clone)]
+pub struct RegimeTradeStat {
+    pub r: f64,
+    pub range_pct: f64,
+    pub mae_pct: f64,
+    pub mfe_pct: f64,
+    pub gap_min: f64,
+    pub is_winner: f64,
+    pub is_quick: f64,
+}
 /// Closed-trade record; `reason` ∊ {stop_loss, take_profit, timeout}.
 #[derive(Debug, Clone)]
 pub struct TradeRecord {
@@ -382,6 +450,7 @@ pub enum EngineEvent {
     Entered(EntryReceipt),
     /// A position was closed (barrier / timeout).
     Exited(TradeRecord),
+    VoidClosed(VoidedTrade),
 }
 
 /// Cheap read-only snapshot for consoles / report writers.
@@ -396,6 +465,7 @@ pub struct StrategySnapshot {
     pub mid: f64,
     pub open_side: Option<Side>,
     pub last_features: Option<Feature>,
+    pub n_voided: u64,
 }
 
 /// Streaming feature + dry-run execution engine (research-faithful).
@@ -435,6 +505,11 @@ pub struct MomentumStrategy {
     /// Take/avoid threshold (from `build/meta_labeller_manifest.json`). 0.0 = the
     /// gate never fires even when a labeller is installed.
     meta_threshold: f64,
+    regime_gate: Option<RegimeGate>,
+    closed_stats: VecDeque<RegimeTradeStat>,
+    n_voided: u64,
+    shadows: Vec<ShadowPosition>,
+    voided: Vec<VoidedTrade>,
 
     // --- orderflow accumulation (mirrors features.py, reset per composite bar) ---
     ofi_prev_bid_price: Option<f64>,
@@ -555,6 +630,11 @@ impl MomentumStrategy {
             fold_models: Vec::new(),
             labeller: None,
             meta_threshold: 0.0,
+            regime_gate: None,
+            closed_stats: VecDeque::new(),
+            n_voided: 0,
+            shadows: Vec::new(),
+            voided: Vec::new(),
             ofi_prev_bid_price: None,
             ofi_prev_bid_amount: 0.0,
             ofi_prev_ask_price: None,
@@ -623,6 +703,40 @@ impl MomentumStrategy {
         self.position.as_ref()
     }
 
+    /// Restore an open position from persistence (called at startup after a
+    /// crash/restart). Rebuilds the live `Position` so an in-flight trade
+    /// survives wifi-kill/config-reload. The caller is responsible for
+    /// validating the restored position (e.g. checking the stop/target are
+    /// still sane given current market conditions).
+    pub fn restore_position(
+        &mut self,
+        side: Side,
+        entry_ms: i64,
+        entry_mid: f64,
+        entry_price: f64,
+        qty: f64,
+        notional: f64,
+        barrier_pct: f64,
+        stop: f64,
+        target: f64,
+        hi: f64,
+        lo: f64,
+    ) {
+        self.position = Some(Position {
+            side,
+            entry_ms,
+            entry_mid,
+            entry_price,
+            qty,
+            notional,
+            barrier_pct,
+            stop,
+            target,
+            hi,
+            lo,
+        });
+    }
+
     /// Force-close the open position immediately at `price` (manual flatten /
     /// emergency exit). Reasons are `&'static str` (e.g. `"flatten"`); the
     /// PnL/barrier accounting is identical to a timeout exit. Returns the
@@ -654,6 +768,7 @@ impl MomentumStrategy {
             mid: self.mid,
             open_side: self.position.as_ref().map(|p| p.side),
             last_features: self.last_features,
+            n_voided: self.n_voided,
         }
     }
 
@@ -1077,11 +1192,22 @@ impl MomentumStrategy {
         // passed every research gate (research/ofmr/meta_labeller.py). A
         // missing/un-deployed labeller leaves `meta_threshold` at 0.0 and the
         // gate can never fire (gate OPEN).
-        if self.labeller.is_some()
+        // Regime-detection gate (research tree; checked FIRST - THE metalabeller).
+        if let Some(gate) = self.regime_gate.as_ref() {
+            let x = self.regime_feature_vector(&feat, fill_price);
+            if let Some(leaf) = gate.classify(&x) {
+                if !gate.is_tradeable(leaf) {
+                    self.last_entry_block = "regime_filter";
+                    self.spawn_shadow(&feat, fill_price, bp, side);
+                    return;
+                }
+            }
+        } else if self.labeller.is_some()
             && self.meta_threshold > 0.0
             && feat.meta_pwin + 1e-12 < self.meta_threshold
         {
             self.last_entry_block = "meta_filter";
+            self.spawn_shadow(&feat, fill_price, bp, side);
             return;
         }
 
@@ -1245,6 +1371,41 @@ impl MomentumStrategy {
     /// intra-second wick (the research state space has no sub-second data).
     /// Target-first → win, stop-first → loss, else the lookahead timeout at
     /// `entry + LOOKAHEAD_SECONDS`.
+    fn spawn_shadow(&mut self, feat: &Feature, fill_price: f64, bp: f64, side: Side) {
+        let slip = if self.cfg.enable_slippage { self.cfg.slippage_bps_fallback } else { 0.0 };
+        let entry_price = match side {
+            Side::Long => fill_price * (1.0 + slip / 10_000.0),
+            Side::Short => fill_price * (1.0 - slip / 10_000.0),
+        };
+        let qty = if self.cfg.risk_pct_per_trade > 0.0 && bp > EPS && self.equity > 0.0 {
+            let risk_usd = self.equity * self.cfg.risk_pct_per_trade;
+            let notional = (risk_usd / bp).min(self.equity * self.cfg.max_leverage);
+            notional / entry_price
+        } else {
+            self.cfg.max_position_usd / entry_price
+        };
+        if qty <= 0.0 { return; }
+        let notional = qty * entry_price;
+        let (stop,target) = match side {
+            Side::Long => (entry_price * (1.0 - bp), entry_price * (1.0 + bp * self.cfg.rr_ratio)),
+            Side::Short => (entry_price * (1.0 + bp), entry_price * (1.0 - bp * self.cfg.rr_ratio)),
+        };
+        let m = self.macro_features.unwrap_or_default();
+        let hour = {
+            let sod = (feat.ts / 1000).rem_euclid(86_400);
+            (sod / 3600) as f64 + ((sod % 3600) / 60) as f64 / 60.0
+        };
+        let feature_snapshot = vec![
+            m.spread_bps_z, m.ma_slope_5, m.rsi_x_ma, m.ma_accel,
+            m.price_roc_3, m.rsi_2, m.sma_14, m.ofi_z,
+            m.cvd_delta_z, m.cvd_slope_z, m.absorption_z, m.tick_autocorr,
+            m.inst_ratio, m.delta_divergence_z, m.depth_imbalance_z, hour,
+        ];
+        self.n_voided +=1;
+        self.shadows.push(ShadowPosition { side, entry_ms: feat.ts, entry_price,
+            qty, notional, barrier_pct: bp, stop, target,
+            meta_pwin: feat.meta_pwin, feature_snapshot });
+    }
     fn check_exit(&mut self, ts: i64, close: f64) -> Option<TradeRecord> {
         let decision = match &mut self.position {
             Some(p) => {
@@ -1431,6 +1592,111 @@ impl MomentumStrategy {
     /// True if a real LightGBM model is installed and will be scored on the
     /// full 15-feature vector. `live-trade` uses this to decide whether to
     /// seed orderflow feeds.
+    pub fn set_regime_gate(&mut self, gate: Option<RegimeGate>) {
+        self.regime_gate = gate;
+    }
+
+/// Build the regime-gate feature vector (28 cols) in the EXACT exported tree order.
+    pub fn regime_feature_vector(&self, feat: &Feature, fill_price: f64) -> Vec<f64> {
+        let m = self.macro_features.unwrap_or_default();
+        let nan = f64::NAN;
+        let names: Vec<String> = self.regime_gate.as_ref().map(|g| g.features.clone()).unwrap_or_default();
+        let mut x: Vec<f64> = Vec::with_capacity(28);
+        for name in names {
+            match name.as_str() {
+                "spread_bps_z_open" => x.push(m.spread_bps_z),
+                "ma_slope_5_open" => x.push(m.ma_slope_5),
+                "ma_accel_open" => x.push(m.ma_accel),
+                "price_roc_3_open" => x.push(m.price_roc_3),
+                "rsi_2_open" => x.push(m.rsi_2),
+                "cvd_slope_z_open" => x.push(m.cvd_slope_z),
+                "tick_autocorr_open" => x.push(m.tick_autocorr),
+                "inst_ratio_open" => x.push(m.inst_ratio),
+                "depth_imbalance_z_open" => x.push(m.depth_imbalance_z),
+                "price_rel_sma14" => x.push(if m.sma_14 >0.0 { fill_price / m.sma_14 - 1.0 } else { nan }),
+                "vol_prior20_range" => x.push(self._roll_med("range_pct",20, 20)),
+                "vol_prior20_mae" => x.push(self._roll_med("mae_pct",20, 20)),
+                "hour_of_day" => {
+                    let sod = (feat.ts / 1000).rem_euclid(86_400);
+                    x.push((sod / 3600) as f64 + ((sod % 3600) / 60) as f64 / 60.0);
+                }
+                "strat_prev10_mean_r" => x.push(self._roll_mean("r",10, 10)),
+                "strat_prev10_median_r" => x.push(self._roll_med("r",10, 10)),
+                "strat_prev10_win_rate" => x.push(self._roll_mean("is_winner",10, 10)),
+                "strat_prev20_win_rate" => x.push(self._roll_mean("is_winner",20, 10)),
+                "strat_prev50_win_rate" => x.push(self._roll_mean("is_winner",50, 10)),
+                "strat_prev20_profit_factor" => x.push(self._roll_pf(20, 10)),
+                "strat_prev20_ret_std" => x.push(self._roll_std("r",20, 10)),
+                "strat_prev10_mae" => x.push(self._roll_mean("mae_pct",10, 10)),
+                "strat_prev10_mfe" => x.push(self._roll_mean("mfe_pct",10, 10)),
+                "strat_prev10_median_gap" => x.push(self._roll_med("gap_min",10, 10)),
+                "strat_prev20_median_gap" => x.push(self._roll_med("gap_min",20, 10)),
+                "strat_prev50_median_gap" => x.push(self._roll_med("gap_min",50, 10)),
+                "strat_prev10_quick_frac" => x.push(self._roll_mean("is_quick",10, 10)),
+                "strat_prev20_quick_frac" => x.push(self._roll_mean("is_quick",20, 10)),
+                "strat_prev10_quick_winless_frac" => {
+                    let vals: Vec<f64> = self.closed_stats.iter().rev().take(10).map(|s| s.is_quick * (1.0 - s.is_winner)).collect();
+                    x.push(if vals.len() <10 { nan } else { Self::_roll_mean2(&vals) });
+                }
+                _ => x.push(nan),
+            }
+        }
+        x
+    }
+
+    fn _roll_mean(&self, key: &str, window: usize, min_req: usize) -> f64 {
+        let vals: Vec<f64> = self.closed_stats.iter().rev().take(window).map(|s| match key {
+            "r" => s.r, "range_pct" => s.range_pct, "mae_pct" => s.mae_pct,
+            "mfe_pct" => s.mfe_pct, "gap_min" => s.gap_min, "is_winner" => s.is_winner,
+            "is_quick" => s.is_quick, _ => f64::NAN,
+        }).collect();
+        let vals: Vec<f64> = vals.into_iter().filter(|x| !x.is_nan()).collect();
+        if vals.len() < min_req { return f64::NAN; }
+        vals.iter().sum::<f64>() / vals.len() as f64
+    }
+
+    fn _roll_med(&self, key: &str, window: usize, min_req: usize) -> f64 {
+        let vals: Vec<f64> = self.closed_stats.iter().rev().take(window).map(|s| match key {
+            "r" => s.r, "range_pct" => s.range_pct, "mae_pct" => s.mae_pct,
+            "mfe_pct" => s.mfe_pct, "gap_min" => s.gap_min, _ => f64::NAN,
+        }).collect();
+        let vals: Vec<f64> = vals.into_iter().filter(|x| !x.is_nan()).collect();
+        if vals.len() < min_req { return f64::NAN; }
+        let mut v = vals.clone(); v.sort_by(|a,b| a.total_cmp(b));
+        let n = v.len(); if n % 2 == 1 { v[n/2] } else { (v[n/2-1] + v[n/2]) / 2.0 }
+    }
+
+    fn _roll_std(&self, _key: &str, window: usize, min_req: usize) -> f64 {
+        let mut values: Vec<f64> = Vec::new();
+        for s in self.closed_stats.iter().rev().take(window) {
+            values.push(s.r);
+        }
+        values.retain(|x| !x.is_nan());
+        if values.len() < min_req { return f64::NAN; }
+        let n = values.len() as f64;
+        let mu = values.iter().sum::<f64>() / n;
+        let var = values.iter().map(|x| (x-mu)*(x-mu)).sum::<f64>() / (n - 1.0);
+        var.sqrt()
+    }
+
+    fn _roll_pf(&self, window: usize, min_req: usize) -> f64 {
+        let mut vals: Vec<f64> = Vec::new();
+        for s in self.closed_stats.iter().rev().take(window) { vals.push(s.r); }
+        vals.retain(|x| !x.is_nan());
+        if vals.len() < min_req { return f64::NAN; }
+        let w: f64 = vals.iter().filter(|&&x| x >0.0).sum();
+        let l: f64 = vals.iter().filter(|&&x| x < 0.0).map(|&x| -x).sum();
+        if l > 1e-9 { w / l } else { f64::NAN }
+    }
+
+    fn _roll_mean2(v: &[f64]) -> f64 {
+        let vals: Vec<f64> = v.iter().copied().filter(|x| !x.is_nan()).collect();
+        if vals.is_empty() { return f64::NAN; }
+        vals.iter().sum::<f64>() / vals.len() as f64
+    }
+
+    /// True if a real LightGBM model is installed and will be scored on the
+    /// True if a real LightGBM model is installed and will be scored on the
     pub fn model_loaded(&self) -> bool {
         self.model.is_some()
     }
@@ -1780,7 +2046,7 @@ fn pop_std(values: &[f64]) -> f64 {
 }
 
 /// Rolling z-score of the last element vs the trailing `window` samples
-/// (population std, matches `calculate_zscore(..., window=…)`).
+/// (population std, matches `calc_zscore(..., window=…)`).
 fn roll_z(series: &[f64], window: usize) -> f64 {
     let n = series.len();
     if n < window || window == 0 {
@@ -1824,7 +2090,7 @@ fn pearson_lag1(series: &[f64]) -> f64 {
 
 /// Append `value` to `buf`, trim to `MAX_Z_HIST`, then return its rolling
 /// z-score vs the trailing `window` samples (population std, matches
-/// features.py `_rolling_zscore` → `calculate_zscore(window=…)`).
+/// features.py `_rolling_zscore` → `calc_zscore(window=…)`).
 fn push_roll_z(buf: &mut VecDeque<f64>, value: f64, window: usize) -> f64 {
     buf.push_back(value);
     if buf.len() > MAX_Z_HIST {
@@ -2104,5 +2370,121 @@ mod tests {
         assert!(exited, "position never hit its target");
         assert_eq!(s.closed_trades().len(), 1);
         assert!(s.snapshot().n_trades == 1);
+    }
+
+    /// RegimeGate::classify routes NaN values to the RIGHT child (sklearn missing-value
+    /// routing: NaN <= threshold evaluates to False, so the right branch is taken).
+    /// This is critical: the gate must never crash on missing features and
+    /// must match the research tree's behavior exactly.
+    #[test]
+    fn regime_gate_classify_nan_routes_right() {
+        let gate = RegimeGate {
+            features: vec!["a".to_string(), "b".to_string()],
+            nodes: vec![
+                GateNode { feature: 0, threshold: 0.5, left: 1, right: 2 },
+                GateNode { feature: -2, threshold: 0.0, left: -1, right: -1 }, // leaf 1
+                GateNode { feature: 1, threshold: 1.0, left: 3, right: 4 },
+                GateNode { feature: -2, threshold: 0.0, left: -1, right: -1 }, // leaf 3
+                GateNode { feature: -2, threshold: 0.0, left: -1, right: -1 }, // leaf 4
+            ],
+            favorable: vec![false, true, false, false, true],
+        };
+        // NaN at feature 0 → sklearn routes RIGHT → node 2 → feature 1
+        // With value 999.0 > 1.0 → RIGHT to leaf 4
+        let x_nan = vec![f64::NAN, 999.0];
+        assert_eq!(gate.classify(&x_nan), Some(4));
+        // NaN with small second feature → node 2 → 0.5 <= 1.0 → LEFT to leaf 3
+        let x_nan2 = vec![f64::NAN, 0.5];
+        assert_eq!(gate.classify(&x_nan2), Some(3));
+        // Value <= threshold → left → leaf 1
+        let x_low = vec![0.3, 999.0];
+        assert_eq!(gate.classify(&x_low), Some(1));
+        // Value > threshold → right → node 2 → feature 1
+        let x_high = vec![0.7, 0.5];
+        assert_eq!(gate.classify(&x_high), Some(3)); // 0.5 <= 1.0 → left
+        let x_high2 = vec![0.7, 2.0];
+        assert_eq!(gate.classify(&x_high2), Some(4)); // 2.0 > 1.0 → right
+    }
+
+    /// RegimeGate::is_tradeable returns the favorable flag for the leaf.
+    #[test]
+    fn regime_gate_is_tradeable() {
+        let gate = RegimeGate {
+            features: vec!["a".to_string()],
+            nodes: vec![
+                GateNode { feature: -2, threshold: 0.0, left: -1, right: -1 },
+            ],
+            favorable: vec![true],
+        };
+        assert!(gate.is_tradeable(0));
+        // Out-of-range leaf defaults to false (not tradeable)
+        assert!(!gate.is_tradeable(99));
+    }
+
+    /// regime_feature_vector produces exactly 28 features when a gate is installed.
+    #[test]
+    fn regime_feature_vector_produces_28_features() {
+        let mut s = MomentumStrategy::new("TEST", StrategyConfig::default());
+        // Build a minimal gate with the 28 research feature names
+        let feats: Vec<String> = (0..28).map(|i| format!("f{}", i)).collect();
+        // Map the first 12 to known names so the match arms fire; rest use _
+        let mut names = feats.clone();
+        names[0] = "spread_bps_z_open".to_string();
+        names[1] = "ma_slope_5_open".to_string();
+        names[2] = "ma_accel_open".to_string();
+        names[3] = "price_roc_3_open".to_string();
+        names[4] = "rsi_2_open".to_string();
+        names[5] = "cvd_slope_z_open".to_string();
+        names[6] = "tick_autocorr_open".to_string();
+        names[7] = "inst_ratio_open".to_string();
+        names[8] = "depth_imbalance_z_open".to_string();
+        names[9] = "price_rel_sma14".to_string();
+        names[10] = "vol_prior20_range".to_string();
+        names[11] = "vol_prior20_mae".to_string();
+        names[12] = "hour_of_day".to_string();
+        for i in 13..28 { names[i] = format!("strat_prev10_mean_r"); }
+        let gate = RegimeGate {
+            features: names,
+            nodes: vec![GateNode { feature: -2, threshold: 0.0, left: -1, right: -1 }],
+            favorable: vec![true],
+        };
+        s.set_regime_gate(Some(gate));
+        let feat = Feature { ts: 1_700_000_000_000, ..Default::default() };
+        let x = s.regime_feature_vector(&feat, 100.0);
+        assert_eq!(x.len(), 28, "regime feature vector must have 28 cols");
+    }
+
+    #[test]
+    fn restore_position_rebuilds_live_position() {
+        let mut s = MomentumStrategy::new("TEST", StrategyConfig::default());
+        assert!(s.open_position().is_none(), "starts with no position");
+
+        // Simulate restoring a persisted open position after a crash/restart
+        s.restore_position(
+            Side::Long,
+            1_700_000_000_000,
+            100.0,
+            100.5,
+            10.0,
+            1005.0,
+            0.01,
+            99.5,
+            110.0,
+            101.0,
+            99.0,
+        );
+
+        let p = s.open_position().expect("open position should be restored");
+        assert_eq!(p.side, Side::Long);
+        assert_eq!(p.entry_ms, 1_700_000_000_000);
+        assert_eq!(p.entry_mid, 100.0);
+        assert_eq!(p.entry_price, 100.5);
+        assert_eq!(p.qty, 10.0);
+        assert_eq!(p.notional, 1005.0);
+        assert_eq!(p.barrier_pct, 0.01);
+        assert_eq!(p.stop, 99.5);
+        assert_eq!(p.target, 110.0);
+        assert_eq!(p.hi, 101.0);
+        assert_eq!(p.lo, 99.0);
     }
 }

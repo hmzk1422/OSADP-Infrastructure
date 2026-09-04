@@ -179,6 +179,8 @@ async fn main() {
         meta_gate,
         report_scope: live_trade::report::ReportScope::default(),
         control_path: None,
+        fresh_equity: false,
+        report_tag: None,
     };
     let ctx = LoopContext {
         feed: create_replay_feed(
