@@ -46,6 +46,8 @@ pub struct BitfinexExchange {
     last_bid: Option<(f64, f64)>, // (price, amount) — new
     last_ask: Option<(f64, f64)>, // (price, amount) — new
     ping: Interval,
+    pong_at: Option<std::time::Instant>, // instant the last ping was sent (RTT timing)
+    last_rtt_ms: Option<f64>,            // last ping→pong RTT (monotonic, skew-free)
 }
 
 impl BitfinexExchange {
@@ -60,6 +62,8 @@ impl BitfinexExchange {
             last_bid: None,
             last_ask: None,
             ping: interval(Duration::from_secs(PING_INTERVAL_SECS)),
+            pong_at: None,
+            last_rtt_ms: None,
         }
     }
     // credentials() unchanged
@@ -144,11 +148,23 @@ impl Feed for BitfinexExchange {
         loop {
             tokio::select! {
                 _ = self.ping.tick() => {
+                    self.pong_at = Some(std::time::Instant::now());
                     ws.send(Message::Text(r#"{"event":"ping"}"#.into())).await?;
                 }
                 msg = ws.next() => {
                     match msg {
                         Some(Ok(Message::Text(text))) => {
+                            // Application-level pong completes an outstanding
+                            // ping RTT sample (skew-free, monotonic clock).
+                            if text.contains("\"pong\"") {
+                                if let Some(t) = self.pong_at.take() {
+                                    let ms = t.elapsed().as_secs_f64() * 1000.0;
+                                    if ms < 3000.0 {
+                                        self.last_rtt_ms = Some(ms);
+                                    }
+                                }
+                                continue;
+                            }
                             if let Some(events) = parse_trade_msg(&text, trades_chan)? {
                                 return Ok(events);
                             }
@@ -160,6 +176,16 @@ impl Feed for BitfinexExchange {
                         }
                         Some(Ok(Message::Ping(p))) => {
                             ws.send(Message::Pong(p)).await?;
+                        }
+                        Some(Ok(Message::Pong(_))) => {
+                            if let Some(t) = self.pong_at.take() {
+                                let ms = t.elapsed().as_secs_f64() * 1000.0;
+                                // Discard samples contaminated by loop stalls
+                                // (pacing/catch-up) — healthy WS RTT < 3 s.
+                                if ms < 3000.0 {
+                                    self.last_rtt_ms = Some(ms);
+                                }
+                            }
                         }
                         Some(Ok(Message::Close(_))) | None => {
                             return Err(ExchangeError::ConnectionClosed);

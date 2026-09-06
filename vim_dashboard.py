@@ -64,16 +64,22 @@ class VimDashboard:
         self.message = "ready - edit portfolio.json live; :q quits"
         self.message_until = 0.0
         self.cfg_mtime = self._mtime()
-        self.asset_hist = {a.ticker: deque(maxlen=HISTORY_MAX) for a in sup.assets}
+        # Keyed by asset_id (not ticker) so twins with the same ticker
+        # (e.g. ethusdt + eth-raw) get independent buffers.
+        self.asset_hist = {a.asset_id: deque(maxlen=HISTORY_MAX) for a in sup.assets}
         self.port_hist: deque = deque(maxlen=HISTORY_MAX)
+        # Clock-offset samples discarded by the |sk| > SK_GUARD_MS guard,
+        # per asset id — shown on the dashboard so filtering is visible.
+        self.sk_discarded: Dict[str, int] = {}
         # Per-asset rolling network metrics (LAT / STAL / SK) for avg/max/min
         self.asset_metrics: Dict[str, dict] = {
-            a.ticker: {"lat": deque(maxlen=HISTORY_MAX),
-                       "stal": deque(maxlen=HISTORY_MAX),
-                       "sk": deque(maxlen=HISTORY_MAX)}
+            a.asset_id: {"lat": deque(maxlen=HISTORY_MAX),
+                         "stal": deque(maxlen=HISTORY_MAX),
+                         "sk": deque(maxlen=HISTORY_MAX)}
             for a in sup.assets
         }
         self._last_totals = None
+        self._state_lock = threading.Lock()  # guards reads of AssetHandle fields
 
     # ------------------------------------------------------------------ utils
     def _mtime(self):
@@ -91,6 +97,17 @@ class VimDashboard:
         if not assets:
             return None
         return assets[min(self.cursor, len(assets) - 1)]
+
+    def _selected_snapshot(self):
+        """Thread-safe version of _selected() -- returns a coherent dict snapshot
+        instead of a live AssetHandle reference that may be mid-update."""
+        assets = self.sup.assets
+        if not assets:
+            return None
+        idx = max(0, min(self.cursor, len(assets) - 1))
+        return assets[idx].snapshot()
+
+
     def _keep_cursor_visible(self, win_h: int) -> None:
         """Adjust config scroll so the cursor is always visible."""
         if self.cursor < self.scroll:
@@ -183,7 +200,8 @@ class VimDashboard:
             from portfolio_supervisor import AssetHandle
 
             handle = AssetHandle(
-                {"ticker": spec["ticker"], "exchange": spec["exchange"],
+                {"id": spec.get("id", spec["ticker"]),
+                 "ticker": spec["ticker"], "exchange": spec["exchange"],
                  "feed": spec["feed"], "mode": spec["mode"],
                  "capital": spec["capital"], "db": spec["db"],
                  "config": str(Path(self.config_path).resolve())},
@@ -194,7 +212,15 @@ class VimDashboard:
             handle.strategy_merged = spec["strategy_merged"]
             handle.spawn()
             self.sup.assets.append(handle)
-            self.asset_hist[handle.ticker] = deque(maxlen=HISTORY_MAX)
+            # Key history by asset_id (NOT ticker): twin assets can share a
+            # ticker (e.g. ethusdt + eth-raw both trading ethusdt) and must
+            # never share one history deque.
+            self.asset_hist[handle.asset_id] = deque(maxlen=HISTORY_MAX)
+            self.asset_metrics.setdefault(
+                handle.asset_id,
+                {"lat": deque(maxlen=HISTORY_MAX),
+                 "stal": deque(maxlen=HISTORY_MAX),
+                 "sk": deque(maxlen=HISTORY_MAX)})
         except Exception as exc:  # noqa: BLE001
             self._flash(f"failed to start {spec['ticker']}: {exc}")
 
@@ -232,42 +258,66 @@ class VimDashboard:
 
         # ------------------------------------------------------------- metrics
     def _sample(self) -> None:
-        for a in self.sup.assets:
-            # Keyed by asset_id (not ticker) so twins don't contaminate each other.
-            hist = self.asset_hist.setdefault(a.asset_id, deque(maxlen=HISTORY_MAX))
-            hist.append((a.equity / a.capital - 1.0) if a.capital else 0.0)
-            m = self.asset_metrics.setdefault(a.asset_id, {"lat": deque(maxlen=HISTORY_MAX),
-                                                           "stal": deque(maxlen=HISTORY_MAX),
-                                                           "sk": deque(maxlen=HISTORY_MAX)})
-            if a.lat_ms is not None:
-                m["lat"].append(a.lat_ms)
-            if a.stal_ms is not None:
-                m["stal"].append(a.stal_ms)
-            if a.skew_ms is not None:
-                m["sk"].append(a.skew_ms)
-        totals = self.sup.totals()
-        if self._last_totals is not None and totals["capital"] > 0:
-            self.port_hist.append(
-                (totals["equity"] - self._last_totals["equity"]) / totals["capital"]
-            )
-        self._last_totals = totals
+        """Sample current live state into history deques for charts/statistics.
+
+        Thread-safe: takes a snapshot of all asset fields under lock so the
+        history buffers always reflect a coherent point-in-time, never a torn
+        read mid-update from the supervisor's _pump() thread.
+        """
+        with self._state_lock:
+            for a in self.sup.assets:
+                hist = self.asset_hist.setdefault(a.asset_id, deque(maxlen=HISTORY_MAX))
+                hist.append((a.equity / a.capital - 1.0) if a.capital else 0.0)
+                m = self.asset_metrics.setdefault(a.asset_id, {"lat": deque(maxlen=HISTORY_MAX),
+                                                               "stal": deque(maxlen=HISTORY_MAX),
+                                                               "sk": deque(maxlen=HISTORY_MAX)})
+                if a.lat_ms is not None:
+                    m["lat"].append(a.lat_ms)
+                if a.stal_ms is not None:
+                    m["stal"].append(a.stal_ms)
+                if a.skew_ms is not None:
+                    # Clock-offset sanity guard (matches supervisor): a wall
+                    # clock off by minutes is unsynced, not feed behavior.
+                    if abs(a.skew_ms) <= self.sup.SK_GUARD_MS:
+                        m["sk"].append(a.skew_ms)
+                    else:
+                        self.sk_discarded[a.asset_id] = (
+                            self.sk_discarded.get(a.asset_id, 0) + 1)
+            totals = self.sup.totals()
+            if self._last_totals is not None and totals["capital"] > 0:
+                self.port_hist.append(
+                    (totals["equity"] - self._last_totals["equity"]) / totals["capital"]
+                )
+            self._last_totals = totals
 
     def _summary(self) -> dict:
-        totals = self.sup.totals()
-        wins = sum(a.n_wins for a in self.sup.assets)
-        losses = sum(a.n_losses for a in self.sup.assets)
-        n = totals["trades"]
-        net = totals["net"]
+        """Read portfolio totals directly from live AssetState (via snapshot),
+        NOT from sampled history -- so the dashboard reflects the current state
+        instantly, not 5s-lagged."""
+        snaps = [a.snapshot() for a in self.sup.assets]
+        capital = sum(s["capital"] for s in snaps)
+        equity = sum(s["equity"] for s in snaps)
+        wins = sum(s["n_wins"] for s in snaps)
+        losses = sum(s["n_losses"] for s in snaps)
+        n = sum(s["n_trades"] for s in snaps)
+        net = equity - capital
+        total_r = sum(s["total_r"] for s in snaps)
+        up = sum(1 for s in snaps if s["status"] == "running")
+        outages = sum(s["outages"] for s in snaps)
+        # Sortino/Sharpe are TRADE-LEVEL and NON-ANNUALIZED: computed from the
+        # closed-trade R-multiple sequence (the strategy trades discretely, so
+        # per-trade R is the honest return series — sampling the UI cannot
+        # create new market observations). None => statistically undefined.
         return {
-            "capital": totals["capital"], "equity": totals["equity"], "pnl": net,
-            "pnl_pct": (net / totals["capital"] * 100.0) if totals["capital"] else 0.0,
+            "capital": capital, "equity": equity, "pnl": net,
+            "pnl_pct": (net / capital * 100.0) if capital else 0.0,
             "trades": n, "wins": wins, "losses": losses,
             "win_rate": (wins / (wins + losses) * 100.0) if (wins + losses) else 0.0,
-            "total_r": totals["r"], "avg_r": (totals["r"] / n) if n else 0.0,
-            "sortino": _compute_sortino(list(self.port_hist)),
-            "sharpe": _compute_sharpe(list(self.port_hist)),
-            "up": totals["up"], "n_assets": len(self.sup.assets),
-            "outages": totals["outages"],
+            "total_r": total_r, "avg_r": (total_r / n) if n else 0.0,
+            "sortino": _compute_sortino(list(self.sup.trade_rs)),
+            "sharpe": _compute_sharpe(list(self.sup.trade_rs)),
+            "up": up, "n_assets": len(snaps),
+            "outages": outages,
         }
 
     def _metric_stats(self, asset_id: str, key: str) -> dict:
@@ -318,7 +368,10 @@ class VimDashboard:
         stdscr.attron(curses.color_pair(5) | curses.A_BOLD)
         stdscr.addnstr(0, 0, f" OSADP PORTFOLIO | {tabs} ".ljust(w), w - 1)
         stdscr.attroff(curses.color_pair(5) | curses.A_BOLD)
-        stdscr.addnstr(1, 0, f" {mode.upper()} | {stamp} ".ljust(w), w - 1)
+        # The wall-clock stamp updates EVERY redraw (~20Hz) — this is your
+        # proof the screen is alive even when LAST EVENT is frozen (feed stall).
+        stdscr.addnstr(1, 0,
+                       f" {mode.upper()} | refresh {stamp} ".ljust(w), w - 1)
 
     def _draw_footer(self, stdscr, h: int, w: int) -> None:
         if self.editing:
@@ -350,7 +403,11 @@ class VimDashboard:
         row(top + 2, "Trades      ", f"{s['trades']}  (W {s['wins']} / L {s['losses']})")
         row(top + 3, "Win rate    ", f"{s['win_rate']:.1f}%")
         row(top + 4, "RR accum    ", f"{s['total_r']:+.2f}R   avg {s['avg_r']:+.3f}R/trade")
-        row(top + 5, "Sortino     ", f"{s['sortino']:.3f}   (sharpe {s['sharpe']:.3f})")
+        # Trade-level, non-annualized. N/A = statistically undefined (too few
+        # closed trades, or no downside observations yet) — NOT zero.
+        sortino_s = f"{s['sortino']:.3f}" if s["sortino"] is not None else "N/A"
+        sharpe_s = f"{s['sharpe']:.3f}" if s["sharpe"] is not None else "N/A"
+        row(top + 5, "Sortino(trd)", f"{sortino_s}   (sharpe(trd) {sharpe_s})")
         row(top + 6, "Assets up   ",
             f"{s['up']}/{s['n_assets']}   feed outages: {s['outages']}",
             4 if s["up"] < s["n_assets"] else 0)
@@ -364,62 +421,91 @@ class VimDashboard:
         sk_avgs = [m["avg"] for m in sk_all if m["avg"] is not None]
         lat_s = (f"avg {sum(lat_avgs)/len(lat_avgs):.1f} worst-max {max(lats):.0f}ms"
                  if lat_avgs else "no data yet")
-        sk_s = (f"avg {sum(sk_avgs)/len(sk_avgs):+.0f} worst-max {max(sks, key=abs):+.0f}ms"
-                if sk_avgs else "no data yet")
+        # Clock offset is a DIAGNOSTIC (local wall clock vs exchange wall
+        # clock) — it is NOT latency. Latency truth = rtt/ord/stal (monotonic).
+        # If any child currently reports an offset beyond the guard, the local
+        # clock is unsynced — say so instead of displaying garbage numbers.
+        sk_discarded_total = sum(self.sk_discarded.values())
+        unsynced = [a for a in self.sup.assets
+                    if a.skew_ms is not None and abs(a.skew_ms) > self.sup.SK_GUARD_MS]
+        if unsynced:
+            worst = max((abs(a.skew_ms) for a in unsynced), default=0.0)
+            sk_s = (f"CLOCK UNSYNCED (offset up to {worst/60000.0:.0f}min)"
+                    " - run 'w32tm /resync'")
+        else:
+            sk_s = (f"avg {sum(sk_avgs)/len(sk_avgs):+.0f} worst-max {max(sks, key=abs):+.0f}ms"
+                    if sk_avgs else "no data yet")
+            if sk_discarded_total:
+                sk_s += f"  (discarded {sk_discarded_total} clock-step samples)"
         row(top + 7, "Latency     ", lat_s)
-        row(top + 8, "Clock skew  ", sk_s)
-        row(top + 9, "MDD (R)     ", f"{self.sup.mdd_r():+.2f}R")
+        row(top + 8, "Clock offset", sk_s + "  [diag]")
+        # MDD-R is the CLOSED-TRADE drawdown (cumulative trade R); MDD-eq is
+        # the account-level equity drawdown (includes restarts as breaks).
+        row(top + 9, "MDD         ",
+            f"{self.sup.mdd_r():+.2f}R (closed-trade)   {self.sup.mdd_pct()*100.0:.2f}% (equity)")
 
         hdr_y = top + 11
         stdscr.addnstr(hdr_y, 0,
-                       "  ASSET     STATUS    EQ($)      NET($)  TR  TOT_R    "
+                       "  ASSET     STATUS    EQ($)      NET($)  TR  VOID TOT_R   "
                        "MID        RSI   PWIN  LAST EVENT", w - 1,
                        curses.A_BOLD | curses.A_UNDERLINE)
-        assets = self.sup.assets
-        self.cursor = max(0, min(self.cursor, len(assets) - 1))
+        snapshots = [a.snapshot() for a in self.sup.assets]
+        self.cursor = max(0, min(self.cursor, len(snapshots) - 1))
         win_h = bot - hdr_y - 1
         start = max(0, min(self.scroll, self.cursor - win_h + 1))
-        start = min(start, max(0, len(assets) - win_h))
+        start = min(start, max(0, len(snapshots) - win_h))
         self.scroll = start
-        for i in range(start, min(len(assets), start + max(1, win_h))):
-            a = assets[i]
+        for i in range(start, min(len(snapshots), start + max(1, win_h))):
+            snap = snapshots[i]
             y = hdr_y + 1 + (i - start)
             sel = (i == self.cursor)
             attr = curses.A_REVERSE if sel else 0
-            net = a.equity - a.capital
-            mid = f"{a.mid:.2f}" if a.mid is not None else "-"
-            rsi = f"{a.rsi:.1f}" if a.rsi is not None else "-"
-            pw = f"{a.pwin:.2f}" if a.pwin is not None else "-"
-            txt = (f"{('>' if sel else ' ')} {a.ticker:<9}{a.status:<9}"
-                   f"{a.equity:>10.2f}{net:>+10.2f}{a.n_trades:>4}"
-                   f"{a.total_r:>+8.2f}  {mid:>10} {rsi:>5} {pw:>5}  "
-                   f"{a.last_event[:40]}")
+            net = snap["equity"] - snap["capital"]
+            mid = f"{snap['mid']:.2f}" if snap["mid"] is not None else "-"
+            rsi = f"{snap['rsi']:.1f}" if snap["rsi"] is not None else "-"
+            pw = f"{snap['pwin']:.2f}" if snap["pwin"] is not None else "-"
+            voided = f"{snap['n_voided']}" if snap["n_voided"] > 0 else "-"
+            asset_id = snap["asset_id"]
+            status = snap["status"]
+            last_event = snap["last_event"]
+            last_net_time = snap["last_net_time"]
+            if last_net_time > 0:
+                net_age = int(time.time() - last_net_time)
+                net_s = f"net{net_age}s"
+            else:
+                net_s = "net?"
+            txt = (f"{('>' if sel else ' ')} {asset_id:<9}{status:<9}"
+                   f"{snap['equity']:>10.2f}{net:>+10.2f}{snap['n_trades']:>4}{voided:>5}"
+                   f"{snap['total_r']:>+8.2f}  {mid:>10} {rsi:>5} {pw:>5}  "
+                   f"{last_event[:34]} {net_s}")
             if not sel:
-                if a.status == "DOWN":
+                if status == "DOWN":
                     attr = curses.color_pair(3)  # red alert
-                elif a.status == "STOPPED":
-                    attr = curses.A_DIM  # user asked to stop — dim, no alarm
-                elif a.status in ("outage", "stalled"):
+                elif status == "STOPPED":
+                    attr = curses.A_DIM  # user asked to stop -- dim, no alarm
+                elif status in ("outage", "stalled"):
                     attr = curses.color_pair(4)  # yellow
-                elif a.status == "running":
+                elif status == "running":
                     attr = curses.color_pair(2)  # green
             stdscr.addnstr(y, 0, txt[:w - 1], w - 1, attr)
 
     def _draw_trades(self, stdscr, top: int, bot: int, w: int) -> None:
-        a = self._selected()
-        if a is None:
+        snap = self._selected_snapshot()
+        if snap is None:
             stdscr.addnstr(top, 0, " no assets", w - 1)
             return
         stdscr.addnstr(top, 0,
-                       f" {a.ticker} trades: {a.n_trades}  (W {a.n_wins} / "
-                       f"L {a.n_losses}, {a.total_r:+.2f}R)   "
-                       f"MDD-R {self.sup.asset_mdd_r(a.asset_id):.2f}",
+                       f" {snap['asset_id']} (ticker {snap['ticker']}) trades: {snap['n_trades']}  "
+                       f"(W {snap['n_wins']} / "
+                       f"L {snap['n_losses']}, {snap['total_r']:+.2f}R)   "
+                       f"MDD-R (closed-trade) {self.sup.asset_mdd_r(snap['asset_id']):.2f}",
                        w - 1, curses.A_BOLD)
         # Network metrics with session avg/max/min (LAT & SK are the important
         # ones; STAL completes the picture). Sampled every REFRESH_SECS tick.
-        lat = self._metric_stats(a.asset_id, "lat")
-        sk = self._metric_stats(a.asset_id, "sk")
-        stal = self._metric_stats(a.asset_id, "stal")
+        aid = snap["asset_id"]
+        lat = self._metric_stats(aid, "lat")
+        sk = self._metric_stats(aid, "sk")
+        stal = self._metric_stats(aid, "stal")
 
         def _fmt3(avg, mx, mn, spec: str) -> str:
             if avg is None:
@@ -428,22 +514,27 @@ class VimDashboard:
 
         stdscr.addnstr(top + 1, 0,
                        f" LAT {_fmt3(lat['avg'], lat['max'], lat['min'], '.2f')}ms"
-                       f"   SK {_fmt3(sk['avg'], sk['max'], sk['min'], '+.0f')}ms"
+                       f"   SK(offset,diag) {_fmt3(sk['avg'], sk['max'], sk['min'], '+.0f')}ms"
                        f"   STAL {_fmt3(stal['avg'], stal['max'], stal['min'], '.0f')}ms"
-                       + ("  [OUTAGE now]" if a.outage_active else ""),
+                       + ("  [OUTAGE now]" if snap["outage_active"] else ""),
                        w - 1, curses.color_pair(1))
-        lines = list(a.event_lines)
+        # View 2 is a FAITHFUL MIRROR of the child's stdout: every line the
+        # algo would print running bare in a terminal ([bar]/[net]/[order]/
+        # [entry]/[exit]/[seed]/[regime]/...), timestamped, newest last.
+        lines = list(a.log_lines)
         win_h = bot - top - 4
         shown = lines[-max(1, win_h):]
         for i, ln in enumerate(shown):
             attr = 0
             if "[exit]" in ln:
                 attr = curses.color_pair(2) if "r=+" in ln else curses.color_pair(3)
-            elif "[entry]" in ln:
+            elif "[entry]" in ln or "[order]" in ln:
                 attr = curses.color_pair(6)
+            elif "[net]" in ln:
+                attr = curses.color_pair(4) if "[OUTAGE]" in ln else curses.A_DIM
             stdscr.addnstr(top + 3 + i, 0, ln[:w - 1], w - 1, attr)
         if not shown:
-            stdscr.addnstr(top + 3, 0, " (no events yet)", w - 1, curses.A_DIM)
+            stdscr.addnstr(top + 3, 0, " (no output yet)", w - 1, curses.A_DIM)
 
 
     def _draw_config(self, stdscr, top: int, bot: int, w: int) -> None:
@@ -683,22 +774,34 @@ class VimDashboard:
 
     # ---------------------------------------------------------------- main
     def run(self, stdscr) -> None:
-        stdscr.timeout(int(REFRESH_SECS * 1000))
+        stdscr.nodelay(True)  # NEVER block on input — the TUI must redraw on
+        # its own cadence even on Windows consoles where timeout()+getch() can
+        # block indefinitely waiting for a key.
         try:
             curses.curs_set(0)
         except curses.error:
             pass
         last_sample = 0.0
         while True:
-            self.check_config_reload()
-            now = time.monotonic()
-            if now - last_sample >= REFRESH_SECS:
-                self._sample()
-                last_sample = now
-            self._draw(stdscr)
+            try:
+                self.check_config_reload()
+                now = time.monotonic()
+                if now - last_sample >= REFRESH_SECS:
+                    self._sample()
+                    last_sample = now
+                self._draw(stdscr)
+            except curses.error:
+                # Terminal was resized/misbehaved mid-draw — never let a
+                # rendering error freeze or kill the dashboard.
+                stdscr.clear()
+                stdscr.refresh()
+            except Exception:  # noqa: BLE001 - the TUI must never die silently
+                stdscr.clear()
+                stdscr.refresh()
             key = stdscr.getch()
             if key != -1:
                 self.handle_key(key)
+            time.sleep(0.05)  # ~20Hz redraw; getch() above never blocks
 
 
 def _open_html_dashboard(dash) -> None:
@@ -716,38 +819,41 @@ def _open_html_dashboard(dash) -> None:
     dash._flash(f"opened {p.name} in your browser")
 
 
-# Dashboard return samples are taken every REFRESH_SECS; annualization uses
-# the corresponding number of sampling periods per year (crypto trades 24/7).
-_PERIODS_PER_YEAR = 365.0 * 86400.0 / REFRESH_SECS
+def _compute_sortino(trade_rs) -> Optional[float]:
+    """Trade-level Sortino ratio (non-annualized) from closed-trade R multiples.
 
-
-def _compute_sortino(returns, risk_free_rate: float = 0.0) -> float:
-    """Annualized Sortino ratio from the sampled per-period portfolio returns."""
-    n = len(returns)
+    Returns None (displayed as N/A) when statistically undefined: fewer than
+    2 closed trades, or no downside observations yet (dd = 0 is undefined,
+    NOT zero performance).
+    """
+    rs = list(trade_rs)
+    n = len(rs)
     if n < 2:
-        return 0.0
-    excess = [r - risk_free_rate for r in returns]
-    mean = sum(excess) / n
-    downside_mean = sum(min(0.0, e) for e in excess) / n
-    dd_var = sum((min(0.0, e) - downside_mean) ** 2 for e in excess) / (n - 1)
+        return None
+    mean = sum(rs) / n
+    downside_mean = sum(min(0.0, r) for r in rs) / n
+    dd_var = sum((min(0.0, r) - downside_mean) ** 2 for r in rs) / (n - 1)
     dd = dd_var ** 0.5
     if dd <= 0.0:
-        return 0.0
-    return mean / dd * _PERIODS_PER_YEAR ** 0.5
+        return None
+    return mean / dd
 
 
-def _compute_sharpe(returns, risk_free_rate: float = 0.0) -> float:
-    """Annualized Sharpe ratio from the sampled per-period portfolio returns."""
-    n = len(returns)
+def _compute_sharpe(trade_rs) -> Optional[float]:
+    """Trade-level Sharpe ratio (non-annualized) from closed-trade R multiples.
+
+    Returns None (displayed as N/A) when statistically undefined.
+    """
+    rs = list(trade_rs)
+    n = len(rs)
     if n < 2:
-        return 0.0
-    excess = [r - risk_free_rate for r in returns]
-    mean = sum(excess) / n
-    var = sum((r - mean) ** 2 for r in excess) / (n - 1)
+        return None
+    mean = sum(rs) / n
+    var = sum((r - mean) ** 2 for r in rs) / (n - 1)
     sd = var ** 0.5
     if sd <= 0.0:
-        return 0.0
-    return mean / sd * _PERIODS_PER_YEAR ** 0.5
+        return None
+    return mean / sd
 
 
 def run_vim_dashboard(sup, config_path: str, ticker_configs: Optional[Dict[str, str]] = None) -> None:

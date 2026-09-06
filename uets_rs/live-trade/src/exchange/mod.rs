@@ -250,6 +250,15 @@ pub trait Feed: Send + Sync {
     /// strategy's feature rings at startup.
     async fn historical_closes(&self, ticker: &str, bars: u32) -> Result<Vec<f64>, ExchangeError>;
 
+    /// Last WebSocket ping→pong round-trip time in ms, measured with the
+    /// MONOTONIC clock on the same socket the market data flows on —
+    /// clock-skew-free by construction. `None` until the first pong arrives.
+    /// This is the actionable network-latency number; raw clock skew mixes
+    /// NTP offset with transit delay and is only a clock-health indicator.
+    fn ws_rtt_ms(&self) -> Option<f64> {
+        None
+    }
+
     /// Tear down connections (drop is enough in practice).
     async fn close(&mut self) -> Result<(), ExchangeError>;
 }

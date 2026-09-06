@@ -42,6 +42,8 @@ pub struct BinanceFeed {
     symbol: String,
     ws: Option<WsStream>,
     ping: Interval,
+    pong_at: Option<std::time::Instant>, // instant the last Ping was sent (RTT timing)
+    last_rtt_ms: Option<f64>,            // last ping→pong RTT (monotonic, skew-free)
 }
 
 impl BinanceFeed {
@@ -50,6 +52,8 @@ impl BinanceFeed {
             symbol: String::new(),
             ws: None,
             ping: interval(Duration::from_secs(PING_INTERVAL_SECS)),
+            pong_at: None,
+            last_rtt_ms: None,
         }
     }
 
@@ -78,6 +82,7 @@ impl Feed for BinanceFeed {
         let (mut ws, _resp) = connect_async(PUBLIC_WS_URL).await?;
 
         let low = self.symbol.to_ascii_lowercase();
+        eprintln!("[feed] {}: subscribing to aggTrade + bookTicker", self.symbol);
         ws.send(Message::Text(
             json!({
                 "method": "SUBSCRIBE",
@@ -91,8 +96,15 @@ impl Feed for BinanceFeed {
         ))
         .await?;
 
-        // Wait for the subscription ack before handing the stream back.
+        // Wait for the subscription ack with timeout. Some networks/VPNs silently
+        // drop WS frames after the initial handshake, so we time out instead of hanging.
+        let ack_deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
         loop {
+            if std::time::Instant::now() > ack_deadline {
+                return Err(ExchangeError::SubscriptionRejected(
+                    "timeout waiting for subscription ACK (VPN may be blocking WS traffic)".into()
+                ));
+            }
             let msg = ws.next().await.ok_or(ExchangeError::ConnectionClosed)??;
             if let Message::Text(text) = &msg {
                 let v: serde_json::Value = serde_json::from_str(text)?;
@@ -101,6 +113,7 @@ impl Feed for BinanceFeed {
                     if let Some(err) = v.get("error") {
                         return Err(ExchangeError::SubscriptionRejected(err.to_string()));
                     }
+                    eprintln!("[feed] {}: subscription ACK received", self.symbol);
                     break;
                 }
             }
@@ -115,6 +128,7 @@ impl Feed for BinanceFeed {
         loop {
             tokio::select! {
                 _ = self.ping.tick() => {
+                    self.pong_at = Some(std::time::Instant::now());
                     ws.send(Message::Ping(vec![0xff; 4])).await?;
                 }
                 msg = ws.next() => {
@@ -127,7 +141,18 @@ impl Feed for BinanceFeed {
                         Some(Ok(Message::Ping(p))) => {
                             ws.send(Message::Pong(p)).await?;
                         }
-                        Some(Ok(Message::Pong(_))) => {}
+                        Some(Ok(Message::Pong(_))) => {
+                            if let Some(t) = self.pong_at.take() {
+                                let ms = t.elapsed().as_secs_f64() * 1000.0;
+                                // Discard samples contaminated by loop stalls
+                                // (pacing/catch-up): a pong read seconds after
+                                // it arrived measures our backlog, not the
+                                // network. Healthy WS RTT is < 3 s.
+                                if ms < 3000.0 {
+                                    self.last_rtt_ms = Some(ms);
+                                }
+                            }
+                        }
                         Some(Ok(Message::Close(_))) | None => {
                             return Err(ExchangeError::ConnectionClosed);
                         }
@@ -150,6 +175,10 @@ impl Feed for BinanceFeed {
         kline_closes_from_url(&url, bars).await
     }
 
+    fn ws_rtt_ms(&self) -> Option<f64> {
+        self.last_rtt_ms
+    }
+
     async fn close(&mut self) -> Result<(), ExchangeError> {
         self.ws = None;
         Ok(())
@@ -166,10 +195,24 @@ impl Feed for BinanceFeed {
 async fn kline_closes_from_url(url: &str, bars: u32) -> Result<Vec<f64>, ExchangeError> {
     let text = reqwest::get(url).await?.error_for_status()?.text().await?;
     let rows: Vec<Vec<serde_json::Value>> = serde_json::from_str(&text)?;
-    let mut closes: Vec<f64> = rows
-        .iter()
-        .filter_map(|row| row.get(4).and_then(|c| c.as_str())?.parse().ok())
-        .collect();
+    let mut closes: Vec<f64> = Vec::with_capacity(rows.len());
+    for row in &rows {
+        // Rows are [openTime, open, high, low, close, ...], oldest-first.
+        let open_ms = row.get(0).and_then(|v| v.as_i64()).unwrap_or(i64::MAX);
+        let close = match row.get(4).and_then(|c| c.as_str()) {
+            Some(s) => s.parse::<f64>().ok(),
+            None => row.get(4).and_then(|c| c.as_f64()),
+        };
+        let Some(close) = close else { continue };
+        // Skip the CURRENTLY-FORMING 5-min bar: its close changes every trade
+        // and two processes fetching a moment apart would seed DIFFERENT
+        // closes, permanently diverging the recursive RSI state. Only closed
+        // bars (open + 300s <= now) are used for seeding — same as research.
+        let now_ms = crate::now_ms();
+        if open_ms + 300_000 <= now_ms {
+            closes.push(close);
+        }
+    }
     closes.truncate(bars as usize);
     Ok(closes)
 }

@@ -91,15 +91,15 @@ def deep_merge(base: dict, override: dict) -> dict:
 def load_portfolio_config(path: str | Path) -> dict:
     """Parse `config/portfolio.json` into a plain dict (no files written).
 
-    Returns `{"mode", "exchange", "feed", "capital", "meta_gate", "restart",
+    Returns `{"mode", "exchange", "feed", "capital", "enable_regime_detection", "restart",
     "status_interval", "strategy", "assets": [{"id", "ticker", "exchange",
-    "feed", "mode", "capital", "db", "meta_gate", "strategy_merged"}, ...]}`.
+    "feed", "mode", "capital", "db", "enable_regime_detection", "strategy_merged"}, ...]}`.
 
     Each asset carries a unique `id` (defaults to its ticker) so the SAME
     ticker can appear multiple times with different configs — e.g. a gate-off
     recorder twin (id "eth-rec") and a gate-on execution twin (id "eth-exec").
-    `meta_gate` (auto|on|off) is the per-asset portfolio meta-labeller gate and
-    is inherited from the top level when omitted.
+    `enable_regime_detection` (strict true|false) is the per-asset regime
+    meta-labeller gate and is inherited from the top level when omitted.
     """
     p = Path(path)
     if not p.exists():
@@ -112,7 +112,14 @@ def load_portfolio_config(path: str | Path) -> dict:
         "feed": raw.get("feed", "bitfinex"),
         "mode": raw.get("mode", "paper"),
         "capital": float(raw.get("capital", 10_000.0)),
-        "meta_gate": str(raw.get("meta_gate", "auto")).lower(),
+        # Regime meta-labeller gate: strict true|false. Read from the
+        # `_regime_gate` block (where it is documented in portfolio.json);
+        # a top-level `enable_regime_detection` is also honoured as fallback.
+        "enable_regime_detection": bool(
+            raw.get("_regime_gate", {}).get(
+                "enable_regime_detection", raw.get("enable_regime_detection", False)
+            )
+        ),
     }
 
     assets_raw = raw.get("assets") or []
@@ -138,7 +145,9 @@ def load_portfolio_config(path: str | Path) -> dict:
             "mode": spec.get("mode", pc_defaults["mode"]),
             "capital": float(spec.get("capital", pc_defaults["capital"])),
             "db": spec.get("db"),
-            "meta_gate": str(spec.get("meta_gate", pc_defaults["meta_gate"])).lower(),
+            "enable_regime_detection": bool(
+                spec.get("enable_regime_detection", pc_defaults["enable_regime_detection"])
+            ),
             "strategy_merged": deep_merge(defaults, overrides),
         })
 
@@ -147,7 +156,7 @@ def load_portfolio_config(path: str | Path) -> dict:
         "exchange": pc_defaults["exchange"],
         "feed": pc_defaults["feed"],
         "capital": pc_defaults["capital"],
-        "meta_gate": pc_defaults["meta_gate"],
+        "enable_regime_detection": pc_defaults["enable_regime_detection"],
         "restart": bool(raw.get("restart", True)),
         "status_interval": float(raw.get("status_interval", 5.0)),
         "strategy": defaults,
@@ -171,9 +180,11 @@ class AssetHandle:
         self.config = spec.get("config") or str(DEFAULT_CONFIG_PATH)
         self.db = spec.get("db") or str(DATA_DIR / f"portfolio_{self.asset_id}.rocksdb")
         self.control_path = spec.get("control", str(BUILD_DIR / f"control_{self.asset_id}.json"))
-        # Portfolio meta-labeller gate (auto|on|off) forwarded to the child as
-        # `--meta-gate <value>`. "auto" honours the deployed labeller manifest.
-        self.meta_gate = str(spec.get("meta_gate", defaults.get("meta_gate", "auto"))).lower()
+        # Regime meta-labeller gate (strict true|false) forwarded to the child as
+        # `--meta-gate on|off`. false = executor trades unfiltered (twin A/B).
+        self.enable_regime_detection = bool(
+            spec.get("enable_regime_detection", defaults.get("enable_regime_detection", False))
+        )
         # Effective strategy parameters (defaults + this asset's overrides),
         # used by the dashboard to detect config changes on live reload.
         self.strategy_merged: Optional[dict] = spec.get("strategy_merged")
@@ -188,13 +199,16 @@ class AssetHandle:
             "--db", self.db,
             "--config", self.config,
             "--control", self.control_path,
-            "--meta-gate", self.meta_gate,
+            "--meta-gate", "on" if self.enable_regime_detection else "off",
             "--report-tag", self.asset_id,
         ]
         self.proc: Optional[subprocess.Popen] = None
         self.exit_code: Optional[int] = None
         self.restarts = 0
-        # live state parsed from stdout
+        # live state parsed from stdout. ALL fields are written by the _pump()
+        # reader thread and read concurrently by the VIM dashboard thread —
+        # every read/write goes through self._lock to prevent torn reads.
+        self._lock = threading.Lock()
         self.equity: float = self.capital
         self.n_trades = 0
         self.n_wins = 0
@@ -210,15 +224,28 @@ class AssetHandle:
         # Ring buffer of economically meaningful child lines ([exit]/[bar]/
         # alerts) for the trades view of the terminal dashboard.
         self.event_lines: deque = deque(maxlen=400)
+        # FULL child log (every stdout line, timestamped) — the trades view of
+        # the VIM dashboard shows exactly what the algo would print with no
+        # dashboard attached ([bar]/[net]/[order]/[entry]/[exit]/[seed]/...).
+        self.log_lines: deque = deque(maxlen=2000)
         # Network-health state parsed from the child's periodic `[net]` line
         # (staleness / latency / clock skew / outage episodes). See
         # execution.rs: NET_OUTAGE_STALENESS_MS / NET_PRINT_SECS for definitions.
         self.stal_ms: Optional[float] = None
         self.lat_ms: Optional[float] = None
         self.skew_ms: Optional[float] = None
+        self.rtt_ms: Optional[float] = None  # ws ping→pong RTT (monotonic, skew-free)
+        self.ord_rtt_ms: Optional[float] = None  # order send→ack RTT (monotonic)
         self.outages: int = 0
         self.max_stal_ms: Optional[float] = None
         self.outage_active: bool = False
+        self.n_voided: int = 0  # trades voided by regime gate
+        # R-multiple of every closed trade, in close order (parsed from the
+        # `r=` token of `[exit]` lines). This is the input series for the
+        # TRADE-level Sortino/Sharpe — not UI samples.
+        self.trade_rs: deque = deque(maxlen=20_000)
+        # Trades closed since the supervisor last drained (see _record_metrics).
+        self._pending_trade_rs: list[float] = []
         self.last_net_time: float = 0.0  # epoch of the last [net] line seen
         self.started_at: float = 0.0  # wall-clock epoch when the asset was spawned
         self.stop_requested: bool = False  # True once we've asked the child to stop
@@ -259,111 +286,176 @@ class AssetHandle:
             logger.debug("[%s] reader stopped: %s", self.ticker, exc)
 
     def _parse_line(self, line: str) -> None:
-        """Extract live state from the live-trade console protocol."""
-        if not line.startswith("[net] "):
-            # [net] lines arrive every few seconds — never let them drown the
-            # last economically meaningful event in the dashboard/console.
-            self.last_event = line[:160]
-        if line.startswith("[bar] "):
-            for tok in line.split():
-                if tok.startswith("close="):
-                    try:
-                        self.mid = float(tok[6:])
-                    except ValueError:
-                        pass
-                elif tok.startswith("rsi2="):
-                    try:
-                        self.rsi = float(tok[5:])
-                    except ValueError:
-                        pass
-                elif tok.startswith("p_win="):
-                    try:
-                        self.pwin = float(tok[6:])
-                    except ValueError:
-                        pass
-        elif line.startswith("[exit] "):
-            # [exit] btcusdt reason=.. @ px r=+x.xx net=+x.xx equity=X (Ns)
-            self.n_trades += 1
-            r_value: Optional[float] = None
-            for tok in line.split():
-                if tok.startswith("r="):
-                    try:
-                        r_value = float(tok[2:])
-                        self.total_r += r_value
-                    except ValueError:
-                        pass
-                elif tok.startswith("equity="):
-                    try:
-                        self.equity = float(tok[7:])
-                    except ValueError:
-                        pass
-            if r_value is not None:
-                if r_value >= 0.0:
-                    self.n_wins += 1
-                else:
-                    self.n_losses += 1
-            self.event_lines.append(f"{datetime.now():%H:%M:%S} {line.strip()}")
-        elif line.startswith("[bar] "):
-            self.event_lines.append(f"{datetime.now():%H:%M:%S} {line.strip()}")
-        elif line.startswith("[entry] "):
-            self.event_lines.append(f"{datetime.now():%H:%M:%S} {line.strip()}")
-        elif line.startswith("[paused] "):
-            self.paused = True
-            if self.status != "DOWN":
-                self.status = "paused"
-            self.event_lines.append(f"{datetime.now():%H:%M:%S} {line.strip()}")
-        elif line.startswith("[resumed] "):
-            self.paused = False
-            if self.status != "DOWN":
-                self.status = "running"
-            self.event_lines.append(f"{datetime.now():%H:%M:%S} {line.strip()}")
-        elif line.startswith("[flatten] "):
-            self.event_lines.append(f"{datetime.now():%H:%M:%S} {line.strip()}")
-        elif line.startswith("[net] "):
-            # [net] btcusdt stal=12ms lat=0.45ms sk=+2ms outages=1
-            #       max_stal=1500ms [OUTAGE]
-            # Emitted by the Rust loop every NET_PRINT_SECS; carries the same
-            # staleness / latency / clock-skew numbers latency_diag.py samples,
-            # plus the running count of distinct network-outage episodes.
-            toks: dict[str, str] = {}
-            for tok in line.split()[2:]:
-                if "=" in tok:
-                    k, v = tok.split("=", 1)
-                    toks[k] = v
+        """Extract live state from the live-trade console protocol.
 
-            def _ms(key: str) -> Optional[float]:
-                v = toks.get(key)
-                if v is None:
-                    return None
+        Writes go through self._lock so the VIM dashboard thread always sees
+        a coherent snapshot (never a torn read where e.g. mid is from bar N
+        but rsi is still from bar N-1).
+        """
+        stripped = line.strip()
+        if stripped:
+            # Every single child line is kept (timestamped) so the VIM trades
+            # view is a faithful mirror of running the child bare in a terminal.
+            # log_lines is append-only and not read concurrently in a way that
+            # requires locking (deque.append is thread-safe).
+            self.log_lines.append(f"{datetime.now():%H:%M:%S} {stripped}")
+        with self._lock:
+            if not line.startswith("[net] "):
+                # [net] lines arrive every few seconds — never let them drown the
+                # last economically meaningful event in the dashboard/console.
+                self.last_event = line[:160]
+            if line.startswith("[bar] "):
+                for tok in line.split():
+                    if tok.startswith("close="):
+                        try:
+                            self.mid = float(tok[6:])
+                        except ValueError:
+                            pass
+                    elif tok.startswith("rsi2="):
+                        try:
+                            self.rsi = float(tok[5:])
+                        except ValueError:
+                            pass
+                    elif tok.startswith("p_win="):
+                        try:
+                            self.pwin = float(tok[6:])
+                        except ValueError:
+                            pass
+                # Also record bar lines in the event log (for trades view).
+                self.event_lines.append(f"{datetime.now():%H:%M:%S} {line.strip()}")
+            elif line.startswith("[exit] "):
+                # [exit] btcusdt reason=.. @ px r=+x.xx net=+x.xx equity=X (Ns)
+                self.n_trades += 1
+                r_value: Optional[float] = None
+                for tok in line.split():
+                    if tok.startswith("r="):
+                        try:
+                            r_value = float(tok[2:])
+                            self.total_r += r_value
+                        except ValueError:
+                            pass
+                    elif tok.startswith("equity="):
+                        try:
+                            self.equity = float(tok[7:])
+                        except ValueError:
+                            pass
+                if r_value is not None:
+                    if r_value >= 0.0:
+                        self.n_wins += 1
+                    else:
+                        self.n_losses += 1
+                    # Record the per-trade R for trade-level Sortino/Sharpe and
+                    # the closed-trade MDD-R curve (drained by the supervisor).
+                    self.trade_rs.append(r_value)
+                    self._pending_trade_rs.append(r_value)
+                self.event_lines.append(f"{datetime.now():%H:%M:%S} {line.strip()}")
+            elif line.startswith("[entry] "):
+                self.event_lines.append(f"{datetime.now():%H:%M:%S} {line.strip()}")
+            elif line.startswith("[paused] "):
+                self.paused = True
+                if self.status != "DOWN":
+                    self.status = "paused"
+                self.event_lines.append(f"{datetime.now():%H:%M:%S} {line.strip()}")
+            elif line.startswith("[resumed] "):
+                self.paused = False
+                if self.status != "DOWN":
+                    self.status = "running"
+                self.event_lines.append(f"{datetime.now():%H:%M:%S} {line.strip()}")
+            elif line.startswith("[flatten] "):
+                self.event_lines.append(f"{datetime.now():%H:%M:%S} {line.strip()}")
+            elif line.startswith("[net] "):
+                # [net] btcusdt stal=12ms lat=0.45ms sk=+2ms outages=1
+                #       max_stal=1500ms [OUTAGE]
+                # Emitted by the Rust loop every NET_PRINT_SECS; carries the same
+                # staleness / latency / clock-skew numbers latency_diag.py samples,
+                # plus the running count of distinct network-outage episodes.
+                toks: dict[str, str] = {}
+                for tok in line.split()[2:]:
+                    if "=" in tok:
+                        k, v = tok.split("=", 1)
+                        toks[k] = v
+
+                def _ms(key: str) -> Optional[float]:
+                    v = toks.get(key)
+                    if v is None:
+                        return None
+                    try:
+                        return float(v.rstrip("ms"))
+                    except ValueError:
+                        return None
+
+                self.stal_ms = _ms("stal")
+                self.lat_ms = _ms("lat")
+                self.skew_ms = _ms("sk")
+                self.rtt_ms = _ms("rtt")
+                self.ord_rtt_ms = _ms("ord")
+                self.max_stal_ms = _ms("max_stal")
                 try:
-                    return float(v.rstrip("ms"))
+                    n = int(toks.get("outages", ""))
                 except ValueError:
-                    return None
+                    n = self.outages
+                try:
+                    self.n_voided = int(toks.get("voided", "0"))
+                except ValueError:
+                    pass
+                if n > self.outages:
+                    # A NEW outage episode started since the last [net] line.
+                    self._alert(
+                        f"network outage #{n} - feed staleness exceeded 1000ms"
+                    )
+                self.outages = n
+                self.outage_active = "[OUTAGE]" in line
+                self.last_net_time = time.time()
+                if self.outage_active:
+                    self.status = "outage"
+                elif self.status in ("outage", "stalled"):
+                    # First healthy [net] telemetry after an outage/stall
+                    # episode — the feed is back. [net] is the authority on
+                    # feed health, so recovery lives HERE, not on a generic
+                    # else-branch that would swallow [seed]/error lines.
+                    self.status = "running"
+            elif line.startswith("[seed] warmed"):
+                self.last_event = "features seeded"
+            elif "connect failed" in line or "stream error" in line:
+                self._alert(line.strip())
 
-            self.stal_ms = _ms("stal")
-            self.lat_ms = _ms("lat")
-            self.skew_ms = _ms("sk")
-            self.max_stal_ms = _ms("max_stal")
-            try:
-                n = int(toks.get("outages", ""))
-            except ValueError:
-                n = self.outages
-            if n > self.outages:
-                # A NEW outage episode started since the last [net] line.
-                self._alert(
-                    f"network outage #{n} - feed staleness exceeded 1000ms"
-                )
-            self.outages = n
-            self.outage_active = "[OUTAGE]" in line
-            self.last_net_time = time.time()
-            if self.outage_active:
-                self.status = "outage"
-            elif self.status in ("outage", "stalled"):
-                self.status = "running"  # episode ended / child responsive again
-        elif line.startswith("[seed] warmed"):
-            self.last_event = "features seeded"
-        elif "connect failed" in line or "stream error" in line:
-            self._alert(line.strip())
+    def snapshot(self) -> dict:
+        """Return a coherent point-in-time copy of all live fields.
+
+        The VIM dashboard thread calls this every ~50ms to render the table.
+        Without the lock, concurrent writes from _pump() could produce a torn
+        read (e.g. mid from bar N but rsi still from bar N-1).
+        """
+        with self._lock:
+            return {
+                "asset_id": self.asset_id,
+                "ticker": self.ticker,
+                "exchange": self.exchange,
+                "feed": self.feed,
+                "mode": self.mode,
+                "status": self.status,
+                "paused": self.paused,
+                "equity": self.equity,
+                "capital": self.capital,
+                "n_trades": self.n_trades,
+                "n_wins": self.n_wins,
+                "n_losses": self.n_losses,
+                "total_r": self.total_r,
+                "mid": self.mid,
+                "rsi": self.rsi,
+                "pwin": self.pwin,
+                "last_event": self.last_event,
+                "stal_ms": self.stal_ms,
+                "lat_ms": self.lat_ms,
+                "skew_ms": self.skew_ms,
+                "rtt_ms": self.rtt_ms,
+                "ord_rtt_ms": self.ord_rtt_ms,
+                "outages": self.outages,
+                "max_stal_ms": self.max_stal_ms,
+                "outage_active": self.outage_active,
+                "n_voided": self.n_voided,
+                "last_net_time": self.last_net_time,
+            }
 
     def _alert(self, msg: str) -> None:
         stamp = datetime.now().strftime("%H:%M:%S")
@@ -450,6 +542,19 @@ class PortfolioSupervisor:
         # show max drawdown in RR terms (resetting peak -> trough of the curve).
         self.r_hist: deque = deque(maxlen=20_000)
         self.eq_hist: deque = deque(maxlen=20_000)
+        # Trade-level portfolio R series (every closed trade across all assets,
+        # in close order). Input for trade-level Sortino/Sharpe. Drained from
+        # each AssetHandle._pending_trade_rs in _record_metrics.
+        self.trade_rs: deque = deque(maxlen=100_000)
+        # Last seen n_trades per asset id — a decrease means the child was
+        # restarted (counters reset to 0), so the cumulative-R curve must be
+        # SPLIT there (None marker) instead of recording a phantom drawdown.
+        self._prev_trade_counts: Dict[str, int] = {}
+        # Clock-offset sanity guard: |sk| samples above this are clock-step
+        # artifacts (unsynced wall clock), not feed behavior. Counted, not
+        # silently dropped, so the dashboard can show what was filtered.
+        self.SK_GUARD_MS = 60_000.0
+        self.sk_discarded_by_asset: Dict[str, int] = {}
         # Keyed by per-asset `id` (not ticker) so duplicate-ticker twins each get
         # their own curve.
         self.r_hist_by_asset: Dict[str, deque] = {
@@ -497,10 +602,18 @@ class PortfolioSupervisor:
 
     @staticmethod
     def _mdd_from_series(values) -> float:
-        """Max peak-to-trough drawdown of a cumulative series (positive value)."""
+        """Max peak-to-trough drawdown of a cumulative series (positive value).
+
+        A None entry is a SESSION BREAK (child restart / counter reset): the
+        curve is split there so the artificial collapse to zero is never
+        counted as a real drawdown.
+        """
         peak: Optional[float] = None
         mdd = 0.0
         for v in values:
+            if v is None:  # restart boundary — start a fresh segment
+                peak = None
+                continue
             if peak is None or v > peak:
                 peak = v
             dd = (peak - v) if peak is not None else 0.0
@@ -513,10 +626,17 @@ class PortfolioSupervisor:
         return self._mdd_from_series(self.r_hist)
 
     def mdd_pct(self) -> float:
-        """Portfolio-level max drawdown as a fraction of peak equity."""
+        """Portfolio-level max drawdown as a fraction of peak equity.
+
+        None entries are restart session-breaks — each segment is evaluated
+        independently (equity resets to capital on restart).
+        """
         peak: Optional[float] = None
         mdd = 0.0
         for v in self.eq_hist:
+            if v is None:
+                peak = None
+                continue
             if peak is None or v > peak:
                 peak = v
             if peak is not None and peak > 0.0:
@@ -530,8 +650,37 @@ class PortfolioSupervisor:
         return self._mdd_from_series(self.r_hist_by_asset.get(asset_id, deque()))
 
     def _record_metrics(self) -> None:
-        """Sample cumulative R / equity so MDD can be computed across the session."""
+        """Sample cumulative R / equity so MDD can be computed across the session.
+
+        Also (a) drains each child's pending closed-trade R values into the
+        portfolio trade-level series and appends a cumulative-R point AT EVERY
+        TRADE CLOSE (so a real trough between 5s ticks is never missed), and
+        (b) detects child restarts (n_trades went backwards) and inserts a
+        session-break marker into the MDD curves.
+        """
         tt = self.totals()
+        # Restart detection BEFORE sampling: a drop in a child's trade counter
+        # means its counters were reset — split the curve, don't record the
+        # artificial +X R -> 0 collapse as drawdown.
+        for a in self.assets:
+            prev = self._prev_trade_counts.get(a.asset_id)
+            if prev is not None and a.n_trades < prev:
+                self.r_hist.append(None)
+                self.eq_hist.append(None)
+                self.r_hist_by_asset.setdefault(
+                    a.asset_id, deque(maxlen=20_000)).append(None)
+            self._prev_trade_counts[a.asset_id] = a.n_trades
+        # Drain closed-trade R values (under the child's parse lock).
+        for a in self.assets:
+            with a._lock:
+                pending = a._pending_trade_rs
+                a._pending_trade_rs = []
+            if pending:
+                self.trade_rs.extend(pending)
+                # Trade-close resolution for the R curve (fine-grained MDD).
+                self.r_hist.append(tt["r"])
+                self.r_hist_by_asset.setdefault(
+                    a.asset_id, deque(maxlen=20_000)).append(a.total_r)
         self.r_hist.append(tt["r"])
         self.eq_hist.append(tt["equity"])
         for a in self.assets:
@@ -548,7 +697,13 @@ class PortfolioSupervisor:
             if a.stal_ms is not None:
                 h["stal"].append(a.stal_ms)
             if a.skew_ms is not None:
-                h["sk"].append(a.skew_ms)
+                # Clock-offset sanity guard: |offset| beyond the guard is a
+                # wall-clock step (unsynced machine), not feed behavior.
+                if abs(a.skew_ms) <= self.SK_GUARD_MS:
+                    h["sk"].append(a.skew_ms)
+                else:
+                    self.sk_discarded_by_asset[a.asset_id] = (
+                        self.sk_discarded_by_asset.get(a.asset_id, 0) + 1)
 
     @staticmethod
     def _stats_from(values) -> dict:
@@ -728,6 +883,7 @@ class PortfolioSupervisor:
             "equity": eq,
             "net": eq - cap,
             "trades": sum(a.n_trades for a in self.assets),
+            "voided": sum(a.n_voided for a in self.assets),
             "r": sum(a.total_r for a in self.assets),
             "up": sum(1 for a in self.assets if a.status == "running"),
             "outages": sum(a.outages for a in self.assets),
@@ -745,11 +901,15 @@ class PortfolioSupervisor:
         stals = [a.stal_ms for a in self.assets if a.stal_ms is not None]
         lats = [a.lat_ms for a in self.assets if a.lat_ms is not None]
         skews = [a.skew_ms for a in self.assets if a.skew_ms is not None]
+        rtts = [a.rtt_ms for a in self.assets if a.rtt_ms is not None]
+        ords = [a.ord_rtt_ms for a in self.assets if a.ord_rtt_ms is not None]
         maxs = [a.max_stal_ms for a in self.assets if a.max_stal_ms is not None]
         return {
             "stal_ms": max(stals) if stals else None,
             "lat_ms": max(lats) if lats else None,
             "skew_ms": max(skews, key=abs) if skews else None,
+            "rtt_ms": max(rtts) if rtts else None,
+            "ord_ms": max(ords) if ords else None,
             "outages": sum(a.outages for a in self.assets),
             "max_stal_ms": max(maxs) if maxs else None,
             "outage_active": any(a.outage_active for a in self.assets),
@@ -762,15 +922,16 @@ class PortfolioSupervisor:
         print(f"\n=== PORTFOLIO @ {stamp} ===")
         print(
             f"  {'asset':<10}{'status':<10}{'eq($)':>11}{'net($)':>10}"
-            f"{'tr':>4}{'totR':>8}{'mid':>11}{'rsi':>6}{'pWin':>6}  last event"
+            f"{'tr':>4}{'void':>5}{'totR':>8}{'mid':>11}{'rsi':>6}{'pWin':>6}  last event"
         )
         for a in self.assets:
             mid = f"{a.mid:.2f}" if a.mid else "-"
             rsi = f"{a.rsi:.1f}" if a.rsi is not None else "-"
             pw = f"{a.pwin:.2f}" if a.pwin is not None else "-"
+            voided = f"{a.n_voided}" if a.n_voided > 0 else "-"
             print(
-                f"  {a.ticker:<10}{a.status:<10}{a.equity:>11.2f}"
-                f"{a.equity - a.capital:>10.2f}{a.n_trades:>4}{a.total_r:>8.2f}"
+                f"  {a.asset_id:<10}{a.status:<10}{a.equity:>11.2f}"
+                f"{a.equity - a.capital:>10.2f}{a.n_trades:>4}{voided:>5}{a.total_r:>8.2f}"
                 f"{mid:>11}{rsi:>6}{pw:>6}  {a.last_event}"
             )
         tt = self.totals()
@@ -782,13 +943,19 @@ class PortfolioSupervisor:
         # ONE network line — the singular general communication-speed
         # measurement (worst across the asset children), not per-asset.
         n = self.network()
-        stal = f"{n['stal_ms']:.0f}ms" if n["stal_ms"] is not None else "-"
+        # stal_ms = -1.0 means NO data has ever been received (feed down)
+        feed_down = n["stal_ms"] is not None and n["stal_ms"] < 0
+        stal = "FEED DOWN" if feed_down else f"{n['stal_ms']:.0f}ms" if n["stal_ms"] is not None else "-"
         lat = f"{n['lat_ms']:.2f}ms" if n["lat_ms"] is not None else "-"
+        rtt = f"{n['rtt_ms']:.1f}ms" if n["rtt_ms"] is not None else "-"
+        ord_s = f"{n['ord_ms']:.1f}ms" if n["ord_ms"] is not None else "-"
         sk = f"{n['skew_ms']:+.0f}ms" if n["skew_ms"] is not None else "-"
         mx = f"{n['max_stal_ms']:.0f}ms" if n["max_stal_ms"] is not None else "-"
+        total_voided = sum(a.n_voided for a in self.assets)
+        void_str = f" voided={total_voided}" if total_voided > 0 else ""
         print(
-            f"  network: stal={stal} lat={lat} sk={sk} "
-            f"outages={n['outages']} max_stal={mx}"
+            f"  network: stal={stal} lat={lat} rtt={rtt} ord={ord_s} sk={sk} "
+            f"outages={n['outages']} max_stal={mx}{void_str}"
             f"{' [OUTAGE]' if n['outage_active'] else ''}  (worst across assets)"
         )
 
@@ -809,7 +976,7 @@ class PortfolioSupervisor:
                 {
                     "id": a.asset_id,
                     "ticker": a.ticker,
-                    "meta_gate": a.meta_gate,
+                    "enable_regime_detection": a.enable_regime_detection,
                     "feed": a.feed,
                     "exchange": a.exchange,
                     "mode": a.mode,
@@ -819,6 +986,7 @@ class PortfolioSupervisor:
                     "equity": a.equity,
                     "net": a.equity - a.capital,
                     "trades": a.n_trades,
+                    "voided": a.n_voided,
                     "total_r": a.total_r,
                     "mid": a.mid,
                     "rsi": a.rsi,
@@ -920,12 +1088,14 @@ def run_portfolio(
     assets = [
         AssetHandle(
             {
+                "id": a["id"],
                 "ticker": a["ticker"],
                 "exchange": a["exchange"],
                 "feed": a["feed"],
                 "mode": a["mode"],
                 "capital": a["capital"],
                 "db": a["db"],
+                "enable_regime_detection": a["enable_regime_detection"],
                 "config": unified_cfg,
                 "strategy_merged": a["strategy_merged"],
             },

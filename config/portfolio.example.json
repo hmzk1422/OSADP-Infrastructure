@@ -90,9 +90,16 @@
     "max_trades_per_hour": 300
   },
 
+  "_regime_gate": {
+    "_comment": "Regime detection (meta-labeller) gate — the model that sits between the executor and execution. The switch is `enable_regime_detection` (TOP-LEVEL or per-asset, strict true|false): true = every entry the executor would take must ALSO pass the regime decision tree build/regime_gate.json (rejected candidates are shadow-logged to build/gate_log_<id>.jsonl); false = the executor runs pure, gate OPEN. To A/B the gate on the SAME ticker: duplicate the asset entry, give it a unique 'id' (e.g. 'eth-raw'), set per-asset 'enable_regime_detection' to the opposite value, and compare net($)/totR between the two dashboard rows — each twin keeps its own RocksDB store (data/portfolio_<id>.rocksdb), gate log and HTML report. Export a gate with: python tools/export_regime_gate.py"
+  },
+
+  "enable_regime_detection": false,
+
   "assets": [
-    { "ticker": "btcusdt", "feed": "bybit",   "capital": 5000 },
-    { "ticker": "ethusdt", "feed": "binance", "capital": 3000 },
-    { "ticker": "solusdt", "feed": "bybit",   "capital": 2000 }
+    { "id": "btcusdt", "ticker": "btcusdt", "feed": "bybit",   "capital": 1000, "enable_regime_detection": true },
+    { "id": "ethusdt", "ticker": "ethusdt", "feed": "binance", "capital": 1000, "enable_regime_detection": true },
+    { "id": "eth-raw", "ticker": "ethusdt", "feed": "binance", "capital": 1000, "enable_regime_detection": false },
+    { "id": "btc-raw", "ticker": "btcusdt", "feed": "bybit",   "capital": 1000, "enable_regime_detection": false }
   ]
 }

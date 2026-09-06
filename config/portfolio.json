@@ -7,10 +7,8 @@
   "restart": true,
   "status_interval": 5.0,
   "strategy_path": "build/strategy_config.json",
-
   "_strategy_defaults": {
     "_comment": "Strategy parameters — single source of truth. The snake_case keys matching engine::StrategyConfig names are read DIRECTLY by the Rust engine (per-ticker: _strategy_defaults + this asset's strategy overrides). Research-only parameters (feature windows, columns, model path) are kept here so there is a single source of truth for the whole stack.",
-
     "micro_barrier_secs": 1,
     "timeframe_barrier_secs": 300,
     "lookahead_seconds": 6000,
@@ -36,11 +34,9 @@
     "score_barrier_as_rr": false,
     "require_fold_coverage": false,
     "one_candidate_per_bar": false,
-
     "rsi_filter_column": "rsi_2",
     "stop_loss_bps": 5,
     "take_profit_bps": 5,
-
     "rsi_14_window": 14,
     "rsi_2_window": 2,
     "sma_14_window": 14,
@@ -55,11 +51,9 @@
     "price_roc_window_5": 5,
     "rsi_roc_window_3": 3,
     "rsi_roc_window_5": 5,
-
     "label_loss": 0,
     "label_win": 1,
-    "eps": 1e-9,
-
+    "eps": 1e-09,
     "feature_columns": [
       "spread_bps_z",
       "ma_slope_5",
@@ -69,11 +63,16 @@
       "rsi_2",
       "sma_14"
     ],
-
     "use_orderflow_features_python": true,
     "orderflow_feature_columns": [
-      "ofi_z", "cvd_delta_z", "cvd_slope_z", "absorption_z",
-      "tick_autocorr", "inst_ratio", "delta_divergence_z", "depth_imbalance_z"
+      "ofi_z",
+      "cvd_delta_z",
+      "cvd_slope_z",
+      "absorption_z",
+      "tick_autocorr",
+      "inst_ratio",
+      "delta_divergence_z",
+      "depth_imbalance_z"
     ],
     "orderflow_z_window": 10,
     "retail_threshold": 0.05,
@@ -81,7 +80,6 @@
     "vpin_window_buckets": 10,
     "vpin_min_periods": 5,
     "vpin_session_lookback_seconds": 86400,
-
     "replay_feed": "",
     "train_on_startup": true,
     "n_historical_bars": 5000,
@@ -89,10 +87,14 @@
     "dry_run": true,
     "max_trades_per_hour": 300
   },
-
   "assets": [
-    { "ticker": "btcusdt", "feed": "bybit",   "capital": 10000 },
-    { "ticker": "ethusdt", "feed": "binance", "capital": 10000 },
-    { "ticker": "solusdt", "feed": "bybit",   "capital": 10000 }
-  ]
+    { "id": "btcusdt", "ticker": "btcusdt", "feed": "bybit",   "capital": 1000, "enable_regime_detection": true },
+    { "id": "ethusdt", "ticker": "ethusdt", "feed": "binance", "capital": 1000, "enable_regime_detection": true },
+    { "id": "eth-raw", "ticker": "ethusdt", "feed": "binance", "capital": 1000, "enable_regime_detection": false },
+    { "id": "btc-raw", "ticker": "btcusdt", "feed": "bybit",   "capital": 1000, "enable_regime_detection": false }
+  ],
+  "_regime_gate": {
+    "_comment": "Regime detection (meta-labeller) gate - the model that sits between the executor and execution. The switch is enable_regime_detection (TOP-LEVEL or per-asset, strict true|false): true = every entry the executor would take must ALSO pass the regime decision tree build/regime_gate.json (rejected candidates are shadow-logged to build/gate_log_<id>.jsonl); false = the executor runs pure, gate OPEN. To A/B the gate on the SAME ticker: duplicate the asset entry, give it a unique id (e.g. eth-raw), set per-asset enable_regime_detection to the opposite value, and compare net($)/totR between the two dashboard rows - each twin keeps its own RocksDB store (data/portfolio_<id>.rocksdb), gate log and HTML report. Export a gate with: python tools/export_regime_gate.py"
+  },
+  "enable_regime_detection": false
 }

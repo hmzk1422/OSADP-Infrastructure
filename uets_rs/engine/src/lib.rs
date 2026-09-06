@@ -58,6 +58,10 @@ pub const TIMEFRAME_BARRIER_SECS: i64 = 300; // 5-minute composite bars
 /// feature vector (micro `price_roc_3` + forward-filled macro) is evaluated on
 /// every micro bar close — the research model runs on EVERY 1-second row.
 pub const MICRO_BARRIER_SECS: i64 = 1;
+/// Max backlogged seconds replayed at wall-clock 1 bar/s on live feeds. A
+/// backlog deeper than this is fast-forwarded instantly instead (the market
+/// has moved on — never act on stale prices at 1 bar/s).
+pub const PACING_MAX_BARS: i64 = 5;
 pub const LOOKAHEAD_SECONDS: i64 = 6000; // barrier horizon / timeout
 pub const BARRIER_MULTIPLIER: f64 = 0.3;
 /// If true, the engine computes the 8 orderflow features (OFI z-score, CVD delta/slope,
@@ -506,6 +510,11 @@ pub struct MomentumStrategy {
     /// gate never fires even when a labeller is installed.
     meta_threshold: f64,
     regime_gate: Option<RegimeGate>,
+    /// Live-feed catch-up pacing (live-trade only, never replay): when the
+    /// feed stalls and then bursts, replay the bar backlog at wall-clock
+    /// 1 bar/second instead of instantly, so entries/prints keep the same
+    /// 1-second real-time cadence the strategy is designed around.
+    realtime_pacing: bool,
     closed_stats: VecDeque<RegimeTradeStat>,
     n_voided: u64,
     shadows: Vec<ShadowPosition>,
@@ -631,6 +640,7 @@ impl MomentumStrategy {
             labeller: None,
             meta_threshold: 0.0,
             regime_gate: None,
+            realtime_pacing: false,
             closed_stats: VecDeque::new(),
             n_voided: 0,
             shadows: Vec::new(),
@@ -898,6 +908,20 @@ impl MomentumStrategy {
                 Vec::new()
             }
             Some(cur) if macro_idx != cur => {
+                // Feed stall across composite boundaries: the tape skipped one
+                // or more 300 s bars. Backfill EVERY skipped bar with the last
+                // known close so the macro close series stays DENSE (one close
+                // per composite bar) — exactly the research/backtest series,
+                // where every 5-min bar contributes exactly one row. Without
+                // this a stall silently drops bars and the recursive,
+                // infinite-memory Wilder RSI(2)/SMA(14)/MA(5) state diverges
+                // between twin processes (gate-on vs gate-off) and drifts from
+                // the research series.
+                let mut fill = cur + 1;
+                while fill < macro_idx && self.macro_closes.len() < MAX_MACRO_CLOSES {
+                    self.macro_closes.push_back(self.macro_close);
+                    fill += 1;
+                }
                 self.compute_macro_features();
                 // Research trade universe: ONE entry candidate per composite
                 // bar -- its LAST volume>0 1-second row (the `volume > 0`
@@ -940,8 +964,21 @@ impl MomentumStrategy {
                 // The research state space is dense at one-second resolution.
                 // Close every missing interval at the last trade price so a
                 // sparse feed cannot change model cadence or timeout timing.
+                let backlog = micro_idx - cur;
+                // Real-time pacing policy (live feeds only):
+                //   * small backlog (<= PACING_MAX_BARS): replay at wall-clock
+                //     1 bar/s so entries/prints keep their 1-second cadence;
+                //   * large backlog: FAST-FORWARD instantly. The market has
+                //     moved on — replaying a 13 s backlog at 1 bar/s would
+                //     leave the strategy permanently behind real time and
+                //     acting on stale prices. Catch up NOW, trade current
+                //     data.
+                let pace = self.realtime_pacing && backlog <= PACING_MAX_BARS;
                 let mut idx = cur;
                 while idx < micro_idx {
+                    if pace && micro_idx - idx > 1 {
+                        std::thread::sleep(std::time::Duration::from_secs(1));
+                    }
                     let bar_close = self.micro_close;
                     let bar_ms = idx * micro_ms;
                     let feat = self.finish_micro(bar_close, bar_ms);
@@ -1198,6 +1235,12 @@ impl MomentumStrategy {
             if let Some(leaf) = gate.classify(&x) {
                 if !gate.is_tradeable(leaf) {
                     self.last_entry_block = "regime_filter";
+                    // Rejected candidate: record shadow, exactly like the research
+                    // walk-forward (one data point PER BAR while the gate keeps
+                    // rejecting). So n_voided grows ~1/s during a sustained regime
+                    // rejection — that is per-bar rejection telemetry, NOT trade
+                    // rate. No order is ever sent for a voided candidate.
+                    // (n_voided is incremented inside spawn_shadow.)
                     self.spawn_shadow(&feat, fill_price, bp, side);
                     return;
                 }
@@ -1382,7 +1425,10 @@ impl MomentumStrategy {
             let notional = (risk_usd / bp).min(self.equity * self.cfg.max_leverage);
             notional / entry_price
         } else {
-            self.cfg.max_position_usd / entry_price
+            // Legacy fixed-notional path — identical to enter_position's else
+            // branch (incl. the min_order_size floor) so the voided record is
+            // EXACTLY the trade the executor would have taken.
+            (self.cfg.max_position_usd / entry_price).max(self.cfg.min_order_size)
         };
         if qty <= 0.0 { return; }
         let notional = qty * entry_price;
@@ -1594,6 +1640,13 @@ impl MomentumStrategy {
     /// seed orderflow feeds.
     pub fn set_regime_gate(&mut self, gate: Option<RegimeGate>) {
         self.regime_gate = gate;
+    }
+
+    /// Enable wall-clock pacing of feed catch-up (see the `realtime_pacing`
+    /// field). Live-trade turns this ON for network feeds and OFF for the
+    /// Parquet replay so historical replays stay fast and deterministic.
+    pub fn set_realtime_pacing(&mut self, on: bool) {
+        self.realtime_pacing = on;
     }
 
 /// Build the regime-gate feature vector (28 cols) in the EXACT exported tree order.

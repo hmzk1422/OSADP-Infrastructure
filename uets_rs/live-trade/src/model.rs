@@ -131,15 +131,30 @@ pub fn load_regime_gate(symbol: &str) -> Option<engine::RegimeGate> {
         .iter()
         .map(|x| x.as_bool().unwrap_or(false))
         .collect();
-        if features.len() != 28 {
-                eprintln!(
-            "[regime] {symbol}: expected 28 features in export, found {} — gate OPEN",
-            features.len()
+    if features.is_empty() {
+        eprintln!(
+            "[regime] {symbol}: no features in export — gate OPEN",
         );
         return None;
     }
-    if nodes.is_empty() || favorable.is_empty() || !nodes_are_consistent(&nodes, favorable.len()) {
-        eprintln!("[regime] {symbol}: empty or inconsistent nodes in {} — gate OPEN", path.display());
+    if nodes.is_empty() || favorable.is_empty() {
+        eprintln!("[regime] {symbol}: empty nodes/favorable in {} — gate OPEN", path.display());
+        return None;
+    }
+    // favorable[] is indexed by node index (same as nodes[]).
+    // Leaf nodes (left < 0 || right < 0) have meaningful favorable values;
+    // non-leaf entries are ignored by is_tradeable (only called with leaf indices).
+    if favorable.len() != nodes.len() {
+        eprintln!(
+            "[regime] {symbol}: favorable length {} != node count {} in {} — gate OPEN",
+            favorable.len(),
+            nodes.len(),
+            path.display()
+        );
+        return None;
+    }
+    if !nodes_are_consistent(&nodes) {
+        eprintln!("[regime] {symbol}: inconsistent nodes in {} — gate OPEN", path.display());
         return None;
     }
     println!(
@@ -154,20 +169,20 @@ pub fn load_regime_gate(symbol: &str) -> Option<engine::RegimeGate> {
         favorable,
     })
 }
-fn nodes_are_consistent(nodes: &[engine::GateNode], n_leaves: usize) -> bool {
+fn nodes_are_consistent(nodes: &[engine::GateNode]) -> bool {
+    // Verify tree structure:
+    // - Branch nodes must have valid children (left/right >= 0 and < nodes.len())
+    // - Leaf nodes have left < 0 or right < 0
+    // - Right child must have index > parent (prevents cycles)
     for (i, node) in nodes.iter().enumerate() {
-        // Leaf node: left or right is negative
-        if node.left < 0 || node.right < 0 {
-            if i >= n_leaves {
-                return false;
-            }
-        } else {
-            // Branching node: children must be valid and ordered (left <= parent index, right > parent)
+        if node.left >= 0 && node.right >= 0 {
+            // Branch node: children must be valid indices
             let max_child = node.left.max(node.right);
             if max_child as usize >= nodes.len() {
                 return false;
             }
-            if node.left as usize > i {
+            // Right child must be after parent in array (tree ordering)
+            if node.right as usize <= i {
                 return false;
             }
         }
