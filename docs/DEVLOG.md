@@ -1,7 +1,7 @@
 # Developer Log
 Documenting architectural planning and engineering hurdles.
 
-# Unified Backtest/Live Architecture System
+# Unified Backtest/Live Architecture System 
 Reference: feature/unified-trading-system
 ```
 RESEARCH                    EXECUTION
@@ -283,3 +283,8 @@ tests match.
   (`build/live_test_feed_<sym>.replay`, `T`/`B` event lines). Implemented via
   `load_state_space_from_replay()` in `ml_state_builder.py`; feeds without orderbook lines
   get a degenerate bid==ask==price book so feature construction still runs.
+
+  # Massive challenge with Production Grade Errors (06/09/2026)
+  Though the algorithm is majoritively completed, it requires strict testing before classifying it as a live-production grade algorithm 
+  - **Large system time synchronization:** Largest problem where I realized as the system got larger, trading algorithms required a synchronized global time for it to operate on. Not just between GUI to the CLI, but also trades dashboard (Some assets might still be lagging behind because of ws staleness), research metrics (very important for html side and live-trading. Very important for future implementations where we need to observe edge decay and manage multiple strategies). Device clock is unreliable where it could suffer from time synchronization and UTC-timezone problems. Rather than relying on exchange API time synchronization (which would be problematic for high-speed trading, waste api calls and introduce discrepancies for multi-exchahnge management (arbitrage for ex)), a global synchronized clock is used instead creating one unified time system.
+  - **Network failure, error handling and package stealing:** It is figured out why in the previous trial live-running, ETH executed over hundreds of trades at the same time. When there is a huge and long network outage inside of trigger regime, the algorithm fails to recognize the network failure. Weak precautions of system break under network failure is unreliable as the system itself is blind to network failure so UETS continues executing trades. Once the network returns, all the trades are executed simultaneously which would've been a catastrophic loss to capital. Luckily it was executed in paper. There are still some unresolved problems. For example, while running multi-terminal portfolio-wise is a good method of limiting system failures (if ETH fails, BTC could still run), it does introduce a problem of network bandwidth stealing where one venue could fail while other venues are still running smoothly.

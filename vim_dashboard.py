@@ -417,6 +417,16 @@ class VimDashboard:
 
     def _draw_dashboard(self, stdscr, top: int, bot: int, w: int) -> None:
         s = self._summary()
+        # Snapshots are hoisted here (not only in the table loop below) so the
+        # portfolio totals can aggregate the Phase-1 [tick] telemetry: how many
+        # assets are currently ARMED (static threshold observation — see the
+        # supervisor `armed` field), how many hold an OPEN position, and the
+        # summed mark-to-market PnL of every open position (unrealized, fees
+        # excluded — realized PnL remains the equity PnL row above).
+        snapshots = [a.snapshot() for a in self.sup.assets]
+        armed_n = sum(1 for sp in snapshots if sp["armed"])
+        open_n = sum(1 for sp in snapshots if sp["open_side"])
+        open_usd = sum((sp["usd_mark"] or 0.0) for sp in snapshots if sp["usd_mark"])
 
         def row(line: int, label: str, value: str, pair: int = 0, bold: bool = False):
             attr = (curses.color_pair(pair) | (curses.A_BOLD if bold else 0))
@@ -434,7 +444,8 @@ class VimDashboard:
         sharpe_s = f"{s['sharpe']:.3f}" if s["sharpe"] is not None else "N/A"
         row(top + 5, "Sortino(trd)", f"{sortino_s}   (sharpe(trd) {sharpe_s})")
         row(top + 6, "Assets up   ",
-            f"{s['up']}/{s['n_assets']}   feed outages: {s['outages']}",
+            f"{s['up']}/{s['n_assets']}  armed {armed_n}/{s['n_assets']}"
+            f"  open {open_n}  mk {open_usd:+.2f}$  outages {s['outages']}",
             4 if s["up"] < s["n_assets"] else 0)
         # Portfolio-wide network metrics (worst across assets) with session
         # avg/max/min, plus max drawdown in RR terms.
@@ -472,7 +483,7 @@ class VimDashboard:
         hdr_y = top + 11
         stdscr.addnstr(hdr_y, 0,
                        "  ASSET     STATUS    EQ($)      NET($)  TR  VOID TOT_R   "
-                       "MID        RSI   PWIN  LAST EVENT", w - 1,
+                       "MID        RSI   PWIN ARM GATE   LAST EVENT", w - 1,
                        curses.A_BOLD | curses.A_UNDERLINE)
         snapshots = [a.snapshot() for a in self.sup.assets]
         self.cursor = max(0, min(self.cursor, len(snapshots) - 1))
@@ -499,10 +510,12 @@ class VimDashboard:
                 net_s = f"net{net_age}s"
             else:
                 net_s = "net?"
-            txt = (f"{('>' if sel else ' ')} {asset_id:<9}{status:<9}"
+            arm = "ARM" if snap["armed"] else "--"
+            gate9 = (snap["gate"] or "-")[:9].ljust(9)
+            txt = (f"{('>' if sel else ' ')} {asset_id:<9}{status:<8}"
                    f"{snap['equity']:>10.2f}{net:>+10.2f}{snap['n_trades']:>4}{voided:>5}"
-                   f"{snap['total_r']:>+8.2f}  {mid:>10} {rsi:>5} {pw:>5}  "
-                   f"{last_event[:34]} {net_s}")
+                   f"{snap['total_r']:>+8.2f}  {mid:>10} {rsi:>5} {pw:>5} {arm:>3} {gate9}  "
+                   f"{last_event[:26]} {net_s}")
             if not sel:
                 if status == "DOWN":
                     attr = curses.color_pair(3)  # red alert
@@ -543,11 +556,16 @@ class VimDashboard:
                        f"   STAL {_fmt3(stal['avg'], stal['max'], stal['min'], '.0f')}ms"
                        + ("  [OUTAGE now]" if snap["outage_active"] else ""),
                        w - 1, curses.color_pair(1))
+# Phase-1 [tick] micro-strip for the selected asset: mid / gate /
+        # armed observation / open-position mark PnL, refreshed ~1s.
+        stdscr.addnstr(top + 2, 0,
+                       ("LIVE " + self._live_strip(snap)).ljust(w - 1),
+                       w - 1, curses.color_pair(1))
         # View 2 is a FAITHFUL MIRROR of the child's stdout: every line the
         # algo would print running bare in a terminal ([bar]/[net]/[order]/
         # [entry]/[exit]/[seed]/[regime]/...), timestamped, newest last.
         lines = snap["log_lines"]
-        win_h = bot - top - 4
+        win_h = bot - top - 5
         shown = lines[-max(1, win_h):]
         for i, ln in enumerate(shown):
             attr = 0
@@ -557,10 +575,52 @@ class VimDashboard:
                 attr = curses.color_pair(6)
             elif "[net]" in ln:
                 attr = curses.color_pair(4) if "[OUTAGE]" in ln else curses.A_DIM
-            stdscr.addnstr(top + 3 + i, 0, ln[:w - 1], w - 1, attr)
+            stdscr.addnstr(top + 4 + i, 0, ln[:w - 1], w - 1, attr)
         if not shown:
-            stdscr.addnstr(top + 3, 0, " (no output yet)", w - 1, curses.A_DIM)
+            stdscr.addnstr(top + 4, 0, " (no output yet)", w - 1, curses.A_DIM)
 
+
+    def _live_strip(self, snap: dict) -> str:
+        """One-line micro-market status for a snapshot (Phase-1 [tick] channel).
+
+        When flat: mid / RSI / P(WIN) / armed observation / gate / feed
+        staleness — all refreshed ~1s from the child's `[tick]` line. When
+        holding: side, qty, notional, entry, stop, target, barrier plus the
+        live mark-to-market R and USD at the current mid.
+        """
+        if snap is None:
+            return ""
+        aid = snap["asset_id"]
+        if snap["open_side"]:
+            vs = "LONG" if snap["open_side"] == "long" else "SHORT"
+            qty = snap["qty"]
+            ep = snap["entry_price"] or 0.0
+            stop = snap["stop"] or 0.0
+            tgt = snap["target"] or 0.0
+            rr, usd = snap["rr_mark"], snap["usd_mark"]
+            notional = snap["notional"]
+            bp = snap["barrier_pct"]
+            pct = ((snap["mid"] or ep) - ep) / ep * 100.0 if ep else 0.0
+            rr_s = f"{rr:+.3f}R" if rr is not None else "?R"
+            usd_s = f"{usd:+.4f}US" if usd is not None else "?US"
+            qty_s = f"{qty:.4g}" if qty is not None and qty > 0 else "-"
+            notional_s = f"${notional:.2f}" if notional is not None else "$?"
+            bp_s = f"{bp*100:.3f}%" if bp is not None else "?%"
+            # 1R value = barrier_pct * notional (what you win/lose per R)
+            one_r = bp * notional if bp and notional else 0.0
+            one_r_s = f"1R=${one_r:.2f}" if one_r > 0 else ""
+            return (f" {aid:<9} {vs} qty={qty_s} notional={notional_s} @ {ep:.2f}"
+                f"  stop={stop:.2f} target={tgt:.2f} bp={bp_s}"
+                f"  | mark {rr_s} {usd_s} ({pct:+.3f}%) {one_r_s}")
+        mid_s = f"{snap['mid']:.2f}" if snap["mid"] else "-"
+        rsi_s = f"{snap['rsi']:.1f}" if snap["rsi"] is not None else "-"
+        pw_s = f"{snap['pwin']:.2f}" if snap["pwin"] is not None else "-"
+        arm_s = "ARMED" if snap["armed"] else "--"
+        gate_s = snap["gate"] or "-"
+        stal_s = (f"{snap['tick_stal_ms']:.0f}ms"
+            if snap.get("tick_stal_ms") is not None else "-")
+        return (f" {aid:<9} FLAT  mid={mid_s} rsi2={rsi_s} p_win={pw_s}"
+                f" {arm_s} gate={gate_s} stal={stal_s}")
 
     def _draw_config(self, stdscr, top: int, bot: int, w: int) -> None:
         try:

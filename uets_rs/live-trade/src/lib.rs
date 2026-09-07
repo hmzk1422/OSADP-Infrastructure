@@ -15,6 +15,7 @@ pub mod config;
 pub mod db;
 pub mod exchange;
 pub mod execution;
+pub mod live_price;
 pub mod model;
 pub mod report;
 
