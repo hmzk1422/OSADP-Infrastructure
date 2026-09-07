@@ -27,6 +27,12 @@ const NET_OUTAGE_STALENESS_MS: f64 = 1000.0;
 /// Cadence of the periodic `[net]` console line (parsed by the portfolio
 /// supervisor into the dashboard; also handy in a bare terminal).
 const NET_PRINT_SECS: u64 = 5;
+/// Cadence of the per-second `[tick]` live-market telemetry line (see the
+/// print block in the main loop). This is the MICRO channel: the supervisor /
+/// VIM dashboard refreshes price, gate state and the open position's
+/// mark-to-market PnL from it once per second, independent of the ~5-minute
+/// `[bar]` macro cadence.
+const TICK_PRINT_SECS: u64 = 1;
 
 /// Rolling minimum of `raw_skew` over a trailing window. Since `raw_skew =
 /// now - exchange_ts` mixes clock offset and network/exchange transit delay
@@ -75,6 +81,32 @@ pub enum ExecutionMode {
     Paper,
     /// Engine events are routed to the exchange as real orders.
     Live,
+}
+
+/// WebSocket connection state machine.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum WsState {
+    #[default]
+    Disconnected,
+    Connected,
+    Reconnecting,
+}
+
+impl WsState {
+    /// String representation for terminal display.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            WsState::Connected => "CONNECTED",
+            WsState::Disconnected => "DISCONNECTED",
+            WsState::Reconnecting => "RECONNECTING",
+        }
+    }
+}
+
+impl std::fmt::Display for WsState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
 }
 
 /// Meta-labeller gate switch for one run: `Auto` follows the manifest's
@@ -241,6 +273,56 @@ pub struct RunStats {
     /// Surfaced in the periodic `[net]` console line so the dashboard can
     /// display how many potential trades the regime filter is blocking.
     pub n_voided: u64,
+
+    // ── Phase A: Timing breakdown (ms, monotonic) ─────────────────────────
+    /// Time blocked awaiting next_events().await (high = quiet feed OR slow network).
+    pub feed_wait_ms: f64,
+    /// Time processing the returned batch (feature + model + execution).
+    pub feed_process_ms: f64,
+    /// Time computing features (finish_micro).
+    pub feature_calc_ms: f64,
+    /// Time in LightGBM model.predict_proba().
+    pub model_infer_ms: f64,
+    /// Time in meta-labeller.predict_proba().
+    pub labeller_infer_ms: f64,
+    /// Time in try_enter / handle_engine_events.
+    pub execution_ms: f64,
+    /// Time in record_trade / record_orderbook_top (RocksDB writes).
+    pub db_write_ms: f64,
+    /// Time in generate_html_report.
+    pub report_ms: f64,
+
+    // ── Phase A: Catch-up specific (THE central hypothesis) ────────────────
+    /// Bars finalized in last catch-up.
+    pub catchup_bars: u64,
+    /// Worst catch-up this session.
+    pub max_catchup_bars: u64,
+    /// Time spent in catch-up loop (ms).
+    pub catchup_time_ms: f64,
+    /// Total catch-up events this session.
+    pub n_catchups: u64,
+
+    // ── Phase A: Strategy lag (see header comment for usage notes) ──────
+    /// Newest exchange timestamp the feed has delivered.
+    pub feed_newest_market_ts: Option<i64>,
+    /// Newest exchange timestamp fully processed.
+    pub processed_newest_market_ts: Option<i64>,
+    /// feed_newest_market_ts - processed_newest_market_ts.
+    /// NOTE: In single-threaded architecture this is usually ~0.
+    /// Use last_event_latency_ms for per-batch processing time instead.
+    pub strategy_lag_ms: f64,
+    /// When the last feed batch was received (for freshness measurement).
+    pub last_feed_receive_instant: Option<std::time::Instant>,
+    /// When the last batch finished processing.
+    pub last_processed_instant: Option<std::time::Instant>,
+
+    // ── Phase A: Connection state machine ──────────────────────────────────
+    pub ws_state: WsState,
+    pub ws_state_changed_at: Option<std::time::Instant>,
+
+    // ── Phase A: Distribution tracking ─────────────────────────────────────
+    /// Session max loop time (ms).
+    pub max_loop_ms: f64,
 }
 
 /// Shared handles the loop and its controlling caller both hold.
@@ -395,6 +477,21 @@ pub async fn run_execution_loop(cfg: ExecutionConfig, mut ctx: LoopContext) {
     let last_exit_ms = AtomicI64::new(i64::MIN);
     let mut skew_floor = SkewFloor::new(120); // 2-minute trailing window
     let mut bar_print = (f64::NAN, f64::NAN); // [bar] telemetry throttle state
+
+    // Emit the effective strategy config so the operator can verify that the
+    // JSON file was parsed correctly (especially risk_pct_per_trade, which
+    // controls position sizing). This is the single most common source of
+    // "why is my position size wrong" bugs.
+    println!(
+        "[config] {} risk_pct={:.4} max_leverage={:.1} max_pos_usd={:.0} barrier_mult={:.2} rr={:.0}",
+        cfg.ticker,
+        strategy.cfg.risk_pct_per_trade,
+        strategy.cfg.max_leverage,
+        strategy.cfg.max_position_usd,
+        strategy.cfg.barrier_multiplier,
+        strategy.cfg.rr_ratio,
+    );
+
     if !cfg.fresh_equity {
 
         if let Some(db) = &db {
@@ -403,8 +500,8 @@ pub async fn run_execution_loop(cfg: ExecutionConfig, mut ctx: LoopContext) {
                 strategy.restore(last.equity, last.last_exit_ms);
                 last_exit_ms.store(last.last_exit_ms, Ordering::SeqCst);
                 println!(
-                    "[restore] equity={:.2} USD n_trades={}",
-                    last.equity, last.n_trades
+                    "[restore] equity={:.2} n_trades={} n_wins={} n_losses={} total_r={:+.2}",
+                    last.equity, last.n_trades, last.n_wins, last.n_losses, last.total_r
                 );
             }
         }
@@ -457,6 +554,8 @@ pub async fn run_execution_loop(cfg: ExecutionConfig, mut ctx: LoopContext) {
     let mut last_report_wake = std::time::Instant::now();
     // Periodic [net] telemetry cadence (see the print block inside the loop).
     let mut last_net_print = std::time::Instant::now();
+// Per-second [tick] live-market telemetry cadence (see the print block).
+    let mut last_tick_print = std::time::Instant::now();
     // External-control-file poll cadence (flatten/pause/resume from the parent).
     let mut last_control_poll = std::time::Instant::now() - std::time::Duration::from_millis(100);
     loop {
@@ -472,13 +571,31 @@ pub async fn run_execution_loop(cfg: ExecutionConfig, mut ctx: LoopContext) {
         }
         let iter_started = std::time::Instant::now();
 
+        // ── Phase A: Track feed wait time separately ─────────────────────
+        let feed_wait_start = std::time::Instant::now();
         let events = match ctx.feed.next_events().await {
-            Ok(events) => events,
+            Ok(events) => {
+                // Mark connection as healthy when we successfully receive events
+                if let Ok(mut s) = ctx.stats.lock() {
+                    if s.ws_state != WsState::Connected {
+                        s.ws_state = WsState::Connected;
+                        s.ws_state_changed_at = Some(std::time::Instant::now());
+                    }
+                }
+                events
+            }
             Err(e) => {
                 eprintln!("[{ticker}] stream error: {e} ??? reconnecting...");
                 if let Ok(mut s) = ctx.stats.lock() {
+                    s.ws_state = WsState::Disconnected;
+                    s.ws_state_changed_at = Some(std::time::Instant::now());
                     s.last_error = Some(e.to_string());
                     s.last_feed_wakeup = Some(std::time::Instant::now());
+                }
+                // Set RECONNECTING before attempting retry (not after success)
+                if let Ok(mut s) = ctx.stats.lock() {
+                    s.ws_state = WsState::Reconnecting;
+                    s.ws_state_changed_at = Some(std::time::Instant::now());
                 }
                 if !connect_with_retry(&mut *ctx.feed, &ticker, &ctx.stop, &ctx.stats).await {
                     break;
@@ -486,6 +603,7 @@ pub async fn run_execution_loop(cfg: ExecutionConfig, mut ctx: LoopContext) {
                 continue;
             }
         };
+        let feed_wait_ms = feed_wait_start.elapsed().as_secs_f64() * 1000.0;
 
         // Monotonic instant the WS frame was delivered to the loop, captured
         // right after next_events() returned. Drives last_event_instant (feed
@@ -501,6 +619,21 @@ pub async fn run_execution_loop(cfg: ExecutionConfig, mut ctx: LoopContext) {
         let mut batch_last_ts: Option<i64> = None; // any event — drives stal
         let mut batch_last_trade_ts: Option<i64> = None; // trades only — drives sk
         let batch_started = feed_recv;
+
+        // ── Phase A: Accumulators for timing ────────────────────────────
+        let mut batch_db_ms: f64 = 0.0;
+        let mut batch_exec_ms: f64 = 0.0;
+
+        // ── Phase A: Track newest timestamp from feed for strategy_lag ──
+        let mut batch_feed_newest_ts: Option<i64> = None;
+        let mut batch_processed_newest_ts: Option<i64> = None;
+        for ev in &events {
+            let ts = match ev {
+                MarketEvent::Trade(t) => t.timestamp,
+                MarketEvent::BookTop(b) => b.timestamp,
+            };
+            batch_feed_newest_ts = Some(batch_feed_newest_ts.map_or(ts, |v| v.max(ts)));
+        }
 
         for event in events {
             // A stop may be raised by the exchange while it returns its final
@@ -518,11 +651,18 @@ pub async fn run_execution_loop(cfg: ExecutionConfig, mut ctx: LoopContext) {
 
             match event {
                 MarketEvent::Trade(t) => {
+                    // ── Phase A: DB write timing ────────────────────────
+                    let db_start = std::time::Instant::now();
                     if let Some(db) = &db {
                         db.record_trade(&ticker, t.clone());
                     }
+                    batch_db_ms += db_start.elapsed().as_secs_f64() * 1000.0;
+
                     let is_buy = t.side == TradeSide::Buy;
                     let engine_events = strategy.on_trade(t.timestamp, t.price, t.amount, is_buy);
+
+                    // ── Phase A: Engine execution timing ───────────────
+                    let exec_start = std::time::Instant::now();
                     handle_engine_events(
                         &cfg,
                         &ctx,
@@ -535,14 +675,20 @@ pub async fn run_execution_loop(cfg: ExecutionConfig, mut ctx: LoopContext) {
                         engine_events,
                     )
                     .await;
+                    batch_exec_ms += exec_start.elapsed().as_secs_f64() * 1000.0;
+
                     batch_events += 1;
                     batch_last_ts = Some(t.timestamp);
-                    batch_last_trade_ts = Some(t.timestamp); // new
+                    batch_last_trade_ts = Some(t.timestamp);
+                    batch_processed_newest_ts = Some(t.timestamp);
                 }
                 MarketEvent::BookTop(b) => {
+                    let db_start = std::time::Instant::now();
                     if let Some(db) = &db {
                         db.record_orderbook_top(&ticker, b.clone());
                     }
+                    batch_db_ms += db_start.elapsed().as_secs_f64() * 1000.0;
+
                     let engine_events = strategy.on_orderbook(
                         b.timestamp,
                         b.bid_price,
@@ -550,6 +696,7 @@ pub async fn run_execution_loop(cfg: ExecutionConfig, mut ctx: LoopContext) {
                         b.ask_price,
                         b.ask_amount,
                     );
+                    let exec_start = std::time::Instant::now();
                     handle_engine_events(
                         &cfg,
                         &ctx,
@@ -562,8 +709,11 @@ pub async fn run_execution_loop(cfg: ExecutionConfig, mut ctx: LoopContext) {
                         engine_events,
                     )
                     .await;
+                    batch_exec_ms += exec_start.elapsed().as_secs_f64() * 1000.0;
+
                     batch_events += 1;
                     batch_last_ts = Some(b.timestamp);
+                    batch_processed_newest_ts = Some(b.timestamp);
                 }
             }
         }
@@ -584,6 +734,8 @@ pub async fn run_execution_loop(cfg: ExecutionConfig, mut ctx: LoopContext) {
             s.events_seen += batch_events;
             if let Some(ts) = batch_last_ts {
                 s.last_event_ts_ms = Some(ts);
+                // ── Phase A: Track feed receive time (arrival) ─────────
+                s.last_feed_receive_instant = Some(feed_recv);
                 // Anchor feed freshness AFTER the batch is fully processed.
                 // With real-time pacing a burst batch can take several seconds
                 // to replay; anchoring at `feed_recv` (arrival) would count the
@@ -593,11 +745,58 @@ pub async fn run_execution_loop(cfg: ExecutionConfig, mut ctx: LoopContext) {
                 // from the moment the loop becomes idle again.
                 s.last_event_instant = Some(std::time::Instant::now());
                 s.last_event_latency_ms = feed_recv.elapsed().as_secs_f64() * 1000.0;
+                // ── Phase A: Track processing completion time ─────────
+                s.last_processed_instant = Some(std::time::Instant::now());
             }
             // Local loop timing is measured on EVERY iteration (pure code
             // latency, meaningful in live AND replay) — outside the net gate.
             s.loop_cadence_ms = iter_started.elapsed().as_secs_f64() * 1000.0;
             s.batch_process_ms = batch_started.elapsed().as_secs_f64() * 1000.0;
+
+            // ── Phase A: Feed wait timing ─────────────────────────────
+            s.feed_wait_ms = feed_wait_ms;
+            s.feed_process_ms = batch_started.elapsed().as_secs_f64() * 1000.0;
+
+            // ── Phase A: DB and execution timing (accumulated) ────────
+            s.db_write_ms = batch_db_ms;
+            s.execution_ms = batch_exec_ms;
+
+            // ── Phase A: Engine timing (from strategy snapshot) ───────
+            s.feature_calc_ms = snap.feature_calc_ms;
+            s.model_infer_ms = snap.model_infer_ms;
+            s.labeller_infer_ms = snap.labeller_infer_ms;
+            s.catchup_bars = snap.catchup_bars;
+
+            // ── Phase A: Track catch-up session stats ──────────────────
+            if snap.catchup_bars > 0 {
+                s.n_catchups += 1;
+                if snap.catchup_bars > s.max_catchup_bars {
+                    s.max_catchup_bars = snap.catchup_bars;
+                }
+            }
+
+            // ── Phase A: Strategy lag (see note in header) ────────────
+            // NOTE: This is NOT yet a perfect backlog measurement in the
+            // single-threaded architecture. It measures the difference between
+            // the newest event in this batch and the last processed event,
+            // which is usually the same. For true backlog measurement across
+            // batches, we need Phase C (separate feed reader + channel).
+            // For now, use last_event_latency_ms as the better indicator
+            // of per-batch processing time.
+            if let Some(feed_ts) = batch_feed_newest_ts {
+                s.feed_newest_market_ts = Some(feed_ts);
+            }
+            if let Some(proc_ts) = batch_processed_newest_ts {
+                s.processed_newest_market_ts = Some(proc_ts);
+            }
+            if let (Some(feed_ts), Some(proc_ts)) = (s.feed_newest_market_ts, s.processed_newest_market_ts) {
+                s.strategy_lag_ms = (feed_ts - proc_ts) as f64;
+            }
+
+            // ── Phase A: Session max loop time ────────────────────────
+            if s.loop_cadence_ms > s.max_loop_ms {
+                s.max_loop_ms = s.loop_cadence_ms;
+            }
 
             // Network diagnostics are LIVE-TRADE ONLY. A replay (live-test)
             // has no network: staleness/latency/skew against historical
@@ -655,26 +854,40 @@ pub async fn run_execution_loop(cfg: ExecutionConfig, mut ctx: LoopContext) {
             }
         }
 
-        // Live report: republish the HTML snapshot on a timer so an open
-        // browser tab (the page meta-refreshes) shows entries/exits and the
-        // growing price tape as they happen — not only on shutdown.
-        if cfg.persist && last_report_wake.elapsed().as_secs() >= crate::report::REPORT_REFRESH_SECS
-        {
+        // ── Phase D: Move report generation off hot path ──────────────
+        // Report generation is non-critical work. Spawn it as a detached task
+        // so it cannot block the trading loop.
+        if cfg.persist && last_report_wake.elapsed().as_secs() >= crate::report::REPORT_REFRESH_SECS {
             last_report_wake = std::time::Instant::now();
             if let Some(db) = &db {
+                let db_clone = db.clone();
+                let ticker = cfg.ticker.clone();
+                let scope = cfg.report_scope;
                 let rr = cfg
                     .strategy_config
                     .as_ref()
                     .map(|c| c.rr_ratio)
                     .unwrap_or(engine::RR_RATIO);
-                crate::report::generate_html_report(
-                    db,
-                    &cfg.ticker,
-                    cfg.report_scope,
-                    rr,
-                    cfg.report_tag.as_deref(),
-                )
-                .await;
+                let tag = cfg.report_tag.clone();
+
+                // spawn_blocking because generate_html_report is CPU/IO-bound
+                // We create a mini-runtime for the blocking task to run async code
+                tokio::task::spawn_blocking(move || {
+                    let rt = tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                        .expect("create mini-runtime for report");
+                    rt.block_on(async {
+                        crate::report::generate_html_report(
+                            &db_clone,
+                            &ticker,
+                            scope,
+                            rr,
+                            tag.as_deref(),
+                        )
+                        .await;
+                    });
+                });
             }
         }
 
@@ -701,23 +914,107 @@ pub async fn run_execution_loop(cfg: ExecutionConfig, mut ctx: LoopContext) {
                 // Order round-trip T1→T2 (local send → local ack) from the
                 // Live order router: `ord=last/max`. '-' while paper mode or
                 // before the first order.
-                let ord = if s.last_order_rtt_ms > 0.0 {
+                let _ord = if s.last_order_rtt_ms > 0.0 {
                     format!("{:.1}/{:.1}ms", s.last_order_rtt_ms, s.max_order_rtt_ms)
                 } else {
                     "-".to_string()
                 };
+
+                // ── Phase A: Enhanced [net] line with timing breakdown ──
+                // NOTE: strategy_lag_ms is ~0 in single-threaded architecture.
+                // Use last_event_latency_ms (proc time) for per-batch cost.
                 println!(
-                    "[net] {} stal={:.0}ms lat={:.2}ms rtt={} ord={} sk={:+.0}ms outages={} max_stal={:.0}ms voided={}{}",
+                    "[net] {} ws={} loop={:.1}ms feed_wait={:.0}ms proc={:.1}ms feat={:.1}ms model={:.1}ms label={:.1}ms db={:.1}ms catchup={}bars n_catch={} lat_ms={:.0}ms max_loop={:.0}ms stal={:.0}ms rtt={} sk={:+.0}ms outages={} voided={}{}",
                     cfg.ticker,
-                    staleness_ms,
+                    s.ws_state,
+                    s.loop_cadence_ms,
+                    s.feed_wait_ms,
                     s.last_event_latency_ms,
+                    s.feature_calc_ms,
+                    s.model_infer_ms,
+                    s.labeller_infer_ms,
+                    s.db_write_ms,
+                    s.catchup_bars,
+                    s.n_catchups,
+                    s.strategy_lag_ms,
+                    s.max_loop_ms,
+                    staleness_ms,
                     rtt,
-                    ord,
                     s.clock_skew_ms,
                     s.n_outages,
-                    s.max_staleness_ms,
                     s.n_voided,
                     if s.outage_active { " [OUTAGE]" } else { "" },
+                );
+            }
+        }
+// Per-second live-market telemetry (PHASE 1 — OBSERVABILITY ONLY):
+        // `[tick]` gives the supervisor / VIM dashboard a MICRO price/position
+        // channel independent of the ~5-minute `[bar]` macro cadence. mid /
+        // rsi / p_win refresh every tick; an open position's mark-to-market
+        // R & USD are recomputed each tick; `armed` is the STATIC threshold
+        // observation `p_win >= confidence_threshold` — exactly the check the
+        // `[bar]` line's `[armed]` tag makes — NOT a state machine. Nothing
+        // here is persisted and nothing changes strategy behavior (a
+        // debounced `signal_armed` hysteresis flag is Phase 2 and stays OUT
+        // of this line).
+        if cfg.feed != ExchangeKind::Parquet
+            && last_tick_print.elapsed().as_secs() >= TICK_PRINT_SECS
+        {
+            last_tick_print = std::time::Instant::now();
+            if let Ok(s) = ctx.stats.lock() {
+                let staleness_ms = s
+                    .last_event_instant
+                    .map(|t| t.elapsed().as_secs_f64() * 1000.0)
+                    .unwrap_or(-1.0);
+                let conf_thr = cfg
+                    .strategy_config
+                    .as_ref()
+                    .map(|c| c.confidence_threshold)
+                    .unwrap_or(CONFIDENCE_THRESHOLD);
+                let armed = if s.win_prob + 1e-12 >= conf_thr { 1 } else { 0 };
+                let ts_ms = s.last_event_ts_ms.unwrap_or_else(|| {
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_millis() as i64)
+                        .unwrap_or(0)
+                });
+                // Open position block (absent when flat): side/qty/entry/stop/
+                // target plus live mark-to-market R and USD at the current mid.
+                let pos_txt = match strategy.open_position() {
+                    Some(p) => {
+                        let side_str = match p.side {
+                            engine::Side::Long => "long",
+                            engine::Side::Short => "short",
+                        };
+                        let (rr, usd) =
+                            mark_to_market(p.side, s.mid, p.entry_price, p.qty, p.barrier_pct);
+                        let notional = p.qty * p.entry_price;
+                        format!(
+                            " side={} qty={:.4} notional={:.2} entry={:.2} stop={:.2} target={:.2} bp={:.5} rr={:+.2} usd={:+.4}",
+                            side_str,
+                            p.qty,
+                            notional,
+                            p.entry_price,
+                            p.stop,
+                            p.target,
+                            p.barrier_pct,
+                            rr,
+                            usd,
+                        )
+                    },
+                    None => " flat".to_string(),
+                };
+                println!(
+                    "[tick] {} {} mid={:.2} rsi2={:.1} p_win={:.2} armed={} gate={}{} stal={:.0}ms",
+                    cfg.ticker,
+                    format_utc(ts_ms),
+                    s.mid,
+                    s.rsi_2,
+                    s.win_prob,
+                    armed,
+                    s.gate,
+                    pos_txt,
+                    staleness_ms,
                 );
             }
         }
@@ -866,13 +1163,15 @@ async fn handle_engine_events(
             }
             EngineEvent::Entered(r) => {
                 println!(
-                    "[entry] {} {} qty={:.4} @ {:.2} stop={:.2} target={:.2} (rsi2={:.1}, win={:.2})",
+                    "[entry] {} {} qty={:.4} @ {:.2} stop={:.2} target={:.2} bp={:.5} notional={:.2} (rsi2={:.1}, win={:.2})",
                     cfg.ticker,
                     r.side.as_str(),
                     r.qty,
                     r.entry_price,
                     r.stop,
                     r.target,
+                    r.barrier_pct,
+                    r.notional,
                     r.rsi_2,
                     r.win_prob
                 );
@@ -1243,5 +1542,57 @@ async fn poll_control(
             }
         }
         other => eprintln!("[control] unknown command {other:?}"),
+    }
+}
+/// Phase-1 mark-to-market telemetry for the `[tick]` console line.
+/// Mirrors `close_position`'s timeout-R basis WITHOUT slip/fees: R is the raw
+/// side-adjusted move from entry divided by the entry barrier (0.0 when no
+/// barrier exists yet); USD is the raw side-adjusted mark on the open
+/// quantity. Observational only — the strategy's real PnL accounting and the
+/// persisted `net_usd`/`r_multiple` record are untouched by this helper.
+fn mark_to_market(
+    side: engine::Side,
+    mid: f64,
+    entry_price: f64,
+    qty: f64,
+    barrier_pct: f64,
+) -> (f64, f64) {
+    let side_sign = match side {
+        engine::Side::Long => 1.0,
+        engine::Side::Short => -1.0,
+    };
+    let rr = if barrier_pct > 1e-9 {
+        (mid - entry_price) / entry_price * side_sign / barrier_pct
+    } else {
+        0.0 // no vol-derived barrier yet -> no R, never divide by zero
+    };
+    (rr, (mid - entry_price) * qty * side_sign)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Phase-1 mark-to-market: LONG above entry -> positive R & USD; SHORT
+    /// below entry -> positive; degenerate zero barrier -> R 0 (no div-by-zero)
+    /// while USD is still measured.
+    #[test]
+    fn mark_to_market_sign_and_scale() {
+        let (rr_long, usd_long) =
+            mark_to_market(engine::Side::Long, 101.0, 100.0, 2.0, 0.01);
+        assert!((rr_long - 1.0).abs() < 1e-9);   // (101-100)/100 / 0.01 = 1.0
+        assert!((usd_long - 2.0).abs() < 1e-9);  // (101-100) * 2.0
+        assert!(rr_long > 0.0 && usd_long > 0.0);
+
+        let (rr_short, usd_short) =
+            mark_to_market(engine::Side::Short, 99.99, 101.0, 1.0, 0.01);
+        // (101-99.99)/101 = 1% drop from entry; short gains → ~+1R.
+        assert!((rr_short - 1.0).abs() < 1e-6);
+        assert!(usd_short > 0.0);
+
+        let (rr_zero, usd_zero) =
+            mark_to_market(engine::Side::Long, 101.0, 100.0, 2.0, 0.0);
+        assert!(rr_zero == 0.0);                 // zero barrier -> R 0, no NaN/Inf
+        assert!(usd_zero > 0.0);                 // USD mark is barrier-independent
     }
 }

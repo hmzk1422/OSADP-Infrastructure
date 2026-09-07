@@ -201,6 +201,7 @@ class AssetHandle:
             "--control", self.control_path,
             "--meta-gate", "on" if self.enable_regime_detection else "off",
             "--report-tag", self.asset_id,
+            "--fresh-equity",
         ]
         self.proc: Optional[subprocess.Popen] = None
         self.exit_code: Optional[int] = None
@@ -248,6 +249,29 @@ class AssetHandle:
         self._pending_trade_rs: list[tuple[int, float]] = []
         self.last_bar_time: float = 0.0
         self.last_net_time: float = 0.0  # epoch of the last [net] line seen
+        # Per-second live-market telemetry parsed from the child's `[tick]`
+        # line (execution.rs TICK_PRINT_SECS) — the MICRO channel: mid / gate
+        # / armed and the open position's mark-to-market PnL refresh here
+        # ~1s, independent of the ~5-minute `[bar]` macro cadence.
+        self.last_tick_time: float = 0.0  # epoch of the last [tick] line seen
+        self.gate: str = ""   # which entry gate rejected the newest bar eval ("")
+        # Phase-1 `armed` = STATIC threshold observation (p_win >=
+        # confidence_threshold at tick time — exactly the [bar] [armed] tag).
+        # A debounced signal_armed state machine lands in Phase 2 and replaces
+        # this interpretation — NOT the field set — to keep the UI contract
+        # stable across both phases.
+        self.armed: bool = False
+        # Open-position snapshot for mark-to-market PnL (all None when flat).
+        self.open_side: Optional[str] = None
+        self.entry_price: Optional[float] = None
+        self.stop: Optional[float] = None
+        self.target: Optional[float] = None
+        self.qty: Optional[float] = None
+        self.notional: Optional[float] = None    # qty * entry (position size in USD)
+        self.barrier_pct: Optional[float] = None
+        self.rr_mark: Optional[float] = None     # mark-to-market R of open position
+        self.usd_mark: Optional[float] = None    # mark-to-market USD of open position
+        self.tick_stal_ms: Optional[float] = None  # feed staleness at last [tick]
         # monotonic() epoch of the last child output line of ANY kind — the
         # honest liveness signal. A child that never connects (no [bar]) still
         # flips to "stalled" once this goes quiet, instead of lying "running".
@@ -306,10 +330,19 @@ class AssetHandle:
                 )
                 self.last_output_time = time.monotonic()
 
-            if not line.startswith("[net] "):
+            if not (line.startswith("[net] ") or line.startswith("[tick] ")):
                 # [net] lines arrive every few seconds — never let them drown the
                 # last economically meaningful event in the dashboard/console.
-                self.last_event = line[:160]
+                # Prefix with HH:MM:SS so the dashboard can show staleness —
+                # without a timestamp you can't tell if an event was 2s or 2h ago.
+                self.last_event = f"{datetime.now():%H:%M:%S} {line[:160]}"
+            # NOTE: [restore] lines are intentionally IGNORED here.
+            # The engine restores cumulative equity/n_trades/total_r from RocksDB
+            # for its own internal consistency (avoiding duplicate positions etc),
+            # but the live session must start FRESH every time. We do NOT restore
+            # any stats — equity starts at capital, n_trades/total_r at zero.
+            # The DB keeps its cumulative data for history; the live display shows
+            # only THIS session's trades.
             if line.startswith("[bar] "):
                 self.last_bar_time = time.monotonic()
                 for tok in line.split():
@@ -330,6 +363,67 @@ class AssetHandle:
                             pass
                 # Also record bar lines in the event log (for trades view).
                 self.event_lines.append(f"{datetime.now():%H:%M:%S} {line.strip()}")
+            elif line.startswith("[tick] "):
+                # [tick] btcusdt 2026-.. mid=61820.55 rsi2=12.3 p_win=0.62
+                #   armed=1 gate=confidence side=long qty=.. entry=.. stop=..
+                #   target=.. bp=.. rr=+0.01 usd=+0.00 stal=12ms  (or "flat")
+                # Per-second live-market channel (execution.rs TICK_PRINT_SECS).
+                # This is what makes the dashboard's MID / gate / armed /
+                # open-position mark-to-market PnL refresh ~1s instead of
+                # waiting on a ~5-minute [bar]. [tick] lines are NOT mirrored
+                # into event_lines/log_lines and do not touch last_event —
+                # otherwise they'd outrank every meaningful [exit]/[entry].
+                toks: dict[str, str] = {}
+                for tok in line.split():
+                    if "=" in tok:
+                        k, v = tok.split("=", 1)
+                        toks[k] = v
+
+                def _fv(key: str) -> Optional[float]:
+                    v = toks.get(key)
+                    if v is None:
+                        return None
+                    try:
+                        return float(v.rstrip("ms"))
+                    except ValueError:
+                        return None
+
+                if toks.get("mid") is not None:
+                    try:
+                        self.mid = float(toks["mid"])
+                    except ValueError:
+                        pass
+                self.gate = toks.get("gate", self.gate)
+                self.armed = toks.get("armed") == "1"
+                self.tick_stal_ms = _fv("stal")
+                if toks.get("rsi2") is not None:
+                    try:
+                        self.rsi = float(toks["rsi2"])
+                    except ValueError:
+                        pass
+                if toks.get("p_win") is not None:
+                    try:
+                        self.pwin = float(toks["p_win"])
+                    except ValueError:
+                        pass
+                if toks.get("side") in ("long", "short"):
+                    self.open_side = toks["side"]
+                    self.qty = _fv("qty")
+                    self.notional = _fv("notional")
+                    self.entry_price = _fv("entry")
+                    self.stop = _fv("stop")
+                    self.target = _fv("target")
+                    self.barrier_pct = _fv("bp")
+                    self.rr_mark = _fv("rr")
+                    self.usd_mark = _fv("usd")
+                else:
+                    # Flat (or malformed) — the position block is all-or-nothing,
+                    # so clear every open-position field atomically.
+                    self.open_side = None
+                    self.qty = self.entry_price = self.stop = self.target = None
+                    self.notional = self.barrier_pct = None
+                    self.rr_mark = self.usd_mark = None
+                self.last_tick_time = time.time()
             elif line.startswith("[exit] "):
                 # [exit] btcusdt reason=.. @ px r=+x.xx net=+x.xx equity=X (Ns)
                 self.n_trades += 1
@@ -463,6 +557,19 @@ class AssetHandle:
                 "outage_active": self.outage_active,
                 "n_voided": self.n_voided,
                 "last_net_time": self.last_net_time,
+                "armed": self.armed,
+                "gate": self.gate,
+                "open_side": self.open_side,
+                "entry_price": self.entry_price,
+                "stop": self.stop,
+                "target": self.target,
+                "qty": self.qty,
+                "notional": self.notional,
+                "barrier_pct": self.barrier_pct,
+                "rr_mark": self.rr_mark,
+                "usd_mark": self.usd_mark,
+                "tick_stal_ms": self.tick_stal_ms,
+                "last_tick_time": self.last_tick_time,
                 "last_bar_time": self.last_bar_time,
                 "last_output_time": self.last_output_time,
             }
@@ -1098,11 +1205,11 @@ class PortfolioSupervisor:
                     # data["network"] (worst across assets) — not per-asset.
                     # the session report is deleted at session end (data lives
                     # in RocksDB), so only link it while it actually exists
-                    "has_report": (BUILD_DIR / f"pnl_report_{a.ticker}.html").exists(),
+                    "has_report": (BUILD_DIR / f"pnl_report_{a.asset_id}.html").exists(),
                     "restarts": a.restarts,
                     "lastEvent": a.last_event,
                     "alerts": a.alerts[-5:],
-                    "report": f"pnl_report_{a.ticker}.html",
+                    "report": f"pnl_report_{a.asset_id}.html",
                 }
                 for a in self.assets
             ],

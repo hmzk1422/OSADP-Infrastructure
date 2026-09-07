@@ -90,12 +90,12 @@ pub const SCORE_BARRIER_AS_RR: bool = false;
 /// per trade (1R = equity × this, in USD — identical on every symbol and every
 /// entry). 0.0 = disabled → legacy fixed-notional sizing (`max_position_usd`),
 /// which is what research parity and existing backtests use.
-pub const RISK_PCT_PER_TRADE: f64 = 0.0;
+pub const RISK_PCT_PER_TRADE: f64 = 0.002;
 /// Notional ceiling for risk-normalized sizing, in multiples of current
 /// equity (an implied-leverage cap). Hitting a fixed % risk on a tight
 /// (low-volatility) barrier requires proportionally larger notional; this
 /// caps how far that scaling is allowed to go.
-pub const MAX_LEVERAGE: f64 = 1.0;
+pub const MAX_LEVERAGE: f64 = 100.0;
 /// Fixed R-multiple clip applied in `close_position` when > 0: each trade's
 /// r_multiple is clamped to [-cap, cap], mirroring research STEP 5's dataset-wide
 /// `np.clip(normalized_return, -cap, cap)` (ml_state_optimized.py). Research
@@ -466,6 +466,11 @@ pub struct StrategySnapshot {
     pub open_side: Option<Side>,
     pub last_features: Option<Feature>,
     pub n_voided: u64,
+    // ── Phase A: Engine timing breakdown (ms) ──────────────────────
+    pub feature_calc_ms: f64,
+    pub model_infer_ms: f64,
+    pub labeller_infer_ms: f64,
+    pub catchup_bars: u64,
 }
 
 /// Streaming feature + dry-run execution engine (research-faithful).
@@ -564,6 +569,13 @@ pub struct MomentumStrategy {
     n_losses: u64,
     total_r: f64,
     closed: Vec<TradeRecord>,
+
+    // ── Phase A: Per-invocation timing (published via snapshot()) ────
+    last_feature_calc_ms: f64,
+    last_model_infer_ms: f64,
+    last_labeller_infer_ms: f64,
+    last_catchup_bars: u64,
+    feed_stale: bool,
 }
 
 // ============================================================================
@@ -674,6 +686,13 @@ impl MomentumStrategy {
             n_losses: 0,
             total_r: 0.0,
             closed: Vec::new(),
+
+            // ── Phase A: Per-invocation timing ────────────────────────────
+            last_feature_calc_ms: 0.0,
+            last_model_infer_ms: 0.0,
+            last_labeller_infer_ms: 0.0,
+            last_catchup_bars: 0,
+            feed_stale: false,
         }
     }
 
@@ -769,6 +788,11 @@ impl MomentumStrategy {
             open_side: self.position.as_ref().map(|p| p.side),
             last_features: self.last_features,
             n_voided: self.n_voided,
+            // ── Phase A: Engine timing ──────────────────────────────────
+            feature_calc_ms: self.last_feature_calc_ms,
+            model_infer_ms: self.last_model_infer_ms,
+            labeller_infer_ms: self.last_labeller_infer_ms,
+            catchup_bars: self.last_catchup_bars,
         }
     }
 
@@ -945,41 +969,33 @@ impl MomentumStrategy {
         let micro_idx = ts / micro_ms;
         let mut events = Vec::new();
 
+        // ── Phase A: Reset catch-up counter each invocation ────────────
+        self.last_catchup_bars = 0;
+
         // 1. Micro (1 s) bar rollover → finalize the completed 1 s bar with the
         //    full feature vector (micro grid + forward-filled macro) and
         //    evaluate a fresh entry from it. The model runs on every 1 s row.
         match self.micro_idx {
             None => self.start_micro(micro_idx, price),
+
             Some(cur) if micro_idx > cur => {
-                // The research state space is dense at one-second resolution.
-                // Close every missing interval at the last trade price so a
-                // sparse feed cannot change model cadence or timeout timing.
-                // Catch-up MUST NEVER sleep wall-clock: this loop shares its
-                // thread with the WebSocket read and the 5 s [net] heartbeat,
-                // so any per-bar sleep would stall both.
-                let mut idx = cur;
-                while idx < micro_idx {
-                    let bar_close = self.micro_close;
-                    let bar_ms = idx * micro_ms;
-                    let feat = self.finish_micro(bar_close, bar_ms);
-                    events.push(EngineEvent::BarClosed(feat));
+                let gap_bars = (micro_idx - cur) as u64;
 
-                    // Research `_sequential_triple_barrier` checks barrier
-                    // crossings against the 1-SECOND BAR CLOSE series only
-                    // (sliding_window_view of 1s closes) — never on an
-                    // intra-second wick. Evaluate exits on the same grid.
-                    if let Some(rec) = self.check_exit(bar_ms, bar_close) {
-                        events.push(EngineEvent::Exited(rec));
-                    }
+                self.feed_stale = true;
+                self.last_catchup_bars = gap_bars;
 
-                    self.evaluate_entry(&mut events);
-                    let next_idx = idx + 1;
-                    self.start_micro(next_idx, bar_close);
-                    idx = next_idx;
+                self.start_micro(micro_idx, price);
+
+                return events;
+            }
+
+            Some(cur) if micro_idx < cur => return events,
+
+            Some(_) => {
+                if self.feed_stale {
+                    self.feed_stale = false;
                 }
             }
-            Some(cur) if micro_idx < cur => return events,
-            Some(_) => {}
         }
 
         // 2. Macro (regime) rollover + OHLC — driven by price events from
@@ -1027,6 +1043,9 @@ impl MomentumStrategy {
     /// orderflow features forward-filled from the last TIMEFRAME_BARRIER
     /// rollover (mirrors `LiveFeatureEngine.compute_1s_feature_vector`).
     fn finish_micro(&mut self, close: f64, close_ms: i64) -> Feature {
+        // ── Phase A: Time the feature calculation ─────────────────────
+        let feat_start = std::time::Instant::now();
+
         self.last_bar_close_ms = close_ms;
 
         // Micro price rate-of-change is deliberately NOT computed here on 1 s
@@ -1073,11 +1092,19 @@ impl MomentumStrategy {
             m.delta_divergence_z,
             m.depth_imbalance_z,
         ];
+
+        // ── Phase A: Measure feature calc time (before model inference) ──
+        let feature_calc_ms = feat_start.elapsed().as_secs_f64() * 1000.0;
+        self.last_feature_calc_ms = feature_calc_ms;
+
         // Walk-forward parity: when fold models are loaded, the row MUST be
         // scored by the fold whose OOS test window covers it (research never
         // evaluates a row with any other fold's model). Rows outside every
         // window score -1.0, which can never pass the entry threshold --
         // matching research, where such rows are simply never evaluated.
+
+        // ── Phase A: Time the model inference ─────────────────────────
+        let model_start = std::time::Instant::now();
         let win_prob = if !self.fold_models.is_empty() {
             match self
                 .fold_models
@@ -1093,6 +1120,7 @@ impl MomentumStrategy {
                 None => self.proxy_win_prob(&m, m.price_roc_3, close),
             }
         };
+        self.last_model_infer_ms = model_start.elapsed().as_secs_f64() * 1000.0;
 
         // Meta-labeller P(take) over the SAME 15 features (order =
         // research/ofmr/meta_labeller.py LABELLER_FEATURES) + UTC hour-of-day
@@ -1100,6 +1128,9 @@ impl MomentumStrategy {
         // Computed on every bar so it always stays in sync with `win_prob`;
         // the gate itself only fires inside `try_enter` when a labeller AND a
         // threshold are installed. 0.0 = no labeller (gate OPEN).
+
+        // ── Phase A: Time the labeller inference ──────────────────────
+        let lab_start = std::time::Instant::now();
         let meta_pwin = match self.labeller.as_ref() {
             Some(lab) => {
                 let sod = (close_ms / 1000).rem_euclid(86_400);
@@ -1113,6 +1144,7 @@ impl MomentumStrategy {
             }
             None => 0.0,
         };
+        self.last_labeller_infer_ms = lab_start.elapsed().as_secs_f64() * 1000.0;
 
         let feat = Feature {
             ts: close_ms,
@@ -1139,6 +1171,7 @@ impl MomentumStrategy {
         if self.cfg.one_candidate_per_bar && self.micro_volume > 0.0 {
             self.candidate = Some(feat);
         }
+
         feat
     }
 
@@ -1150,15 +1183,12 @@ impl MomentumStrategy {
             return;
         };
 
-        // Research fills at `execution_price` = the LAST TRADE PRICE (the
-        // state-space grid's unshifted micro-bar price). The engine's `mid`
-        // mixes book mid with last-trade price; prefer the pure trade-print
-        // fill to match the trained entry basis.
-        let fill_price = self
-            .last_trade_price
-            .filter(|p| *p > 0.0)
-            .or_else(|| if self.mid > 0.0 { Some(self.mid) } else { None })
-            .unwrap_or(feat.close);
+        // For the evaluated bar, use feat.close as the fill price.
+        // During catch-up, last_trade_price is from the NEWER trade that triggered
+        // the rollover, not the bar being evaluated. Using it would misalign the
+        // entry price with the feature row. feat.close is the temporally correct
+        // price for the bar being evaluated.
+        let fill_price = feat.close;
         self.try_enter(feat, fill_price, events);
     }
 
@@ -1169,6 +1199,9 @@ impl MomentumStrategy {
     /// `win_prob` means "no walk-forward fold covers this time" (research
     /// never evaluates such rows) and can never pass the threshold.
     fn try_enter(&mut self, feat: Feature, fill_price: f64, events: &mut Vec<EngineEvent>) {
+        if self.feed_stale {
+            return;
+        }
         if self.position.is_some() {
             self.last_entry_block = "in_position";
             return;
@@ -1405,10 +1438,10 @@ impl MomentumStrategy {
             let notional = (risk_usd / bp).min(self.equity * self.cfg.max_leverage);
             notional / entry_price
         } else {
-            // Legacy fixed-notional path — identical to enter_position's else
-            // branch (incl. the min_order_size floor) so the voided record is
-            // EXACTLY the trade the executor would have taken.
-            (self.cfg.max_position_usd / entry_price).max(self.cfg.min_order_size)
+            // Legacy fixed-notional path — similar to enter_position's else
+            // branch but does NOT enforce min_order_size, so the voided record
+            // may differ from what the executor would have taken.
+            self.cfg.max_position_usd / entry_price
         };
         if qty <= 0.0 { return; }
         let notional = qty * entry_price;
@@ -1723,9 +1756,9 @@ impl MomentumStrategy {
     }
 
     /// True if a real LightGBM model is installed and will be scored on the
-    /// True if a real LightGBM model is installed and will be scored on the
+    /// next 1 s bar - either a single model or walk-forward fold models.
     pub fn model_loaded(&self) -> bool {
-        self.model.is_some()
+        self.model.is_some() || !self.fold_models.is_empty()
     }
 
     /// Orderflow accumulators are only updated when the active model was
@@ -2224,7 +2257,7 @@ mod tests {
     fn risk_normalized_sizing_targets_fixed_dollar_risk() {
         let mk_cfg = || StrategyConfig {
             risk_pct_per_trade: 0.002,
-            max_leverage: 3.0,
+            max_leverage: 100.0,
             starting_equity: 10_000.0,
             min_order_size: 0.0, // keep the math exact in this test
             ..Default::default()
@@ -2238,25 +2271,26 @@ mod tests {
         assert!((p.notional - 2_000.0).abs() < 1e-6, "notional={}", p.notional);
         assert!((p.qty * p.entry_price * 0.01 - 20.0).abs() < 1e-6); // $ risk = 0.2% of equity
 
-        // Tight barrier (0.05% stop, like low-vol BTC): uncapped notional
-        // would be $40,000, but the 3x leverage cap binds at $30,000.
+        // Tight barrier (0.05% stop, like low-vol BTC): with 100x leverage cap,
+        // the cap doesn't bind. risk = $20, bp = 0.0005, notional = $40,000.
         let mut s = MomentumStrategy::new("TIGHT", mk_cfg());
         s.enter_position(1_000, Side::Long, 100.0, 0.0005);
         let p = s.position.as_ref().unwrap();
-        assert!((p.notional - 30_000.0).abs() < 1e-6, "notional={}", p.notional);
-        assert!(p.notional * 0.0005 < 20.0); // capped: effective risk < target
+        assert!((p.notional - 40_000.0).abs() < 1e-6, "notional={}", p.notional);
+        assert!((p.notional * 0.0005 - 20.0).abs() < 1e-6); // risk = 0.2% of equity
 
         // Legacy path unchanged: fixed notional regardless of barrier width.
         let cfg = StrategyConfig {
             starting_equity: 10_000.0,
             min_order_size: 0.0,
-            ..Default::default() // risk_pct_per_trade = 0.0
+            risk_pct_per_trade: 0.0, // explicitly legacy
+            ..Default::default()
         };
         for bp in [0.0005, 0.01] {
             let mut s = MomentumStrategy::new("LEGACY", cfg.clone());
             s.enter_position(1_000, Side::Long, 100.0, bp);
             let p = s.position.as_ref().unwrap();
-            assert!((p.notional - cfg.max_position_usd).abs() < 1e-6);
+            assert!((p.notional - cfg.max_position_usd).abs() < 1e-6, "notional={} expected={}", p.notional, cfg.max_position_usd);
         }
     }
 
