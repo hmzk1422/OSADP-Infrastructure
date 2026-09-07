@@ -898,6 +898,20 @@ impl MomentumStrategy {
                 Vec::new()
             }
             Some(cur) if macro_idx != cur => {
+                // Feed stall across composite boundaries: the tape skipped one
+                // or more 300 s bars. Backfill EVERY skipped bar with the last
+                // known close so the macro close series stays DENSE (one close
+                // per composite bar) — exactly the research/backtest series,
+                // where every 5-min bar contributes exactly one row. Without
+                // this a stall silently drops bars and the recursive,
+                // infinite-memory Wilder RSI(2)/SMA(14)/MA(5) state diverges
+                // between twin processes (gate-on vs gate-off) and drifts from
+                // the research series.
+                let mut fill = cur + 1;
+                while fill < macro_idx && self.macro_closes.len() < MAX_MACRO_CLOSES {
+                    self.macro_closes.push_back(self.macro_close);
+                    fill += 1;
+                }
                 self.compute_macro_features();
                 // Research trade universe: ONE entry candidate per composite
                 // bar -- its LAST volume>0 1-second row (the `volume > 0`
@@ -940,6 +954,9 @@ impl MomentumStrategy {
                 // The research state space is dense at one-second resolution.
                 // Close every missing interval at the last trade price so a
                 // sparse feed cannot change model cadence or timeout timing.
+                // Catch-up MUST NEVER sleep wall-clock: this loop shares its
+                // thread with the WebSocket read and the 5 s [net] heartbeat,
+                // so any per-bar sleep would stall both.
                 let mut idx = cur;
                 while idx < micro_idx {
                     let bar_close = self.micro_close;
@@ -1198,6 +1215,12 @@ impl MomentumStrategy {
             if let Some(leaf) = gate.classify(&x) {
                 if !gate.is_tradeable(leaf) {
                     self.last_entry_block = "regime_filter";
+                    // Rejected candidate: record shadow, exactly like the research
+                    // walk-forward (one data point PER BAR while the gate keeps
+                    // rejecting). So n_voided grows ~1/s during a sustained regime
+                    // rejection — that is per-bar rejection telemetry, NOT trade
+                    // rate. No order is ever sent for a voided candidate.
+                    // (n_voided is incremented inside spawn_shadow.)
                     self.spawn_shadow(&feat, fill_price, bp, side);
                     return;
                 }
@@ -1382,7 +1405,10 @@ impl MomentumStrategy {
             let notional = (risk_usd / bp).min(self.equity * self.cfg.max_leverage);
             notional / entry_price
         } else {
-            self.cfg.max_position_usd / entry_price
+            // Legacy fixed-notional path — identical to enter_position's else
+            // branch (incl. the min_order_size floor) so the voided record is
+            // EXACTLY the trade the executor would have taken.
+            (self.cfg.max_position_usd / entry_price).max(self.cfg.min_order_size)
         };
         if qty <= 0.0 { return; }
         let notional = qty * entry_price;
@@ -1595,6 +1621,7 @@ impl MomentumStrategy {
     pub fn set_regime_gate(&mut self, gate: Option<RegimeGate>) {
         self.regime_gate = gate;
     }
+
 
 /// Build the regime-gate feature vector (28 cols) in the EXACT exported tree order.
     pub fn regime_feature_vector(&self, feat: &Feature, fill_price: f64) -> Vec<f64> {
@@ -2264,6 +2291,34 @@ mod tests {
             })
             .collect();
         assert_eq!(bars, vec![0, 1_000, 2_000, 3_000, 4_000]);
+    }
+
+    #[test]
+    fn backlog_catchup_never_blocks_wall_clock() {
+        // Regression: catch-up used to sleep 1 s per backlogged 1 s bar on the
+        // SAME thread that reads the WebSocket and prints the [net] heartbeat,
+        // so an N-second feed stall delayed both by N seconds. The sleep is
+        // gone - replay must be effectively instant so the loop always returns
+        // to its socket read and its 5 s [net] cadence.
+        let mut s = MomentumStrategy::new("BACKLOG", StrategyConfig::default());
+        let _ = s.on_trade(0, 100.0, 1.0, true);
+        let started = std::time::Instant::now();
+        let events = s.on_trade(10_000, 101.0, 1.0, true); // 10 s jump => 10 bars
+        let elapsed_ms = started.elapsed().as_secs_f64() * 1000.0;
+        let bars: Vec<i64> = events
+            .iter()
+            .filter_map(|event| match event {
+                EngineEvent::BarClosed(feature) => Some(feature.ts),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(bars.len(), 10, "every missing second must still be finalized");
+        assert!(
+            elapsed_ms < 200.0,
+            "catch-up of {} bars took {:.1} ms; a backlog must never block the loop",
+            bars.len(),
+            elapsed_ms
+        );
     }
 
     /// End-to-end: warm up the 300 s composite regime features on a steady

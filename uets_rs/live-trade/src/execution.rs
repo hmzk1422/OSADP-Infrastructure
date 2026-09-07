@@ -229,6 +229,18 @@ pub struct RunStats {
     pub n_outages: u64,
     pub outage_active: bool,
     pub max_staleness_ms: f64,
+    /// Number of trades voided by the regime gate (rejected before entry).
+    /// Order round-trip latency: T1 (local timestamp right before the order
+    /// is pushed to the socket) → T2 (local timestamp the instant the venue
+    /// acknowledgement is read back). Measured ONLY on the local monotonic
+    /// clock — no exchange timestamps, no wall clock, no skew. This is the
+    /// true "us → exchange → us" trading latency.
+    pub last_order_rtt_ms: f64,
+    /// Session max of `last_order_rtt_ms`.
+    pub max_order_rtt_ms: f64,
+    /// Surfaced in the periodic `[net]` console line so the dashboard can
+    /// display how many potential trades the regime filter is blocking.
+    pub n_voided: u64,
 }
 
 /// Shared handles the loop and its controlling caller both hold.
@@ -563,6 +575,7 @@ pub async fn run_execution_loop(cfg: ExecutionConfig, mut ctx: LoopContext) {
             s.n_trades = snap.n_trades;
             s.n_wins = snap.n_wins;
             s.n_losses = snap.n_losses;
+            s.n_voided = snap.n_voided;
             s.total_r = snap.total_r;
             s.mid = snap.mid;
             s.paused = ctx.paused.load(Ordering::SeqCst);
@@ -571,7 +584,14 @@ pub async fn run_execution_loop(cfg: ExecutionConfig, mut ctx: LoopContext) {
             s.events_seen += batch_events;
             if let Some(ts) = batch_last_ts {
                 s.last_event_ts_ms = Some(ts);
-                s.last_event_instant = Some(feed_recv);
+                // Anchor feed freshness AFTER the batch is fully processed.
+                // With real-time pacing a burst batch can take several seconds
+                // to replay; anchoring at `feed_recv` (arrival) would count the
+                // deliberate replay as an outage (fake [OUTAGE] flicker) even
+                // though data is flowing. Post-processing anchor = freshness
+                // of the feed HEAD, and a genuine new stall is still measured
+                // from the moment the loop becomes idle again.
+                s.last_event_instant = Some(std::time::Instant::now());
                 s.last_event_latency_ms = feed_recv.elapsed().as_secs_f64() * 1000.0;
             }
             // Local loop timing is measured on EVERY iteration (pure code
@@ -672,14 +692,31 @@ pub async fn run_execution_loop(cfg: ExecutionConfig, mut ctx: LoopContext) {
                     .last_event_instant
                     .map(|t| t.elapsed().as_secs_f64() * 1000.0)
                     .unwrap_or(-1.0);
+                // Monotonic ping→pong RTT on the data socket — the actionable
+                // network number (clock-skew-free). '-' until the first pong.
+                let rtt = match ctx.feed.ws_rtt_ms() {
+                    Some(r) => format!("{:.1}ms", r),
+                    None => "-".to_string(),
+                };
+                // Order round-trip T1→T2 (local send → local ack) from the
+                // Live order router: `ord=last/max`. '-' while paper mode or
+                // before the first order.
+                let ord = if s.last_order_rtt_ms > 0.0 {
+                    format!("{:.1}/{:.1}ms", s.last_order_rtt_ms, s.max_order_rtt_ms)
+                } else {
+                    "-".to_string()
+                };
                 println!(
-                    "[net] {} stal={:.0}ms lat={:.2}ms sk={:+.0}ms outages={} max_stal={:.0}ms{}",
+                    "[net] {} stal={:.0}ms lat={:.2}ms rtt={} ord={} sk={:+.0}ms outages={} max_stal={:.0}ms voided={}{}",
                     cfg.ticker,
                     staleness_ms,
                     s.last_event_latency_ms,
+                    rtt,
+                    ord,
                     s.clock_skew_ms,
                     s.n_outages,
                     s.max_staleness_ms,
+                    s.n_voided,
                     if s.outage_active { " [OUTAGE]" } else { "" },
                 );
             }
@@ -840,7 +877,7 @@ async fn handle_engine_events(
                     r.win_prob
                 );
                 if cfg.mode == ExecutionMode::Live {
-                    route_entry(ctx.broker.as_ref(), native_symbol, &r).await;
+                    route_entry(ctx.broker.as_ref(), native_symbol, &r, &ctx.stats).await;
                 }
                 if let Some(db) = db {
                     let snap = strategy.snapshot();
@@ -893,7 +930,7 @@ async fn handle_engine_events(
                     rec.duration_s
                 );
                 if cfg.mode == ExecutionMode::Live {
-                    route_exit(ctx.broker.as_ref(), native_symbol, &rec).await;
+                    route_exit(ctx.broker.as_ref(), native_symbol, &rec, &ctx.stats).await;
                 }
                 if let Some(db) = db {
                     let snap = strategy.snapshot();
@@ -1053,8 +1090,14 @@ async fn finish(cfg: &ExecutionConfig, mut ctx: LoopContext, db: &Option<Arc<DbW
 }
 
 /// Route an engine entry to the exchange (Live mode): market order sized to
-/// the engine receipt quantity.
-async fn route_entry(broker: &dyn Broker, symbol: &str, r: &engine::EntryReceipt) {
+/// the engine receipt quantity. Measures the order round-trip T1→T2 (local
+/// send → local ack) on the monotonic clock and records it in RunStats.
+async fn route_entry(
+    broker: &dyn Broker,
+    symbol: &str,
+    r: &engine::EntryReceipt,
+    stats: &Arc<Mutex<RunStats>>,
+) {
     let side = if r.side == engine::Side::Long {
         TradeSide::Buy
     } else {
@@ -1067,9 +1110,13 @@ async fn route_entry(broker: &dyn Broker, symbol: &str, r: &engine::EntryReceipt
         price: 0.0,
         amount: r.qty,
     };
-    match broker.place_order(&req).await {
+    let t1 = std::time::Instant::now(); // T1: right before hitting the socket
+    let result = broker.place_order(&req).await;
+    let rtt_ms = t1.elapsed().as_secs_f64() * 1000.0; // T2: ack read back
+    record_order_rtt(stats, rtt_ms);
+    match result {
         Ok(resp) => println!(
-            "[order] submitted {} side={} status={}",
+            "[order] submitted {} side={} status={} rtt={rtt_ms:.1}ms",
             resp.exchange_order_id,
             if side == TradeSide::Buy {
                 "buy"
@@ -1078,13 +1125,21 @@ async fn route_entry(broker: &dyn Broker, symbol: &str, r: &engine::EntryReceipt
             },
             resp.status
         ),
-        Err(e) => eprintln!("[order] FAILED to place entry order: {e}"),
+        Err(e) => eprintln!(
+            "[order] FAILED to place entry order rtt={rtt_ms:.1}ms: {e}"
+        ),
     }
 }
 
 /// Route an engine exit to the exchange (Live mode): close the position by
-/// trading back the recorded quantity on the opposite side.
-async fn route_exit(broker: &dyn Broker, symbol: &str, rec: &engine::TradeRecord) {
+/// trading back the recorded quantity on the opposite side. Same T1→T2
+/// round-trip measurement as `route_entry`.
+async fn route_exit(
+    broker: &dyn Broker,
+    symbol: &str,
+    rec: &engine::TradeRecord,
+    stats: &Arc<Mutex<RunStats>>,
+) {
     let side = if rec.side == engine::Side::Long {
         TradeSide::Sell
     } else {
@@ -1097,12 +1152,29 @@ async fn route_exit(broker: &dyn Broker, symbol: &str, rec: &engine::TradeRecord
         price: 0.0,
         amount: rec.qty,
     };
-    match broker.place_order(&req).await {
+    let t1 = std::time::Instant::now(); // T1: right before hitting the socket
+    let result = broker.place_order(&req).await;
+    let rtt_ms = t1.elapsed().as_secs_f64() * 1000.0; // T2: ack read back
+    record_order_rtt(stats, rtt_ms);
+    match result {
         Ok(resp) => println!(
-            "[order] closed {} status={}",
+            "[order] closed {} status={} rtt={rtt_ms:.1}ms",
             resp.exchange_order_id, resp.status
         ),
-        Err(e) => eprintln!("[order] FAILED to place exit order: {e}"),
+        Err(e) => eprintln!(
+            "[order] FAILED to place exit order rtt={rtt_ms:.1}ms: {e}"
+        ),
+    }
+}
+
+/// Store one order round-trip sample (last + session max). Never blocks the
+/// trading loop on a poisoned lock.
+fn record_order_rtt(stats: &Arc<Mutex<RunStats>>, rtt_ms: f64) {
+    if let Ok(mut s) = stats.lock() {
+        s.last_order_rtt_ms = rtt_ms;
+        if rtt_ms > s.max_order_rtt_ms {
+            s.max_order_rtt_ms = rtt_ms;
+        }
     }
 }
 

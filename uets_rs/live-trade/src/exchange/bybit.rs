@@ -43,6 +43,8 @@ pub struct BybitExchange {
     symbol: String, // venue-native, e.g. "BTCUSDT"
     ws: Option<WsStream>,
     ping: Interval,
+    pong_at: Option<std::time::Instant>, // instant the last Ping was sent (RTT timing)
+    last_rtt_ms: Option<f64>,            // last ping→pong RTT (monotonic, skew-free)
 }
 
 impl BybitExchange {
@@ -53,6 +55,8 @@ impl BybitExchange {
             symbol: String::new(),
             ws: None,
             ping: interval(Duration::from_secs(PING_INTERVAL_SECS)),
+            pong_at: None,
+            last_rtt_ms: None,
         }
     }
 
@@ -99,14 +103,22 @@ impl BybitExchange {
                 format!("orderbook.1.{}", self.symbol),
             ],
         });
+        eprintln!("[feed] {}: sending subscription for publicTrade + orderbook.1", self.symbol);
+        eprintln!("[feed] {}: sending subscription for publicTrade + orderbook.1", self.symbol);
         ws.send(Message::Text(sub.to_string())).await?;
 
-        // Wait for the subscription ack before handing the stream back. Bybit
+        // Wait for the subscription ack with timeout. before handing the stream back. Bybit
         // v5 acknowledges with a top-level `"operate":"subscribe"` field
         // (`{"success":true,"ret_msg":"","conn_id":...,"op":"subscribe"}`) —
         // NOT a nested `request.op`. Accept both forms so older/newer Bybit
         // responses are handled.
+        let ack_deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
         loop {
+            if std::time::Instant::now() > ack_deadline {
+                return Err(ExchangeError::SubscriptionRejected(
+                    "timeout waiting for subscription ACK (VPN may be blocking WS traffic)".into()
+                ));
+            }
             let msg = ws.next().await.ok_or(ExchangeError::ConnectionClosed)??;
             if let Message::Text(text) = &msg {
                 let v: serde_json::Value = serde_json::from_str(text)?;
@@ -118,6 +130,7 @@ impl BybitExchange {
                 let is_ack = v.get("success").and_then(|x| x.as_bool()).unwrap_or(false)
                     && is_sub;
                 if is_ack {
+                    eprintln!("[feed] {}: subscription ACK received", self.symbol);
                     break;
                 }
                 if v.get("success").and_then(|x| x.as_bool()) == Some(false) {
@@ -160,11 +173,23 @@ impl Feed for BybitExchange {
         loop {
             tokio::select! {
                 _ = self.ping.tick() => {
+                    self.pong_at = Some(std::time::Instant::now());
                     ws.send(Message::Ping(Vec::new())).await?;
                 }
                 msg = ws.next() => {
                     match msg {
                         Some(Ok(Message::Text(text))) => {
+                            // Application-level pong ({"op":"pong"} / {"ret_msg":"pong"})
+                            // also completes an outstanding ping RTT sample.
+                            if text.contains("\"pong\"") {
+                                if let Some(t) = self.pong_at.take() {
+                                    let ms = t.elapsed().as_secs_f64() * 1000.0;
+                                    if ms < 3000.0 {
+                                        self.last_rtt_ms = Some(ms);
+                                    }
+                                }
+                                continue;
+                            }
                             if let Some(events) = parse_frame(&text)? {
                                 return Ok(events);
                             }
@@ -172,7 +197,18 @@ impl Feed for BybitExchange {
                         Some(Ok(Message::Ping(p))) => {
                             ws.send(Message::Pong(p)).await?;
                         }
-                        Some(Ok(Message::Pong(_))) => {}
+                        Some(Ok(Message::Pong(_))) => {
+                            if let Some(t) = self.pong_at.take() {
+                                let ms = t.elapsed().as_secs_f64() * 1000.0;
+                                // Discard samples contaminated by loop stalls
+                                // (pacing/catch-up): a pong read seconds after
+                                // it arrived measures our backlog, not the
+                                // network. Healthy WS RTT is < 3 s.
+                                if ms < 3000.0 {
+                                    self.last_rtt_ms = Some(ms);
+                                }
+                            }
+                        }
                         Some(Ok(Message::Close(_))) | None => {
                             return Err(ExchangeError::ConnectionClosed);
                         }
@@ -190,6 +226,10 @@ impl Feed for BybitExchange {
             "{REST_URL}/market/kline?category=linear&symbol={symbol}&interval=5&limit={limit}"
         );
         kline_closes_from_url(&url).await
+    }
+
+    fn ws_rtt_ms(&self) -> Option<f64> {
+        self.last_rtt_ms
     }
 
     async fn close(&mut self) -> Result<(), ExchangeError> {
@@ -221,8 +261,10 @@ async fn kline_closes_from_url(url: &str) -> Result<Vec<f64>, ExchangeError> {
         result: Option<KlineResult>,
     }
 
-    let env: KlineEnvelope = reqwest::get(url)
-        .await?
+    let resp = tokio::time::timeout(Duration::from_secs(10), reqwest::get(url))
+        .await
+        .map_err(|_| ExchangeError::Http("seed fetch timed out after 10s".into()))??;
+    let env: KlineEnvelope = resp
         .error_for_status()?
         .json()
         .await?;
@@ -231,12 +273,17 @@ async fn kline_closes_from_url(url: &str) -> Result<Vec<f64>, ExchangeError> {
         if let Some(res) = env.result {
             // Each row is an array:
             // [startTime, open, high, low, close, volume, turnover]
-            // — close is index 4 (a numeric string).
+            // — close is index 4 (a numeric string). Bybit returns NEWEST-FIRST.
+            // Skip the currently-forming 5-min bar (open + 300s > now): its
+            // close changes every trade and would seed different RSI state in
+            // twin processes that fetch a moment apart. Only closed bars seed.
+            let now_ms = now_ms();
             for row in res.list {
-                if let Some(c) = row.get(4).and_then(|v| v.as_str()) {
-                    if let Ok(c) = c.parse::<f64>() {
-                        closes.push(c);
-                    }
+                let open_ms = row.get(0).and_then(|v| v.as_i64()).unwrap_or(0);
+                let Some(c) = row.get(4).and_then(|v| v.as_str()) else { continue };
+                let Ok(c) = c.parse::<f64>() else { continue };
+                if open_ms + 300_000 <= now_ms {
+                    closes.push(c);
                 }
             }
         }
