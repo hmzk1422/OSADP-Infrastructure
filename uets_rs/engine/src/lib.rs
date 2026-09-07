@@ -58,10 +58,6 @@ pub const TIMEFRAME_BARRIER_SECS: i64 = 300; // 5-minute composite bars
 /// feature vector (micro `price_roc_3` + forward-filled macro) is evaluated on
 /// every micro bar close — the research model runs on EVERY 1-second row.
 pub const MICRO_BARRIER_SECS: i64 = 1;
-/// Max backlogged seconds replayed at wall-clock 1 bar/s on live feeds. A
-/// backlog deeper than this is fast-forwarded instantly instead (the market
-/// has moved on — never act on stale prices at 1 bar/s).
-pub const PACING_MAX_BARS: i64 = 5;
 pub const LOOKAHEAD_SECONDS: i64 = 6000; // barrier horizon / timeout
 pub const BARRIER_MULTIPLIER: f64 = 0.3;
 /// If true, the engine computes the 8 orderflow features (OFI z-score, CVD delta/slope,
@@ -510,11 +506,6 @@ pub struct MomentumStrategy {
     /// gate never fires even when a labeller is installed.
     meta_threshold: f64,
     regime_gate: Option<RegimeGate>,
-    /// Live-feed catch-up pacing (live-trade only, never replay): when the
-    /// feed stalls and then bursts, replay the bar backlog at wall-clock
-    /// 1 bar/second instead of instantly, so entries/prints keep the same
-    /// 1-second real-time cadence the strategy is designed around.
-    realtime_pacing: bool,
     closed_stats: VecDeque<RegimeTradeStat>,
     n_voided: u64,
     shadows: Vec<ShadowPosition>,
@@ -640,7 +631,6 @@ impl MomentumStrategy {
             labeller: None,
             meta_threshold: 0.0,
             regime_gate: None,
-            realtime_pacing: false,
             closed_stats: VecDeque::new(),
             n_voided: 0,
             shadows: Vec::new(),
@@ -964,21 +954,11 @@ impl MomentumStrategy {
                 // The research state space is dense at one-second resolution.
                 // Close every missing interval at the last trade price so a
                 // sparse feed cannot change model cadence or timeout timing.
-                let backlog = micro_idx - cur;
-                // Real-time pacing policy (live feeds only):
-                //   * small backlog (<= PACING_MAX_BARS): replay at wall-clock
-                //     1 bar/s so entries/prints keep their 1-second cadence;
-                //   * large backlog: FAST-FORWARD instantly. The market has
-                //     moved on — replaying a 13 s backlog at 1 bar/s would
-                //     leave the strategy permanently behind real time and
-                //     acting on stale prices. Catch up NOW, trade current
-                //     data.
-                let pace = self.realtime_pacing && backlog <= PACING_MAX_BARS;
+                // Catch-up MUST NEVER sleep wall-clock: this loop shares its
+                // thread with the WebSocket read and the 5 s [net] heartbeat,
+                // so any per-bar sleep would stall both.
                 let mut idx = cur;
                 while idx < micro_idx {
-                    if pace && micro_idx - idx > 1 {
-                        std::thread::sleep(std::time::Duration::from_secs(1));
-                    }
                     let bar_close = self.micro_close;
                     let bar_ms = idx * micro_ms;
                     let feat = self.finish_micro(bar_close, bar_ms);
@@ -1642,12 +1622,6 @@ impl MomentumStrategy {
         self.regime_gate = gate;
     }
 
-    /// Enable wall-clock pacing of feed catch-up (see the `realtime_pacing`
-    /// field). Live-trade turns this ON for network feeds and OFF for the
-    /// Parquet replay so historical replays stay fast and deterministic.
-    pub fn set_realtime_pacing(&mut self, on: bool) {
-        self.realtime_pacing = on;
-    }
 
 /// Build the regime-gate feature vector (28 cols) in the EXACT exported tree order.
     pub fn regime_feature_vector(&self, feat: &Feature, fill_price: f64) -> Vec<f64> {
@@ -2317,6 +2291,34 @@ mod tests {
             })
             .collect();
         assert_eq!(bars, vec![0, 1_000, 2_000, 3_000, 4_000]);
+    }
+
+    #[test]
+    fn backlog_catchup_never_blocks_wall_clock() {
+        // Regression: catch-up used to sleep 1 s per backlogged 1 s bar on the
+        // SAME thread that reads the WebSocket and prints the [net] heartbeat,
+        // so an N-second feed stall delayed both by N seconds. The sleep is
+        // gone - replay must be effectively instant so the loop always returns
+        // to its socket read and its 5 s [net] cadence.
+        let mut s = MomentumStrategy::new("BACKLOG", StrategyConfig::default());
+        let _ = s.on_trade(0, 100.0, 1.0, true);
+        let started = std::time::Instant::now();
+        let events = s.on_trade(10_000, 101.0, 1.0, true); // 10 s jump => 10 bars
+        let elapsed_ms = started.elapsed().as_secs_f64() * 1000.0;
+        let bars: Vec<i64> = events
+            .iter()
+            .filter_map(|event| match event {
+                EngineEvent::BarClosed(feature) => Some(feature.ts),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(bars.len(), 10, "every missing second must still be finalized");
+        assert!(
+            elapsed_ms < 200.0,
+            "catch-up of {} bars took {:.1} ms; a backlog must never block the loop",
+            bars.len(),
+            elapsed_ms
+        );
     }
 
     /// End-to-end: warm up the 300 s composite regime features on a steady

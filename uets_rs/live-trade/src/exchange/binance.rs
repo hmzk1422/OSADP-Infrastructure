@@ -193,7 +193,10 @@ impl Feed for BinanceFeed {
 /// `[openTime, open, high, low, close, volume, ...]` — close is index 4 as a
 /// numeric string; closes are returned oldest-first.
 async fn kline_closes_from_url(url: &str, bars: u32) -> Result<Vec<f64>, ExchangeError> {
-    let text = reqwest::get(url).await?.error_for_status()?.text().await?;
+    let resp = tokio::time::timeout(Duration::from_secs(10), reqwest::get(url))
+        .await
+        .map_err(|_| ExchangeError::Http("seed fetch timed out after 10s".into()))??;
+    let text = resp.error_for_status()?.text().await?;
     let rows: Vec<Vec<serde_json::Value>> = serde_json::from_str(&text)?;
     let mut closes: Vec<f64> = Vec::with_capacity(rows.len());
     for row in &rows {
@@ -208,7 +211,7 @@ async fn kline_closes_from_url(url: &str, bars: u32) -> Result<Vec<f64>, Exchang
         // and two processes fetching a moment apart would seed DIFFERENT
         // closes, permanently diverging the recursive RSI state. Only closed
         // bars (open + 300s <= now) are used for seeding — same as research.
-        let now_ms = crate::now_ms();
+        let now_ms = now_ms();
         if open_ms + 300_000 <= now_ms {
             closes.push(close);
         }

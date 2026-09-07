@@ -245,9 +245,14 @@ class AssetHandle:
         # TRADE-level Sortino/Sharpe — not UI samples.
         self.trade_rs: deque = deque(maxlen=20_000)
         # Trades closed since the supervisor last drained (see _record_metrics).
-        self._pending_trade_rs: list[float] = []
+        self._pending_trade_rs: list[tuple[int, float]] = []
+        self.last_bar_time: float = 0.0
         self.last_net_time: float = 0.0  # epoch of the last [net] line seen
-        self.started_at: float = 0.0  # wall-clock epoch when the asset was spawned
+        # monotonic() epoch of the last child output line of ANY kind — the
+        # honest liveness signal. A child that never connects (no [bar]) still
+        # flips to "stalled" once this goes quiet, instead of lying "running".
+        self.last_output_time: float = time.monotonic()
+        self.started_at = datetime.now()  # wall-clock epoch when the asset was spawned
         self.stop_requested: bool = False  # True once we've asked the child to stop
         self.stopped_by_user: bool = False  # user asked to stop → monitor must NOT auto-restart it
 
@@ -293,18 +298,20 @@ class AssetHandle:
         but rsi is still from bar N-1).
         """
         stripped = line.strip()
-        if stripped:
-            # Every single child line is kept (timestamped) so the VIM trades
-            # view is a faithful mirror of running the child bare in a terminal.
-            # log_lines is append-only and not read concurrently in a way that
-            # requires locking (deque.append is thread-safe).
-            self.log_lines.append(f"{datetime.now():%H:%M:%S} {stripped}")
+
         with self._lock:
+            if stripped:
+                self.log_lines.append(
+                    f"{datetime.now():%H:%M:%S} {stripped}"
+                )
+                self.last_output_time = time.monotonic()
+
             if not line.startswith("[net] "):
                 # [net] lines arrive every few seconds — never let them drown the
                 # last economically meaningful event in the dashboard/console.
                 self.last_event = line[:160]
             if line.startswith("[bar] "):
+                self.last_bar_time = time.monotonic()
                 for tok in line.split():
                     if tok.startswith("close="):
                         try:
@@ -347,7 +354,7 @@ class AssetHandle:
                     # Record the per-trade R for trade-level Sortino/Sharpe and
                     # the closed-trade MDD-R curve (drained by the supervisor).
                     self.trade_rs.append(r_value)
-                    self._pending_trade_rs.append(r_value)
+                    self._pending_trade_rs.append((time.monotonic_ns(), r_value))
                 self.event_lines.append(f"{datetime.now():%H:%M:%S} {line.strip()}")
             elif line.startswith("[entry] "):
                 self.event_lines.append(f"{datetime.now():%H:%M:%S} {line.strip()}")
@@ -445,6 +452,7 @@ class AssetHandle:
                 "rsi": self.rsi,
                 "pwin": self.pwin,
                 "last_event": self.last_event,
+                "log_lines": list(self.log_lines),
                 "stal_ms": self.stal_ms,
                 "lat_ms": self.lat_ms,
                 "skew_ms": self.skew_ms,
@@ -455,6 +463,8 @@ class AssetHandle:
                 "outage_active": self.outage_active,
                 "n_voided": self.n_voided,
                 "last_net_time": self.last_net_time,
+                "last_bar_time": self.last_bar_time,
+                "last_output_time": self.last_output_time,
             }
 
     def _alert(self, msg: str) -> None:
@@ -546,6 +556,22 @@ class PortfolioSupervisor:
         # in close order). Input for trade-level Sortino/Sharpe. Drained from
         # each AssetHandle._pending_trade_rs in _record_metrics.
         self.trade_rs: deque = deque(maxlen=100_000)
+        self.trade_rs_by_asset: Dict[str, deque] = {
+            a.asset_id: deque(maxlen=20_000)
+            for a in self.assets
+        }
+
+        self._portfolio_mdd_r = 0.0
+        self._asset_mdd_r: Dict[str, float] = {
+            a.asset_id: 0.0
+            for a in self.assets
+        }
+
+        self._portfolio_trade_r_cumulative = 0.0
+        self._asset_trade_r_cumulative: Dict[str, float] = {
+            a.asset_id: 0.0
+            for a in self.assets
+        }
         # Last seen n_trades per asset id — a decrease means the child was
         # restarted (counters reset to 0), so the cumulative-R curve must be
         # SPLIT there (None marker) instead of recording a phantom drawdown.
@@ -622,8 +648,7 @@ class PortfolioSupervisor:
         return mdd
 
     def mdd_r(self) -> float:
-        """Portfolio-level max drawdown in R-multiples (from cumulative R curve)."""
-        return self._mdd_from_series(self.r_hist)
+        return self._portfolio_mdd_r
 
     def mdd_pct(self) -> float:
         """Portfolio-level max drawdown as a fraction of peak equity.
@@ -646,65 +671,108 @@ class PortfolioSupervisor:
         return mdd
 
     def asset_mdd_r(self, asset_id: str) -> float:
-        """Per-asset max drawdown in R-multiples (from that asset's R curve)."""
-        return self._mdd_from_series(self.r_hist_by_asset.get(asset_id, deque()))
-
+        return self._asset_mdd_r.get(asset_id, 0.0)
+    
     def _record_metrics(self) -> None:
-        """Sample cumulative R / equity so MDD can be computed across the session.
+        # ------------------------------------------------------------
+        # 1. Drain closed-trade events from every asset.
+        #    Each event carries a monotonic observation timestamp.
+        # ------------------------------------------------------------
+        events: list[tuple[int, str, float]] = []
 
-        Also (a) drains each child's pending closed-trade R values into the
-        portfolio trade-level series and appends a cumulative-R point AT EVERY
-        TRADE CLOSE (so a real trough between 5s ticks is never missed), and
-        (b) detects child restarts (n_trades went backwards) and inserts a
-        session-break marker into the MDD curves.
-        """
-        tt = self.totals()
-        # Restart detection BEFORE sampling: a drop in a child's trade counter
-        # means its counters were reset — split the curve, don't record the
-        # artificial +X R -> 0 collapse as drawdown.
-        for a in self.assets:
-            prev = self._prev_trade_counts.get(a.asset_id)
-            if prev is not None and a.n_trades < prev:
-                self.r_hist.append(None)
-                self.eq_hist.append(None)
-                self.r_hist_by_asset.setdefault(
-                    a.asset_id, deque(maxlen=20_000)).append(None)
-            self._prev_trade_counts[a.asset_id] = a.n_trades
-        # Drain closed-trade R values (under the child's parse lock).
         for a in self.assets:
             with a._lock:
                 pending = a._pending_trade_rs
                 a._pending_trade_rs = []
-            if pending:
-                self.trade_rs.extend(pending)
-                # Trade-close resolution for the R curve (fine-grained MDD).
-                self.r_hist.append(tt["r"])
-                self.r_hist_by_asset.setdefault(
-                    a.asset_id, deque(maxlen=20_000)).append(a.total_r)
-        self.r_hist.append(tt["r"])
+
+            for ts_ns, r_value in pending:
+                events.append((ts_ns, a.asset_id, r_value))
+
+        # Merge all assets into actual observed close order.
+        events.sort(key=lambda x: x[0])
+
+        for _ts_ns, asset_id, r_value in events:
+            self.trade_rs.append(r_value)
+
+            asset_hist = self.trade_rs_by_asset.setdefault(
+                asset_id,
+                deque(maxlen=20_000),
+            )
+            asset_hist.append(r_value)
+
+            # Portfolio cumulative closed-trade R.
+            self._portfolio_trade_r_cumulative += r_value
+
+            # Asset cumulative closed-trade R.
+            self._asset_trade_r_cumulative.setdefault(asset_id, 0.0)
+            self._asset_trade_r_cumulative[asset_id] += r_value
+
+            # Update portfolio MDD-R.
+            if not hasattr(self, "_portfolio_trade_r_peak"):
+                self._portfolio_trade_r_peak = self._portfolio_trade_r_cumulative
+            else:
+                self._portfolio_trade_r_peak = max(
+                    self._portfolio_trade_r_peak,
+                    self._portfolio_trade_r_cumulative,
+                )
+
+            self._portfolio_mdd_r = max(
+                self._portfolio_mdd_r,
+                self._portfolio_trade_r_peak
+                - self._portfolio_trade_r_cumulative,
+            )
+
+            # Update asset MDD-R.
+            if not hasattr(self, "_asset_trade_r_peak"):
+                self._asset_trade_r_peak = {}
+
+            peak = self._asset_trade_r_peak.get(
+                asset_id,
+                self._asset_trade_r_cumulative[asset_id],
+            )
+            peak = max(
+                peak,
+                self._asset_trade_r_cumulative[asset_id],
+            )
+            self._asset_trade_r_peak[asset_id] = peak
+
+            self._asset_mdd_r[asset_id] = max(
+                self._asset_mdd_r.get(asset_id, 0.0),
+                peak - self._asset_trade_r_cumulative[asset_id],
+            )
+
+        # ------------------------------------------------------------
+        # 2. Equity MDD remains sampled at monitor cadence.
+        # ------------------------------------------------------------
+        tt = self.totals()
         self.eq_hist.append(tt["equity"])
+
+        # ------------------------------------------------------------
+        # 3. Network history.
+        # ------------------------------------------------------------
         for a in self.assets:
-            self.r_hist_by_asset.setdefault(a.asset_id, deque(maxlen=20_000)).append(a.total_r)
-            # Network metrics for the HTML charts (skip pre-first-[net] ticks).
             h = self.net_hist_by_asset.setdefault(
-                a.asset_id, {
+                a.asset_id,
+                {
                     "lat": deque(maxlen=NET_HIST_MAX),
                     "stal": deque(maxlen=NET_HIST_MAX),
                     "sk": deque(maxlen=NET_HIST_MAX),
-                })
+                },
+            )
+
             if a.lat_ms is not None:
                 h["lat"].append(a.lat_ms)
+
             if a.stal_ms is not None:
                 h["stal"].append(a.stal_ms)
+
             if a.skew_ms is not None:
-                # Clock-offset sanity guard: |offset| beyond the guard is a
-                # wall-clock step (unsynced machine), not feed behavior.
                 if abs(a.skew_ms) <= self.SK_GUARD_MS:
                     h["sk"].append(a.skew_ms)
                 else:
                     self.sk_discarded_by_asset[a.asset_id] = (
-                        self.sk_discarded_by_asset.get(a.asset_id, 0) + 1)
-
+                        self.sk_discarded_by_asset.get(a.asset_id, 0) + 1
+                    )
     @staticmethod
     def _stats_from(values) -> dict:
         vals = list(values)
@@ -820,18 +888,29 @@ class PortfolioSupervisor:
                         self._restart(a)
                     continue
                 # Child process alive but silent: [net] telemetry arrives every
-                # 5s, so >20s of silence means the child is hung (not a network
-                # outage — that shows as "outage"). Surfaced as "stalled".
+                # 5s, so >10s of silence means the child is hung OR never
+                # connected. We key off last_output_time (any line — [bar]/
+                # [net]/[seed]/[feed]/error), so a child that fails to connect
+                # and produces NOTHING still honestly flips to "stalled"
+                # instead of lying "running" forever.
                 if (
                     a.status in ("running", "outage")
-                    and a.last_net_time
-                    and now - a.last_net_time > 20.0
+                    and time.monotonic() - a.last_output_time > 10
                 ):
                     a.status = "stalled"
-            self._print_table()
-            self._record_metrics()
+            try:
+                self._print_table()
+                self._record_metrics()
+            except Exception:  # noqa: BLE001 — a metrics/table bug must never freeze
+                # the monitor (and therefore the whole dashboard). Log and keep
+                # ticking so statuses stay live.
+                logger.exception("[monitor] metrics/table step failed")
             if self.dashboard_enabled:
-                self.write_dashboard()
+                try:
+                    self.write_dashboard()
+                except Exception:  # noqa: BLE001 — same guard; dashboard write is
+                    # best-effort and must never kill the monitor loop.
+                    logger.exception("[monitor] dashboard write failed")
             waited = 0.0
             while waited < self.status_interval and not self.stop_requested:
                 time.sleep(0.25)
@@ -900,7 +979,7 @@ class PortfolioSupervisor:
         """
         stals = [a.stal_ms for a in self.assets if a.stal_ms is not None]
         lats = [a.lat_ms for a in self.assets if a.lat_ms is not None]
-        skews = [a.skew_ms for a in self.assets if a.skew_ms is not None]
+        skews = [ a.skew_ms for a in self.assets if a.skew_ms is not None and abs(a.skew_ms) <= self.SK_GUARD_MS]
         rtts = [a.rtt_ms for a in self.assets if a.rtt_ms is not None]
         ords = [a.ord_rtt_ms for a in self.assets if a.ord_rtt_ms is not None]
         maxs = [a.max_stal_ms for a in self.assets if a.max_stal_ms is not None]
@@ -997,7 +1076,12 @@ class PortfolioSupervisor:
                     "net": {
                         "lat_ms": a.lat_ms,
                         "stal_ms": a.stal_ms,
-                        "skew_ms": a.skew_ms,
+                        "skew_ms": (
+                            a.skew_ms
+                            if a.skew_ms is not None
+                            and abs(a.skew_ms) <= self.SK_GUARD_MS
+                            else None
+                        ),
                         "outages": a.outages,
                         "outage_active": a.outage_active,
                         "stats": self.asset_net_stats(a.asset_id),

@@ -261,8 +261,10 @@ async fn kline_closes_from_url(url: &str) -> Result<Vec<f64>, ExchangeError> {
         result: Option<KlineResult>,
     }
 
-    let env: KlineEnvelope = reqwest::get(url)
-        .await?
+    let resp = tokio::time::timeout(Duration::from_secs(10), reqwest::get(url))
+        .await
+        .map_err(|_| ExchangeError::Http("seed fetch timed out after 10s".into()))??;
+    let env: KlineEnvelope = resp
         .error_for_status()?
         .json()
         .await?;
@@ -275,7 +277,7 @@ async fn kline_closes_from_url(url: &str) -> Result<Vec<f64>, ExchangeError> {
             // Skip the currently-forming 5-min bar (open + 300s > now): its
             // close changes every trade and would seed different RSI state in
             // twin processes that fetch a moment apart. Only closed bars seed.
-            let now_ms = crate::now_ms();
+            let now_ms = now_ms();
             for row in res.list {
                 let open_ms = row.get(0).and_then(|v| v.as_i64()).unwrap_or(0);
                 let Some(c) = row.get(4).and_then(|v| v.as_str()) else { continue };

@@ -297,9 +297,6 @@ pub async fn run_execution_loop(cfg: ExecutionConfig, mut ctx: LoopContext) {
     strategy_cfg.max_position_usd = capital_usd;
     strategy_cfg.starting_equity = capital_usd;
     let mut strategy = MomentumStrategy::new(&ticker, strategy_cfg);
-    // Pace feed catch-up to wall clock on network feeds (burst replay at
-    // 1 bar/s). OFF for the Parquet replay feed — replays must stay fast.
-    strategy.set_realtime_pacing(cfg.feed != ExchangeKind::Parquet);
 
     // Walk-forward parity mode (--wf-dir): score each second with the fold
     // model whose OOS test window covers it, mirroring research's walk-forward

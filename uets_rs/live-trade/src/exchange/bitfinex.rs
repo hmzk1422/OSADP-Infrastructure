@@ -211,7 +211,10 @@ impl Feed for BitfinexExchange {
         // pages newest-first; reverse locally into the oldest-first order
         // `seed_macro_closes` expects.
         let url = format!("{PUBLIC_REST_URL}/candles/trade:5m:{symbol}/hist?limit={limit}&sort=-1");
-        let rows: Vec<Vec<serde_json::Value>> = reqwest::get(&url).await?.json().await?;
+        let resp = tokio::time::timeout(Duration::from_secs(10), reqwest::get(&url))
+            .await
+            .map_err(|_| ExchangeError::Http("seed fetch timed out after 10s".into()))??;
+        let rows: Vec<Vec<serde_json::Value>> = resp.json().await?;
         let mut closes: Vec<f64> = rows
             .iter()
             .filter_map(|r| r.get(2).and_then(|c| c.as_f64()))

@@ -79,7 +79,6 @@ class VimDashboard:
             for a in sup.assets
         }
         self._last_totals = None
-        self._state_lock = threading.Lock()  # guards reads of AssetHandle fields
 
     # ------------------------------------------------------------------ utils
     def _mtime(self):
@@ -134,10 +133,14 @@ class VimDashboard:
             self._flash(f"CONFIG ERROR (keeping last good): {exc}")
             return
 
-        handles = {a.ticker: a for a in self.sup.assets}
+        handles = {a.asset_id: a for a in self.sup.assets}
         restarted = []
         for spec in pc["assets"]:
-            a = handles.get(spec["ticker"])
+            asset_id = str(
+                spec.get("id") or spec["ticker"]
+            ).strip().lower()
+
+            a = handles.get(asset_id)
             if a is None:
                 self._spawn_new_asset(spec, pc)
                 restarted.append(spec["ticker"] + "(new)")
@@ -164,21 +167,22 @@ class VimDashboard:
         )
 
     def _apply_spec_to_handle(self, a, spec) -> None:
-        """Push a freshly-parsed portfolio spec onto an existing AssetHandle so the
-        restarted child spawns with the NEW capital/venue/config, not the stale
-        values from when the handle was first created."""
         old_cap = a.capital
         a.exchange = spec.get("exchange", a.exchange)
         a.feed = spec.get("feed", a.feed)
         a.mode = spec.get("mode", a.mode)
         a.capital = float(spec.get("capital", a.capital))
+        a.enable_regime_detection = bool(
+            spec.get("enable_regime_detection", a.enable_regime_detection)
+        )
         a.config = spec.get("config") or str(self.config_path.resolve())
-        a.db = spec.get("db") or str(DATA_DIR / f"portfolio_{a.ticker}.rocksdb")
-        a.strategy_merged = spec.get("strategy_merged", getattr(a, "strategy_merged", None))
-        # Rebuild the child command line so it uses the NEW values.
+        a.db = spec.get("db") or str(DATA_DIR / f"portfolio_{a.asset_id}.rocksdb")
+        a.strategy_merged = spec.get(
+            "strategy_merged", getattr(a, "strategy_merged", None)
+        )
 
         a.cmd = [
-            a.cmd[0],  # bin_path
+            a.cmd[0],
             a.ticker,
             "--exchange", a.exchange,
             "--feed", a.feed,
@@ -187,11 +191,12 @@ class VimDashboard:
             "--db", a.db,
             "--config", a.config,
             "--control", a.control_path,
+            "--meta-gate", "on" if a.enable_regime_detection else "off",
+            "--report-tag", a.asset_id,
         ]
-        # The restarted child starts fresh at the new capital; don't show stale eq.
+
         a.equity = a.capital
-        # When the capital changed, tell the Rust engine to skip the RocksDB
-        # equity restore so it reports the NEW capital instead of the old equity.
+
         if abs(old_cap - a.capital) > 1e-9:
             a.cmd.append("--fresh-equity")
 
@@ -200,11 +205,17 @@ class VimDashboard:
             from portfolio_supervisor import AssetHandle
 
             handle = AssetHandle(
-                {"id": spec.get("id", spec["ticker"]),
-                 "ticker": spec["ticker"], "exchange": spec["exchange"],
-                 "feed": spec["feed"], "mode": spec["mode"],
-                 "capital": spec["capital"], "db": spec["db"],
-                 "config": str(Path(self.config_path).resolve())},
+                {
+                    "id": spec.get("id", spec["ticker"]),
+                    "ticker": spec["ticker"],
+                    "exchange": spec["exchange"],
+                    "feed": spec["feed"],
+                    "mode": spec["mode"],
+                    "capital": spec["capital"],
+                    "db": spec["db"],
+                    "enable_regime_detection": spec["enable_regime_detection"],
+                    "config": str(Path(self.config_path).resolve()),
+                },
                 {"exchange": pc["exchange"], "feed": pc["feed"],
                  "mode": pc["mode"], "capital": pc["capital"]},
                 self.sup.assets[0].cmd[0] if self.sup.assets else "live-trade",
@@ -244,7 +255,12 @@ class VimDashboard:
         try:
             pc = load_portfolio_config(self.config_path)
             spec = next(
-                (s for s in pc["assets"] if s["ticker"] == a.ticker), None
+                (
+                    s for s in pc["assets"]
+                    if str(s.get("id") or s["ticker"]).strip().lower()
+                    == a.asset_id
+                ),
+                None,
             )
             if spec is not None:
                 self._apply_spec_to_handle(a, spec)
@@ -258,37 +274,46 @@ class VimDashboard:
 
         # ------------------------------------------------------------- metrics
     def _sample(self) -> None:
-        """Sample current live state into history deques for charts/statistics.
+        snapshots = [a.snapshot() for a in self.sup.assets]
 
-        Thread-safe: takes a snapshot of all asset fields under lock so the
-        history buffers always reflect a coherent point-in-time, never a torn
-        read mid-update from the supervisor's _pump() thread.
-        """
-        with self._state_lock:
-            for a in self.sup.assets:
-                hist = self.asset_hist.setdefault(a.asset_id, deque(maxlen=HISTORY_MAX))
-                hist.append((a.equity / a.capital - 1.0) if a.capital else 0.0)
-                m = self.asset_metrics.setdefault(a.asset_id, {"lat": deque(maxlen=HISTORY_MAX),
-                                                               "stal": deque(maxlen=HISTORY_MAX),
-                                                               "sk": deque(maxlen=HISTORY_MAX)})
-                if a.lat_ms is not None:
-                    m["lat"].append(a.lat_ms)
-                if a.stal_ms is not None:
-                    m["stal"].append(a.stal_ms)
-                if a.skew_ms is not None:
-                    # Clock-offset sanity guard (matches supervisor): a wall
-                    # clock off by minutes is unsynced, not feed behavior.
-                    if abs(a.skew_ms) <= self.sup.SK_GUARD_MS:
-                        m["sk"].append(a.skew_ms)
-                    else:
-                        self.sk_discarded[a.asset_id] = (
-                            self.sk_discarded.get(a.asset_id, 0) + 1)
-            totals = self.sup.totals()
-            if self._last_totals is not None and totals["capital"] > 0:
-                self.port_hist.append(
-                    (totals["equity"] - self._last_totals["equity"]) / totals["capital"]
-                )
-            self._last_totals = totals
+        for snap in snapshots:
+            hist = self.asset_hist.setdefault(
+                snap["asset_id"], deque(maxlen=HISTORY_MAX)
+            )
+            hist.append(
+                (snap["equity"] / snap["capital"] - 1.0)
+                if snap["capital"] else 0.0
+            )
+
+            m = self.asset_metrics.setdefault(
+                snap["asset_id"],
+                {
+                    "lat": deque(maxlen=HISTORY_MAX),
+                    "stal": deque(maxlen=HISTORY_MAX),
+                    "sk": deque(maxlen=HISTORY_MAX),
+                },
+            )
+
+            if snap["lat_ms"] is not None:
+                m["lat"].append(snap["lat_ms"])
+            if snap["stal_ms"] is not None:
+                m["stal"].append(snap["stal_ms"])
+
+            if snap["skew_ms"] is not None:
+                if abs(snap["skew_ms"]) <= self.sup.SK_GUARD_MS:
+                    m["sk"].append(snap["skew_ms"])
+                else:
+                    self.sk_discarded[snap["asset_id"]] = (
+                        self.sk_discarded.get(snap["asset_id"], 0) + 1
+                    )
+
+        totals = self.sup.totals()
+        if self._last_totals is not None and totals["capital"] > 0:
+            self.port_hist.append(
+                (totals["equity"] - self._last_totals["equity"])
+                / totals["capital"]
+            )
+        self._last_totals = totals
 
     def _summary(self) -> dict:
         """Read portfolio totals directly from live AssetState (via snapshot),
@@ -521,7 +546,7 @@ class VimDashboard:
         # View 2 is a FAITHFUL MIRROR of the child's stdout: every line the
         # algo would print running bare in a terminal ([bar]/[net]/[order]/
         # [entry]/[exit]/[seed]/[regime]/...), timestamped, newest last.
-        lines = list(a.log_lines)
+        lines = snap["log_lines"]
         win_h = bot - top - 4
         shown = lines[-max(1, win_h):]
         for i, ln in enumerate(shown):
