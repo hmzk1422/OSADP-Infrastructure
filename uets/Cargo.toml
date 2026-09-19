@@ -1,0 +1,29 @@
+[package]
+name = "uets"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "uets"
+path = "executor/lib.rs"
+crate-type = ["cdylib", "rlib"]
+
+[features]
+# Opt-in only: maturin enables this automatically when building the Python
+# extension module. It must stay OFF for `cargo run --bin dev_test` -- an
+# rlib built with extension-module cannot be linked into an executable
+# (the Python C symbols would be unresolved at link time).
+extension-module = ["pyo3/extension-module"]
+
+[dependencies]
+binance = "0.21"
+pyo3 = "0.29"
+# Same major as what the `binance` crate pulls in (see Cargo.lock: 0.21.0) so
+# both resolve to one build. No TLS feature: tungstenite 0.21 enables
+# native-tls by default and the binance crate uses the vendored variant.
+tungstenite = "0.21"
+serde_json = "1"
+
+[[bin]]
+name = "dev_test"
+path = "executor/executor.rs"
