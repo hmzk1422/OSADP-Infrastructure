@@ -20,6 +20,11 @@ Asset performance differs materially. ETH significantly outperformed BTC and SOL
 
 ## Next Objective
 
-[ ] Regime detection + metalabeller implementation on live execution (Simultaneous execution of current model vs metalabeller to see performance difference).
+[X] Regime detection + metalabeller implementation on live execution (Simultaneous execution of current model vs metalabeller to see performance difference).
 
-[ ] Implementing Modern Portfolio Theory. Diversify through assets or strategies to reduce variance but rigorous testing must show positive expectancy.
+[X] Implementing Modern Portfolio Theory. Diversify through assets or strategies to reduce variance but rigorous testing must show positive expectancy.
+
+# OOD Identifer as Regime Detection (9 Sept 2026 - 13 Sept 2026)
+Possibility of edge decay (unproven, still running). Strategy suffers from terrible MDD (Average 20RR) and trade expectancy (Average +0.091RR). Research purged wf-validation and monte-carlo returned positive expectancy yet edge decayed very quickly. Past performance doesn't guarantee future results.
+- MoE system with underlying strategy using VQ-VAE to act as OOD filter. Still utilizes OFMR with each expert trained specifically for certain latent space. Use this as a method of trading only in markets we know.
+- Optimize strategy with objective of both sortino and trade expectancy in mind. Use improved data source, restart OFMR research over strategy. Not for solving edge, but rather solving for managing non-stationarity problem.

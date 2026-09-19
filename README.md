@@ -181,3 +181,16 @@ See `docs/TERMUX.md` for the Android/Termux setup (runs the same stack inside a 
 | Dashboard shows all DOWN | Check exchange/feed names; check network |
 | Config edit rejected | Check JSON syntax; the validator tells you what's wrong |
 | `live-trade` crashes on start | Check `config/portfolio.json` has an `assets` list with valid tickers |
+
+# Important System Commands
+**historical backtest ingestion**: keep concurrency deliberately low to avoid saturating disk I/O and network bandwidth. Run **two Binance download workers** for the smaller daily `aggTrades`/`bookDepth` files, while limiting **CryptoHFTData L2 to one worker** because its hourly order-book files are significantly larger and more disk-intensive. This prioritizes stable throughput and reliability over maximum parallelism.
+
+```bash
+python ingestion.py \
+  --symbol YOUR_SYMBOL \
+  --start-date START_DATE \ # 2025-06-28 furthest date
+  --end-date END_DATE \ # 2026-09-01 example (ISO date format)
+  --workers NUM_OF_WORKERS \
+  --overwrite # Use 
+  --delete-raw
+```
