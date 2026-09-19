@@ -1,0 +1,775 @@
+"""
+Live.py
+
+Serves as an abstraction between scripts/ingestion_v2 and the research framework.
+All of the files are stored inside of data_v2 based on the following. It's recommended
+for all data_v2 usage to take place through this function.
+
+data_v2
+|_ $exchange\$ticker\$datatype  # original source file (non-parquet)
+|_ parquet\$ticker\$datatype    # original source file (parquet)
+|_ manifests                    # stores metadata for atomic writing (ingestion exclusive)
+|_ matched\$ticker              # copy of source file
+
+Important
+- source files are read only for research. Read, write only for scripts/ingestion_v2.
+- matched files are read write for research. This system ensures source file cannot
+be corrupted/sabotaged by research computations.
+- Use case:
+    - fetch_parquet() copies to matched then perform write_parquet() or read_parquet()
+    to interact with matched files. O(n) but reduces overhead cost greatly by saving
+    state.
+    - read_source_data() works similarly to write_parquet(). It decompresses zstandard
+    to perform given function operation recursively until all data is processed, before
+    compressing back to zstandard. O(n) but perform this if and only if storage is a bottleneck
+    as it involves recomputing per batch.
+
+Keep each computation process with as little complexity as possible to keep it running fast
+"""
+
+import os
+import re
+from datetime import datetime, timezone
+from pathlib import Path
+
+import pandas as pd
+import polars as pl
+
+import research.MoE.data.dataconfig as cfg
+
+
+# ===========================================================
+# FILENAME MATCHING
+# ===========================================================
+
+# Matches e.g.  BTCUSDT_2026-02-01_2026-02-01_05-05.parquet
+# and the legacy BTCUSDT_2026-02-01_2026-02-05.parquet
+
+MATCH_PATTERN = re.compile(
+    r"_(\d{4}-\d{2}-\d{2})_(\d{4}-\d{2}-\d{2})(?:_(\d{2})-(\d{2}))?$"
+)
+
+# NOTE ON SORTING:
+# Source files are already sorted ascending and never cross hour boundaries
+# (verified: aggTrades daily files are monotonic in transact_time, CryptoHFT
+# hourly files are monotonic in event_time, and hour h+1 min >= hour h max).
+# The aggTrades frames are therefore concatenated in file order without any
+# runtime .sort(); sortedness is asserted via set_sorted() for join_asof.
+#
+# The LOB side is an incremental diff stream: each event_time batch holds the
+# changed levels for one timestamp, ordered asks-first / bids-last (verified:
+# 100% of batches end with a bid row). Joining the raw update rows asof would
+# always attach the batch's final row (a bid) to every trade — hence the
+# "bid only" artifact. The stream is therefore REPLAYED into L2 book
+# state (snapshot resets the book, quantity-0 updates remove a level) and one
+# book-state row is emitted per event_time batch, carrying the top-N levels
+# per side (N = lob_levels). This also fixes a subtle correctness issue of
+# the previous top-of-book aggregation: that code took the max/min price
+# among only the levels touched in the current batch, which is wrong whenever
+# the true best level was NOT touched in that batch.
+# CAVEAT: CryptoHFTData stopped embedding snapshot events after ~2025-06-30,
+# so for later windows the replayed state is a WARM START from diffs alone
+# (near-exact at levels 1-5, approximate deeper); see _build_multilevel_book.
+# group_by destroys ordering, so the aggregated book (~70k
+# rows/hour) is re-sorted by event_time — cheap now that it is no longer the
+# 6M-row raw stream.
+
+
+def _filter_parquet_files(
+    agg_path: Path,
+    lob_path: Path,
+    start: str,
+    end: str,
+):
+    agg_path = Path(agg_path)
+    lob_path = Path(lob_path)
+
+    agg = {
+        f.stem: f
+        for f in agg_path.rglob("*.parquet")
+        if start <= f.stem <= end
+    }
+
+    lob = {}
+    for day_dir in lob_path.iterdir():
+        if not day_dir.is_dir() or not (start <= day_dir.name <= end):
+            continue
+
+        # FIX (2026-09-18): support BOTH layouts —
+        #   unified parquet tree:  <day>/<HH>.parquet          (hour file)
+        #   legacy raw CHD tree:   <day>/<HH>/<symbol>_orderbook.parquet (hour dir)
+        # The raw tree is now empty (files were moved into the unified tree by
+        # convert_to_parquet.py), so the unified layout is the primary one.
+        for entry in day_dir.iterdir():
+            if entry.is_file() and entry.stem.isdigit() and entry.suffix == ".parquet":
+                lob[(day_dir.name, int(entry.stem))] = [entry]
+                continue
+
+            if entry.is_dir() and entry.name.isdigit():
+                files = sorted(entry.rglob("*.parquet"))
+
+                if files:
+                    lob[(day_dir.name, int(entry.name))] = files
+
+    lob_days = {day for day, _ in lob}
+
+    print("Missing aggTrades:", sorted(lob_days - agg.keys()))
+    print("Missing LOB:", sorted(agg.keys() - lob_days))
+
+    return [
+        (day, hour, agg[day], files)
+        for (day, hour), files in sorted(lob.items())
+        if day in agg
+    ]
+
+
+def _hour_start_ms(day: str, hour: int) -> int:
+    dt = datetime.strptime(day, "%Y-%m-%d").replace(
+        hour=hour,
+        tzinfo=timezone.utc,
+    )
+    return int(dt.timestamp() * 1000)
+
+
+# ===========================================================
+# MULTI-LEVEL LOB RECONSTRUCTION (true L2 replay)
+# ===========================================================
+
+def _build_multilevel_book(lob: pl.LazyFrame, levels: int, state: dict | None = None):
+    """
+    Reconstruct (the top-`levels` of) L2 book state from the CryptoHFTData
+    depth-diff stream and emit one book row per event_time.
+
+    Replay semantics (Binance depth-diff contract, as stored by CryptoHFTData):
+      - event_type == "snapshot": full-depth rows for one side -> that side's
+        book is RESET to exactly these rows (exact state).
+      - event_type == "update":   changed levels only; quantity == 0 removes
+        the level, quantity > 0 upserts it. Applied in file order (files are
+        monotonic in event_time; rows within one event_time batch belong to
+        one exchange event and are applied together).
+      - A price lives on exactly one side: upserting a price on one side
+        removes it from the other (handles bid <-> ask transitions).
+
+    DATA LIMITATION (verified 2026-09-18): CryptoHFTData embedded "snapshot"
+    events only until ~2025-06-30; from 2025-07-01 the hourly files are a
+    pure, chain-continuous diff stream (each hour's first prev_final_update_id
+    equals the previous hour's last final_update_id — verified across the
+    whole 2026-02-01..02 window). Without a snapshot the book cannot be
+    seeded exactly: a level that never changes is absent from the diff
+    stream, so its price/quantity are unknowable. In that regime this
+    function WARM-STARTS from diffs alone:
+      - shallow levels (1-5) converge to exact quickly (best levels change
+        constantly),
+      - deeper levels can be stale/missing until the level itself is touched,
+        so top-N ranking is approximate below the shallow levels.
+    Passing `state` chains replay state across contiguous files/hours so the
+    warm start improves as more history is replayed. Update-ID gaps
+    (prev_final_update_id != previous final_update_id) reset the state —
+    per CryptoHFTData's docs, unverifiable state must not be trusted.
+
+    Emission: one row AFTER all rows of an event_time batch are applied.
+    Rows whose (possibly approximate) state is crossed (best_bid >= best_ask)
+    are dropped and counted in stats["crossed_dropped"].
+
+    Returns (book_df, state, stats):
+        book_df columns:
+            event_time,
+            best_bid_price, best_bid_qty        (level 1 — legacy names),
+            bid_price_2 .. bid_price_{levels}, bid_qty_2 .. bid_qty_{levels},
+            best_ask_price, best_ask_qty,
+            ask_price_2 .. ask_price_{levels}, ask_qty_2 .. ask_qty_{levels}
+            (bids best/highest first, asks best/lowest first, missing = null),
+        state: replay state for chaining across contiguous chunks,
+        stats: {"crossed_dropped": int, "gaps": int, "snapshots": int}.
+    """
+    if levels < 1:
+        raise ValueError("levels must be >= 1")
+
+    from bisect import bisect_left, insort
+
+    raw = lob.select(
+        "event_time",
+        "event_type",
+        (pl.col("side") == "bid").alias("_bid"),
+        "price",
+        "quantity",
+        "prev_final_update_id",
+        "final_update_id",
+    ).collect()
+
+    event_time = raw["event_time"].to_list()
+    is_bid = raw["_bid"].to_list()
+    price = raw["price"].to_list()
+    quantity = raw["quantity"].to_list()
+    is_snapshot = [s == "snapshot" for s in raw["event_type"].to_list()]
+    prev_final_ids = raw["prev_final_update_id"].to_list()
+    final_ids = raw["final_update_id"].to_list()
+
+    if state is None:
+        state = {
+            "bid_qty": {}, "ask_qty": {},
+            "bid_px": [], "ask_px": [],
+            "last_final_update_id": None,
+        }
+    bid_qty = state["bid_qty"]
+    ask_qty = state["ask_qty"]
+    bid_px = state["bid_px"]  # kept sorted ascending
+    ask_px = state["ask_px"]  # kept sorted ascending
+    last_final = state["last_final_update_id"]
+
+    stats = {"crossed_dropped": 0, "gaps": 0, "snapshots": 0}
+
+    def _remove(side_is_bid: bool, p):
+        """Remove price p from one side's dict + sorted list (if present)."""
+        if side_is_bid:
+            if p in bid_qty:
+                del bid_qty[p]
+                idx = bisect_left(bid_px, p)
+                if idx < len(bid_px) and bid_px[idx] == p:
+                    del bid_px[idx]
+        else:
+            if p in ask_qty:
+                del ask_qty[p]
+                idx = bisect_left(ask_px, p)
+                if idx < len(ask_px) and ask_px[idx] == p:
+                    del ask_px[idx]
+
+    def _upsert(side_is_bid: bool, p, q):
+        # invariant: a price level lives on exactly one side
+        _remove(not side_is_bid, p)
+        if side_is_bid:
+            if p not in bid_qty:
+                insort(bid_px, p)
+            bid_qty[p] = q
+        else:
+            if p not in ask_qty:
+                insort(ask_px, p)
+            ask_qty[p] = q
+
+    rows_t: list = []
+    rows_bids: list = []  # per row: [(price, qty), ...] best-first
+    rows_asks: list = []
+
+    def emit(t):
+        if not bid_px or not ask_px:
+            return
+        # The true book never crosses; a crossing in (approximate) state
+        # means at least one side is stale -> drop the unverifiable row.
+        if bid_px[-1] >= ask_px[0]:
+            stats["crossed_dropped"] += 1
+            return
+        nb = min(levels, len(bid_px))
+        na = min(levels, len(ask_px))
+        rows_t.append(t)
+        # bids: best = highest price -> take from the top of the sorted list
+        rows_bids.append([(p, bid_qty[p]) for p in bid_px[: -nb - 1 : -1]])
+        # asks: best = lowest price -> take from the bottom of the sorted list
+        rows_asks.append([(p, ask_qty[p]) for p in ask_px[:na]])
+
+    prev_t = None
+    last_pf = None  # prev_final_update_id of the previous row (batch detection)
+    for i in range(len(event_time)):
+        t = event_time[i]
+
+        pf, fi = prev_final_ids[i], final_ids[i]
+        # Update-ID continuity, checked once per EVENT BATCH: rows within a
+        # batch share their ids, so a row-by-row comparison would compare the
+        # batch against itself. A gap means unverifiable state -> reset.
+        if pf != last_pf:
+            if (
+                not is_snapshot[i]
+                and last_final is not None
+                and pf is not None
+                and pf != last_final
+            ):
+                stats["gaps"] += 1
+                bid_qty.clear(); ask_qty.clear()
+                bid_px.clear(); ask_px.clear()
+                last_final = None
+            last_pf = pf
+        if fi is not None:
+            last_final = fi
+
+        if is_snapshot[i]:
+            if prev_t is not None and t != prev_t:
+                emit(prev_t)
+            prev_t = t
+            stats["snapshots"] += 1
+            # Snapshot rows replace the whole side (each side's rows are
+            # contiguous within the snapshot batch, so clearing per row is
+            # safe — the first row of the side wipes stale state).
+            (bid_qty if is_bid[i] else ask_qty).clear()
+            (bid_px if is_bid[i] else ask_px).clear()
+            _upsert(is_bid[i], price[i], quantity[i])
+            continue
+
+        if prev_t is None:
+            prev_t = t
+
+        # quantity == 0 means level REMOVAL in Binance depth diffs — it must
+        # never be upserted as a live (zero-qty) level.
+        if quantity[i] > 0:
+            _upsert(is_bid[i], price[i], quantity[i])
+        else:
+            _remove(is_bid[i], price[i])
+
+        if t != prev_t:
+            emit(prev_t)
+            prev_t = t
+
+    emit(prev_t)
+    state["last_final_update_id"] = last_final
+
+    data = {"event_time": rows_t}
+    for j in range(1, levels + 1):
+        bp, bq, ap, aq = [], [], [], []
+        for b, a in zip(rows_bids, rows_asks):
+            if len(b) >= j:
+                bp.append(b[j - 1][0])
+                bq.append(b[j - 1][1])
+            else:
+                bp.append(None)
+                bq.append(None)
+            if len(a) >= j:
+                ap.append(a[j - 1][0])
+                aq.append(a[j - 1][1])
+            else:
+                ap.append(None)
+                aq.append(None)
+        if j == 1:
+            data["best_bid_price"], data["best_bid_qty"] = bp, bq
+            data["best_ask_price"], data["best_ask_qty"] = ap, aq
+        else:
+            data[f"bid_price_{j}"], data[f"bid_qty_{j}"] = bp, bq
+            data[f"ask_price_{j}"], data[f"ask_qty_{j}"] = ap, aq
+
+    return (
+        pl.DataFrame(data)
+        .sort("event_time")
+        .with_columns(pl.col("event_time").set_sorted()),
+        state,
+        stats,
+    )
+
+
+# ===========================================================
+# OPTIONAL: BINANCE bookDepth (cumulative % band depth)
+# ===========================================================
+
+def _load_bookdepth_wide(days, start_ms: int, end_ms: int):
+    """
+    Load Binance bookDepth daily parquet files for the given days, restrict to
+    the chunk window, and pivot the long (timestamp x percentage) format into
+    one wide row per timestamp:
+
+        bd_depth_m1..m5 / bd_notional_m1..m5   (negative % = bid side below mid)
+        bd_depth_p1..p5 / bd_notional_p1..p5   (positive % = ask side above mid)
+
+    Returns a sorted polars DataFrame keyed on `timestamp` (epoch ms), or None
+    when no bookDepth data exists for the window (feature stays optional).
+    """
+    files = []
+    for day in sorted(set(days)):
+        p = Path(cfg.BOOKDEPTH_PATH) / f"{day}.parquet"
+        if p.exists():
+            files.append(str(p))
+        else:
+            print(f"bookDepth: no file for {day} ({p}) — skipping that day")
+
+    if not files:
+        return None
+
+    long = (
+        pl.scan_parquet(files)
+        .filter(
+            (pl.col("timestamp") >= start_ms)
+            & (pl.col("timestamp") < end_ms)
+            # percentage == 0 is a duplicated mid marker, not a depth band
+            # (bands are +-1..5); drop it so pivot keys are unique.
+            & (pl.col("percentage") != 0)
+        )
+        .collect()
+    )
+
+    if long.is_empty():
+        return None
+
+    wide_d = long.pivot(
+        index="timestamp", on="percentage", values="depth", aggregate_function="first"
+    )
+    wide_n = long.pivot(
+        index="timestamp", on="percentage", values="notional", aggregate_function="first"
+    )
+
+    def _rename_band(c: str, prefix: str) -> str:
+        p = int(str(c).split("_")[-1])
+        return f"bd_{prefix}_{'m' if p < 0 else 'p'}{abs(p)}"
+
+    wide_d = wide_d.rename(
+        {c: _rename_band(c, "depth") for c in wide_d.columns if c != "timestamp"}
+    )
+    wide_n = wide_n.rename(
+        {c: _rename_band(c, "notional") for c in wide_n.columns if c != "timestamp"}
+    )
+
+    wide = (
+        wide_d.sort("timestamp")
+        .with_columns(pl.col("timestamp").set_sorted())
+        .hstack(wide_n.drop("timestamp"))
+    )
+    return wide
+
+
+# ===========================================================
+# BUILD MATCHED DATA
+# ===========================================================
+
+def fetch_source_data(
+    agg_path=cfg.AGG_TRADES_PATH,
+    lob_path=cfg.LOB_PATH,
+    start=cfg.START_DATE,
+    end=cfg.END_DATE,
+    chunk_size=None,
+    precision=1,
+    lob_levels=20,
+    include_bookdepth=False,
+):
+    """
+    Match Binance aggTrades with CryptoHFT L2 data, hour by hour.
+
+    Each output file covers a contiguous hour range and is named
+    {TICKER}_{start_day}_{end_day}_{start_hour}-{end_hour}.parquet.
+
+    chunk_size:
+        Number of HOURS processed at once.
+        chunk_size=1 processes a single hour per pass, which keeps peak
+        memory at roughly one hourly LOB file (~5-7M rows).
+        None = all matching hours at once (high memory usage).
+
+    precision:
+        Row-reduction multiplier on the LOB side.
+        precision=N keeps 1 batch for every N consecutive event_time
+        batches (the book-state rows are subsampled by batch index).
+        precision=1 preserves every book-state batch.
+
+    lob_levels:
+        Number of LOB price levels per side included in the matched data.
+        The CryptoHFTData stream is a full-depth L2 diff feed; it is replayed
+        into book state (snapshot reset + ordered updates incl. qty=0
+        removals) and the top-`lob_levels` levels per side are attached to
+        each trade:
+            best_bid_price, best_bid_qty, bid_price_2..N, bid_qty_2..N
+            best_ask_price, best_ask_qty, ask_price_2..N, ask_qty_2..N
+        (bids best/highest first, asks best/lowest first). lob_levels=1
+        reproduces the legacy top-of-book-only schema.
+        ACCURACY: where the stream contains snapshots the replayed state is
+        exact. CryptoHFTData, however, stopped embedding snapshot events
+        after ~2025-06-30; for later windows the state is WARM-STARTED from
+        diffs alone and chained across contiguous hours — level 1-5 are
+        near-exact (best levels change constantly), deeper ranks can be
+        stale/missing until the level is touched. Crossed (unverifiable)
+        rows are dropped and reported. See _build_multilevel_book.
+
+    include_bookdepth:
+        If True, Binance bookDepth (cumulative depth/notional within +-1..5%
+        bands of mid, ~30s snapshots) is also asof-joined to each trade as
+        wide columns:
+            bd_depth_m1..m5, bd_notional_m1..m5  (negative % = bid side)
+            bd_depth_p1..p5, bd_notional_p1..p5  (positive % = ask side)
+        Off by default: the CHD L2 levels above are strictly richer; bookDepth
+        is a coarse fallback/robustness feature. Days without a bookDepth
+        parquet yield null bd_* columns for the affected trades.
+    """
+    if precision < 1:
+        raise ValueError("precision must be >= 1")
+    if lob_levels < 1:
+        raise ValueError("lob_levels must be >= 1")
+
+    hours = _filter_parquet_files(
+        agg_path,
+        lob_path,
+        start,
+        end,
+    )
+
+    if not hours:
+        return
+
+    if chunk_size is None:
+        chunk_size = len(hours)
+
+    output_dir = Path(cfg.MATCHED_PATH)
+    output_dir.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    replay_state = None
+    prev_chunk_end = None
+    totals = {"crossed_dropped": 0, "gaps": 0, "snapshots": 0}
+
+    for i in range(0, len(hours), chunk_size):
+
+        chunk = hours[i:i + chunk_size]
+
+        agg_files = []
+        for _, _, agg_file, _ in chunk:
+            if str(agg_file) not in agg_files:
+                agg_files.append(str(agg_file))
+
+        lob_files = [
+            str(file)
+            for _, _, _, lob_hour in chunk
+            for file in lob_hour
+        ]
+
+        # Restrict aggTrades to the chunk's hour window, otherwise trades
+        # from hours outside the chunk would match against stale LOB rows.
+        start_ms = _hour_start_ms(chunk[0][0], chunk[0][1])
+        end_ms = _hour_start_ms(chunk[-1][0], chunk[-1][1]) + 3_600_000
+
+        agg = (
+            pl.scan_parquet(agg_files)
+            .filter(
+                (pl.col("transact_time").is_not_null())
+                & (pl.col("transact_time") >= start_ms)
+                & (pl.col("transact_time") < end_ms)
+            )
+            # Already sorted on disk; assert it instead of re-sorting.
+            .with_columns(
+                pl.col("transact_time").set_sorted()
+            )
+        )
+
+        lob = (
+            pl.scan_parquet(lob_files)
+            .filter(
+                pl.col("event_time").is_not_null()
+            )
+            .with_columns(
+                pl.col("price").cast(pl.Float64),
+                pl.col("quantity").cast(pl.Float64),
+            )
+        )
+
+        # --- Multi-level LOB reconstruction ------------------------------
+        # Replay the depth-diff stream into book state and emit the
+        # top-`lob_levels` levels per side at every event_time. State chains
+        # across contiguous chunk hours (warm start improves with replayed
+        # history); it is reseeded on non-contiguous chunks, snapshots, or
+        # update-ID gaps. See _build_multilevel_book for full semantics and
+        # the snapshot-less (warm-start) data limitation.
+        if replay_state is not None and prev_chunk_end is not None:
+            expected_start = prev_chunk_end
+            if start_ms != expected_start:
+                # Non-contiguous chunk boundary: state unverifiable.
+                replay_state = None
+
+        book, replay_state, replay_stats = _build_multilevel_book(
+            lob, lob_levels, replay_state
+        )
+        totals["crossed_dropped"] += replay_stats["crossed_dropped"]
+        totals["gaps"] += replay_stats["gaps"]
+        totals["snapshots"] += replay_stats["snapshots"]
+        prev_chunk_end = end_ms
+
+        if precision > 1:
+            # Subsample whole book-state batches instead of raw diff rows.
+            book = (
+                book.with_row_index("_row_idx")
+                .filter(
+                    pl.col("_row_idx") % precision == precision - 1
+                )
+                .drop("_row_idx")
+            )
+
+        combined = agg.join_asof(
+            book.lazy(),
+            left_on="transact_time",
+            right_on="event_time",
+            strategy="backward",
+        )
+
+        # --- Optional: Binance bookDepth cumulative band depth -----------
+        if include_bookdepth:
+            bd = _load_bookdepth_wide(
+                [c[0] for c in chunk],
+                start_ms,
+                end_ms,
+            )
+            if bd is not None:
+                combined = (
+                    combined.with_columns(
+                        pl.col("transact_time").set_sorted()
+                    )
+                    .join_asof(
+                        bd.lazy().with_columns(
+                            pl.col("timestamp").set_sorted()
+                        ),
+                        left_on="transact_time",
+                        right_on="timestamp",
+                        strategy="backward",
+                    )
+                )
+            else:
+                print("bookDepth: no data in window — bd_* columns omitted")
+
+        start_day, start_hour = chunk[0][0], chunk[0][1]
+        end_day, end_hour = chunk[-1][0], chunk[-1][1]
+
+        output = (
+            output_dir
+            / f"{cfg.TICKER}_{start_day}_{end_day}_{start_hour:02d}-{end_hour:02d}.parquet"
+        )
+
+        tmp = output.with_name(
+            output.stem + ".tmp.parquet"
+        )
+
+        if tmp.exists():
+            tmp.unlink()
+
+        combined.sink_parquet(tmp)
+        os.replace(tmp, output)
+
+    print(
+        f"LOB replay: {totals['snapshots']} snapshot resets, "
+        f"{totals['gaps']} update-ID gaps, "
+        f"{totals['crossed_dropped']} crossed book rows dropped."
+    )
+
+# ===========================================================
+# READ MATCHED DATA
+# ===========================================================
+
+def read_source_data(
+    path=cfg.MATCHED_PATH,
+    start=cfg.START_DATE,
+    end=cfg.END_DATE,
+    chunk_size=None,
+):
+    """
+    Read matched parquet files into Pandas.
+
+    chunk_size:
+        Number of matched parquet files to read.
+        None = all matching files.
+    """
+
+    files = []
+
+    for f in Path(path).glob("*.parquet"):
+
+        match = MATCH_PATTERN.search(f.stem)
+
+        if match is None:
+            continue
+
+        file_start = match.group(1)
+        file_end = match.group(2)
+
+        if (
+            file_end >= start
+            and file_start <= end
+        ):
+            files.append(f)
+
+    files = sorted(files)
+
+    if not files:
+        available = sorted(
+            MATCH_PATTERN.search(f.stem).groups()
+            for f in Path(path).glob("*.parquet")
+            if MATCH_PATTERN.search(f.stem)
+        )
+
+        if available:
+            print(
+                f"No matched files between {start} and {end}. "
+                f"Available range: {available[0][0]} -> {available[-1][1]}"
+            )
+
+        return pd.DataFrame()
+
+    if chunk_size is not None:
+        files = files[:chunk_size]
+
+    if not files:
+        return pd.DataFrame()
+
+    return pd.concat(
+        (
+            pd.read_parquet(file)
+            for file in files
+        ),
+        ignore_index=True,
+    )
+
+
+# ===========================================================
+# WRITE / MODIFY MATCHED DATA
+# ===========================================================
+
+def write_source_data(
+    formula,
+    path=cfg.MATCHED_PATH,
+    start=cfg.START_DATE,
+    end=cfg.END_DATE,
+    state=None,
+):
+    """
+    Apply a stateful formula sequentially to matched parquet files.
+
+    The DataFrame is temporary.
+    State persists across files.
+    """
+
+    files = []
+
+    for f in Path(path).glob("*.parquet"):
+
+        match = MATCH_PATTERN.search(f.stem)
+
+        if match is None:
+            continue
+
+        file_start = match.group(1)
+        file_end = match.group(2)
+
+        if (
+            file_end >= start
+            and file_start <= end
+        ):
+            files.append(f)
+
+    files = sorted(files)
+
+    if state is None:
+        state = {}
+
+    for file in files:
+
+        df = pd.read_parquet(file)
+
+        df, state = formula(
+            df,
+            state,
+        )
+
+        tmp = file.with_suffix(".tmp.parquet")
+
+        df.to_parquet(
+            tmp,
+            index=False,
+        )
+
+        os.replace(
+            tmp,
+            file,
+        )
+
+        del df
+
+    return state
+
+can you check if this is all correct code logic wise?
