@@ -1,0 +1,3 @@
+# OFMR setting
+HTF_TIMEFRAME = "1min"
+LTF_TIMEFRAME = "1s"

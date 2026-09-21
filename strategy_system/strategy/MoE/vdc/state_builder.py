@@ -216,47 +216,6 @@ def add_leveraged_pair(
 
 def build_state(df):
     """
-    Builds the internal strategy mechanism for strategy.py
-    to backtest and interact with.
-    """
-
-    df_1 = reconstruct(
-        df,
-        "1m",
-        rule(),
-    )
-
-    df_2 = reconstruct(
-        df,
-        "5m",
-        rule(),
-    )
-
-    df = join_timeframes(
-        df_1,
-        df_2,
-    )
-
-    # -------------------------------------------------------
-    # Synthetic leveraged ETF pair / decay feature
-    # -------------------------------------------------------
-
-    df = add_leveraged_pair(
-        df,
-        price_col="price_close",
-        leverage=3.0,
-    )
-
-    print(df)
-
-    return df
-
-# ===============================================
-# STANDARD FUNCTIONS
-# ===============================================
-
-def build_state(df):
-    """
     Builds the interent strategy mechanism for strategy.py to backtest
     and interact with.
     """
