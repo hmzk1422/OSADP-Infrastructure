@@ -10,17 +10,44 @@ Binance Data Vision and CryptoHFTData provide different types of market data.
 Initially, only Binance aggTrades and bookDepth are used to account for data limitations (Both span 3 years, large quantity of data means model can be trained without dangers of overfitting). aggTrades provides the incremental accuracy while bookDepth provides a shallow, rough look at L2 data.
 ## Design choices
 ```bash
-scripts
-|_ ingestion.py
-|_ ingestion_L2
-   |_ ofp_data_downloader.py # Downloads binance and cryptohftdata files.
-   |_ parquet_converter.py # Converts binance data to parquet files
-   |_ spec_data_downloader.py # Orderflow and price are universal but certain features (liquidation, etc) are considered exclusive data.
+components
+|_ python
+   |_ ingestion_L2
+      |_ main.py                # unified executor: python main.py <command> [flags]
+      |_ datapaths.py           # single source of truth for the on-disk layout
+      |_ ofp_data_downloader.py # Stage 1: downloads binance and cryptohftdata files.
+      |_ convert_to_parquet.py  # Stage 2: converts raw files into the parquet tree
+      |_ zstandard_fix.py       # orderbook parquet: compress / decompress / repair
+      |_ refresh_matched.py     # rebuilds matched/ (wraps the strategy data layer)
+      |_ scan_snapshots.py      # census of snapshot-bearing orderbook hours
+      |_ validate_replay.py     # replay-invariant validation over matched/
+      |_ spec_data_downloader.py # Orderflow and price are universal but certain features (liquidation, etc) are considered exclusive data.
 
 Sequence
-ingestion.py --> download binance aggTrades + bookDepth --> download CryptoHFTData --> conversion to parquet files
+main.py pipeline --> download binance aggTrades + bookDepth --> download CryptoHFTData --> conversion to parquet files --> (optional) compress / refresh matched
 ```
-Everything is executed via unified runner ingestion.py. This is useful for single-command, reproducible research execution. This allows for possible future implementation (e.g. Self-aware trading strategy for autonomous alpha discovery, or complex web of trading systems).
+Everything is executed via the unified executor `main.py`. Every stage is also runnable on its own (`python main.py <command> --help` prints that stage's own flags), which keeps single-command reproducible research execution without losing the ability to run one step. This allows for possible future implementation (e.g. Self-aware trading strategy for autonomous alpha discovery, or complex web of trading systems).
+- **Everything ingestion lives in `ingestion_L2`**: no ingestion module, helper tool, or layout constant sits outside the component. `datapaths.py` owns the tree so a layout change is a one-file edit, and `main.py` is the only entry point needed to reach any of it.
+## Data layout
+Raw archival data and downstream analytical formats are separated, and each tree is keyed by **ticker and data type** — never by provider:
+```bash
+market_data
+|_ ingest_source                     # raw, provider-native, immutable
+|  |_ manifests/BTCUSDT_manifest.json  # atomic write log: status, paths, bytes, errors
+|  |_ BTCUSDT
+|     |_ aggTrades/<DATE>/BTCUSDT-aggTrades-<DATE>.zip     # Binance (daily)
+|     |_ bookDepth/<DATE>/BTCUSDT-bookDepth-<DATE>.zip     # Binance (daily)
+|     |_ orderbook/<DATE>/<HH>/BTCUSDT_orderbook.parquet   # CryptoHFTData L2 (hourly)
+|_ ingest_parquet                    # normalized, uniform parquet
+|  |_ BTCUSDT
+|     |_ aggTrades/<DATE>.parquet
+|     |_ bookDepth/<DATE>.parquet
+|     |_ orderbook/<DATE>/<HH>.parquet
+|_ matched                           # aggTrades x L2 join output, research read/write
+   |_ BTCUSDT/BTCUSDT_<start>_<end>_<start-HH>-<end-HH>.parquet
+```
+The provider is deliberately not a path segment: the dataset name already identifies it (`aggTrades` / `bookDepth` are Binance, `orderbook` is CryptoHFTData L2), and every consumer selects by data type. The mapping is recorded once, in code (`datapaths.PROVIDER_OF`), for manifest bookkeeping. `--root` (or `$MARKET_DATA_ROOT`) always names the `market_data` directory itself.
+- A tree predating this layout (`ingest_source/<provider>/<TICKER>/...`) is migrated with `python main.py migrate-layout --apply`, which re-homes the files and re-points the manifest (the old path is kept per entry as `legacy_path`).
 - **Controlled Concurrent workers/threading**: Run concurrent workers for aggTrades and BookDepth where each workers work on different dates/trade sequences. Threading works very well here as it speeds up download speed massively and there is no risk of interleaving by having workers work on each feed. Binance and CryptoHFTData is explicitly split to prevent disk overloading where running too many workers might cause overhead bottleneck and diminishing performance (CryptoHFTData being true L2 data makes it heavy)
 - **Provider-Specific Ingestion, Abstraction on Executor**: Data stream are chosen exclusively to be easily constructable as the following.
     - AggTrades: Directly obtained from websocket.

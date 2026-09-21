@@ -1,0 +1,14 @@
+[package]
+name = "rust_components"
+version = "0.1.0"
+edition = "2021"
+
+# Shared dependencies for ALL binaries in this folder
+[dependencies]
+arrow = "53"
+parquet_rs = { package = "parquet", version = "53", features = ["arrow"] }
+# pyo3 = "0.29" (if marl_test still needs it)
+
+[[bin]]
+name = "lob_replay"
+path = "lob_replay/btree_ver/main.rs"

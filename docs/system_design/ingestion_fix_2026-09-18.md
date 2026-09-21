@@ -238,6 +238,86 @@ not exist for these dates (verified: NoSuchKey).
 
 ### 6.4 Tooling
 
-- `scripts/_scan_snapshots.py <start> <end>`: parallel scan for
+- `main.py scan-snapshots --start <start> --end <end>`: parallel scan for
   snapshot-bearing orderbook files (projection-pushdown, 12 workers).
-- `scripts/_validate_replay.py`: ad-hoc validation snippets.
+- `main.py validate-replay [--start <d> --end <d>]`: replay-invariant
+  validation over the matched tree.
+
+---
+
+## 7. Layout + executor refactor (2026-09-19)
+
+Everything ingestion now lives in one component and the raw tree is keyed by
+**ticker and data type** instead of provider. No ingestion module, helper
+tool, or layout constant sits outside the component any more.
+
+### 7.1 Directory changes
+
+- Component: `scripts/` -> `library/python/` -> **`components/python/ingestion_L2/`**
+  (`ingestion.py` was folded into `main.py`; `refresh_matched.py`,
+  `_scan_snapshots.py` -> `scan_snapshots.py` and `_validate_replay.py` ->
+  `validate_replay.py` moved inside).
+- New `datapaths.py` owns the whole tree, so a path change is a one-file edit.
+  Roots resolve as `--root` > `$MARKET_DATA_ROOT` > `<repo>/market_data`, and
+  `--root` always names the `market_data` directory itself.
+- New `main.py` is the single executor: `pipeline`, `download`, `convert`,
+  `compress` / `decompress` / `repair`, `refresh-matched`, `scan-snapshots`,
+  `validate-replay`, `migrate-layout`, `layout`. Stage flags are forwarded
+  verbatim, so `main.py <command> --help` prints the stage's own options.
+  Stage modules stay individually runnable (each exposes `main(argv)`).
+
+| Before | After |
+|---|---|
+| `ingest_source/binance/<TICKER>/<dataset>/<DATE>/...` | `ingest_source/<TICKER>/<dataset>/<DATE>/...` |
+| `ingest_source/cryptohftdata/<TICKER>/orderbook/<DATE>/<HH>/...` | `ingest_source/<TICKER>/orderbook/<DATE>/<HH>/...` |
+| `parquet/<TICKER>/...` | `ingest_parquet/<TICKER>/...` |
+| `--root research/data_v2` | `--root market_data` |
+
+The provider is no longer a path segment (the dataset name already implies it:
+`aggTrades`/`bookDepth` = Binance, `orderbook` = CryptoHFTData L2). The mapping
+lives once in `datapaths.PROVIDER_OF`, used for manifest bookkeeping.
+
+`python main.py migrate-layout --apply` performs the move, re-points every
+manifest entry to the canonical path (keeping the original as `legacy_path`),
+stamps `layout_version: 2`, and prunes the emptied provider dirs.
+
+### 7.2 Refactor details
+
+- **Centralized paths.** `ofp_data_downloader.py`, `convert_to_parquet.py` and
+  `zstandard_fix.py` no longer build paths by hand
+  (`root / "binance" / symbol / ...`, a hard-coded
+  `research/data_v2/parquet/BTCUSDT/orderbook`, `./research/data_v2` defaults).
+  All of them call `datapaths`.
+- **`main(argv=None)` on every stage**, so the executor can import and call a
+  stage in-process instead of spawning a subprocess; `SystemExit` from argparse
+  or `sys.exit(1)` is converted into a return code and stops the pipeline.
+- **Raw-file pruning bug fixed.** `_delete_raw_file` walked up removing empty
+  parents with no floor, so it could delete the dataset dir and everything
+  above it. It now takes `stop=<dataset dir>` and never climbs past it.
+- **`migrate-layout` pruning** removes nested empty dirs deepest-first; a
+  top-down walk left empty `<dataset>/<DATE>/<HH>` shells behind.
+- **`refresh_matched.py`** no longer hard-codes the strategy package path. It
+  discovers `<...>/MoE/data/live.py` under the repo root and imports it by its
+  relative dotted path (so `research` -> `strategies` -> `strategy_system`
+  renames do not break ingestion), treats `dataconfig` as optional, and always
+  passes ingestion layout paths explicitly to `fetch_source_data(...)` so a
+  stale strategy-side path cannot silently match the wrong tree.
+- **`zstandard_fix.py`** gained `--symbol`/optional `--root` and defaults to
+  `<market_data>/ingest_parquet/<TICKER>/orderbook`.
+
+### 7.3 Validation (re-run after the refactor)
+
+- `main.py layout`: `aggTrades` 431 days, `bookDepth` 431 days, `orderbook`
+  431 days / 10,138 hourly files (2025-06-28 .. 2026-09-01), 48 matched files.
+- `main.py migrate-layout --apply`: 11,206 manifest entries re-pointed, 0 stale
+  `research/data_v2` paths left, `legacy_path` preserved.
+- `main.py convert --symbol BTCUSDT`: idempotent no-op (all outputs present).
+- `main.py scan-snapshots --start 2025-06-28 --end 2025-06-28`: reproduces the
+  §6.2 census (19/19 hours, 12,000 snapshot rows each).
+- `main.py validate-replay --start 2026-02-01 --end 2026-02-02`: 48 files,
+  8,133,068 rows, 0 null best bid/ask, 0 crossed, 0 level-order violations,
+  spread min 0.1 / max 3,935.3, bookDepth coverage 99.676%. Matches §6.3.
+- `main.py refresh-matched`: resolves `strategy_system.strategy.MoE.data`, then
+  reports that the strategy layer's own `import research.MoE.data.dataconfig`
+  is stale (exit 2). The strategy-side import path is a strategy-layer change,
+  outside ingestion; the ingestion trees are intact either way.
