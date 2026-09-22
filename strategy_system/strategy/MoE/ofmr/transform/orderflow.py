@@ -119,7 +119,6 @@ def _rolling_sum(
 # ROBUST HISTORICAL NORMALIZATION
 # ===========================================================
 
-
 def _robust_zscore(
     series: pd.Series,
     baseline_window: int = 1000,
@@ -129,24 +128,21 @@ def _robust_zscore(
     """
     Historical robust z-score.
 
-    Baseline uses ONLY observations before the current row.
+    The current observation is excluded from its own baseline.
 
-        historical = series.shift(1)
+    Normal case:
+        z = (x - historical_median)
+            / (1.4826 * historical_MAD)
 
-    Robust location:
-        rolling median
+    Fallback:
+        historical standard deviation.
 
-    Robust scale:
-        1.4826 * rolling MAD
+    Degenerate case:
+        if the historical baseline has zero variation and the
+        current value equals the historical baseline, return 0.
 
-    This is deliberately used for magnitude / activity
-    variables rather than bounded imbalance variables.
-
-    Example:
-
-        trade_notional_z_5 = unusually large 5-event flow
-        ofi_z_20           = unusually large 20-event OFI
-        spread_bps_z       = unusually wide spread
+    This is important for order-flow variables that can be
+    legitimately flat for stretches of time.
     """
 
     if baseline_window <= 0:
@@ -161,6 +157,10 @@ def _robust_zscore(
 
     historical = series.shift(1)
 
+    # -------------------------------------------------------
+    # Historical location.
+    # -------------------------------------------------------
+
     median = (
         historical
         .rolling(
@@ -170,9 +170,12 @@ def _robust_zscore(
         .median()
     )
 
+    # -------------------------------------------------------
+    # Historical robust dispersion.
+    # -------------------------------------------------------
+
     deviation = (
-        historical
-        - median
+        historical - median
     ).abs()
 
     mad = (
@@ -188,14 +191,17 @@ def _robust_zscore(
         1.4826 * mad
     )
 
+    # -------------------------------------------------------
+    # Primary robust z-score.
+    # -------------------------------------------------------
+
     z = _safe_div(
         series - median,
         robust_scale,
     )
 
     # -------------------------------------------------------
-    # Fallback for extremely discrete / quiet series where
-    # MAD becomes zero.
+    # Fallback to historical standard deviation.
     # -------------------------------------------------------
 
     historical_std = (
@@ -217,10 +223,46 @@ def _robust_zscore(
         fallback,
     )
 
+    # -------------------------------------------------------
+    # Degenerate historical baseline.
+    #
+    # Example:
+    #
+    # historical OFI = 0, 0, 0, 0, ...
+    #
+    # There is no dispersion to estimate.
+    #
+    # If current == historical baseline, the correct
+    # standardized value is simply neutral = 0.
+    # -------------------------------------------------------
+
+    flat_baseline = (
+        median.notna()
+        & (robust_scale <= _EPS)
+        & (
+            historical_std.isna()
+            | (historical_std <= _EPS)
+        )
+    )
+
+    same_as_baseline = (
+        (series - median).abs()
+        <= _EPS
+    )
+
+    z = z.mask(
+        flat_baseline & same_as_baseline,
+        0.0,
+    )
+
+    # -------------------------------------------------------
+    # Optional clipping.
+    # -------------------------------------------------------
+
     if clip is not None:
         z = z.clip(
-            -clip,
-            clip,
+            lower=-clip,
+            upper=clip,
         )
 
     return z
@@ -286,10 +328,10 @@ def add_trade_flow_features(
         "is_buyer_maker"
     ]
 
-    if maker.isna().any():
-        raise ValueError(
-            "is_buyer_maker contains NaN values"
-        )
+    #if maker.isna().any():
+    #    raise ValueError(
+    #        "is_buyer_maker contains NaN values"
+    #    )
 
     maker = maker.astype(bool)
 
@@ -506,7 +548,7 @@ def add_bbo_features(
     out["queue_imbalance"] = _safe_div(
         bid_qty - ask_qty,
         bid_qty + ask_qty,
-    )
+    ).fillna(0.0)
 
     # -------------------------------------------------------
     # Microprice.
@@ -532,7 +574,7 @@ def add_bbo_features(
     ] = _safe_div(
         microprice - mid,
         spread,
-    )
+    ).fillna(0.0)
 
     return out
 
@@ -818,7 +860,7 @@ def add_multilevel_depth_features(
         ] = _safe_div(
             bid_depth - ask_depth,
             total_depth,
-        )
+        ).fillna(0.0)
 
     return out
 

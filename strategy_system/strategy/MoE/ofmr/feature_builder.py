@@ -30,6 +30,7 @@ def macro_features(df, timeframe):
     - Runs reconstruct(df, timeframe) first before computing the features
     - returns dataframe reconstructed based on the timeframe
     """
+    df = df.copy()
     df = reconstruct(
         df,
         timeframe,
@@ -52,6 +53,8 @@ def micro_features(df, timeframe):
     - Runs reconstruct(df, timeframe) first before computing the feature.
     - Run macro_features first before running micro_features as this will be the final output
     """
+    df = df.copy()
+    df = reconstruct(df, timeframe)
     df, feat_col = add_orderflow(df)
 
     return df, feat_col
@@ -62,15 +65,41 @@ def compute_feature(df):
     - Ensures lookahead bias is avoided clearly here
     - Exports only the columns needed
     """
-    df, macro_feat_col = macro_features(df,"5m",)
+    df_1, macro_feat_col = macro_features(
+        df,
+        "5min",
+    )
 
-    df, micro_feat_col = micro_features(df,1)
+    df_2, micro_feat_col = micro_features(
+        df,
+        "1min"
+    )
+    df = join_timeframes(
+        df_2,
+        df_1,
+        "5min",
+    )
+    # join_timeframes prefixes higher-timeframe columns
+    # with "htf_".
+    macro_feat_col = [
+        f"htf_{col}"
+        for col in macro_feat_col
+    ]
 
-    feat_col = (macro_feat_col + micro_feat_col)
+    feat_col = (
+        macro_feat_col
+        + micro_feat_col
+    )
+
+    # Features use information available at t-1.
+    # price_close remains unshifted.
 
     df[feat_col] = (
         df[feat_col]
         .shift(1)
+    )
+    df = df.dropna(
+        subset=feat_col
     )
 
     return df[

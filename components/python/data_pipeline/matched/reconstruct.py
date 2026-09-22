@@ -25,8 +25,8 @@ def rule(selection=1):
     rules = {
         "price": "ohlc",
 
-        "qty": "last",
-        "quantity": "last",
+        "qty": "sum",
+        "quantity": "sum",
         "notional": "last",
 
         "bool": "mean",
@@ -221,10 +221,6 @@ def reconstruct(
 
     df[time_col] = _convert_timestamp(
         df[time_col]
-    )
-
-    df = df.dropna(
-        subset=[time_col]
     )
 
     # Use agg_trade_id as a tie-breaker when available.
@@ -815,6 +811,236 @@ def join_timeframes(
         result
         .set_index(time_col)
         .sort_index()
-    ).dropna(axis=0, how="any")
+    )
 
     return result
+
+def check_missing_time(
+    df,
+    timeframe,
+    causal_col="agg_trade_id",
+):
+    """
+    Validate continuity of a reconstructed sequence.
+
+    Timeframe
+    ---------
+    String:
+        Time-based timeframe, e.g. "1m", "5m", "1h".
+
+        Checks for missing timestamps at the expected frequency.
+
+    Integer:
+        Tick-based timeframe, e.g. 1, 10, 100.
+
+        There is no fixed time interval between tick bars, so
+        timestamp frequency cannot be checked directly.
+
+        When `causal_col` exists, the function checks that the
+        reconstructed tick bars advance continuously according
+        to the requested tick size.
+
+    Raises
+    ------
+    TypeError
+        Invalid dataframe index.
+
+    ValueError
+        Duplicate timestamps, non-monotonic timestamps, or
+        missing time/tick observations.
+    """
+
+    if not isinstance(
+        df.index,
+        pd.DatetimeIndex,
+    ):
+        raise TypeError(
+            "DataFrame must have a DatetimeIndex."
+        )
+
+    if df.empty:
+        return
+
+    timestamps = df.index
+
+    # --------------------------------------------------------
+    # Timestamp ordering
+    # --------------------------------------------------------
+
+    if not timestamps.is_monotonic_increasing:
+        raise ValueError(
+            "Timestamps are not monotonically increasing."
+        )
+
+    if timestamps.has_duplicates:
+        raise ValueError(
+            "Duplicate timestamps found."
+        )
+
+    # ========================================================
+    # TICK TIMEFRAME
+    # ========================================================
+
+    if isinstance(
+        timeframe,
+        (int, np.integer),
+    ):
+
+        if timeframe <= 0:
+            raise ValueError(
+                "Tick timeframe must be greater than 0."
+            )
+
+        # ----------------------------------------------------
+        # There is no expected timestamp frequency for ticks.
+        #
+        # Example:
+        #
+        # tick 1  -> 12:00:00.001
+        # tick 2  -> 12:00:00.018
+        # tick 3  -> 12:00:01.203
+        #
+        # All are perfectly valid.
+        #
+        # Therefore use the causal event ID instead.
+        # ----------------------------------------------------
+
+        if causal_col not in df.columns:
+            raise ValueError(
+                f"Cannot validate tick continuity because "
+                f"'{causal_col}' is not present."
+            )
+
+        ids = pd.to_numeric(
+            df[causal_col],
+            errors="coerce",
+        )
+
+        if ids.isna().any():
+            raise ValueError(
+                f"'{causal_col}' contains NaN values."
+            )
+
+        if not ids.is_monotonic_increasing:
+            raise ValueError(
+                f"'{causal_col}' is not monotonically increasing."
+            )
+
+        if ids.duplicated().any():
+            raise ValueError(
+                f"Duplicate '{causal_col}' values found."
+            )
+
+        # ----------------------------------------------------
+        # A reconstructed N-tick bar should advance by N
+        # aggregate trades if the underlying event stream is
+        # complete.
+        #
+        # Example for timeframe=10:
+        #
+        #     1000
+        #     1010
+        #     1020
+        #     1030
+        #
+        # A jump:
+        #
+        #     1000
+        #     1020
+        #
+        # implies missing source events.
+        # ----------------------------------------------------
+
+        diff = ids.diff().dropna()
+
+        expected_step = timeframe
+
+        missing = diff[
+            diff != expected_step
+        ]
+
+        if not missing.empty:
+
+            examples = []
+
+            for index in missing.index[:20]:
+
+                position = df.index.get_loc(
+                    index
+                )
+
+                previous_id = ids.iloc[
+                    position - 1
+                ]
+
+                current_id = ids.iloc[
+                    position
+                ]
+
+                actual_step = (
+                    current_id
+                    - previous_id
+                )
+
+                examples.append(
+                    {
+                        "timestamp": index,
+                        "previous_id": previous_id,
+                        "current_id": current_id,
+                        "expected_step": expected_step,
+                        "actual_step": actual_step,
+                    }
+                )
+
+            raise ValueError(
+                f"Missing or irregular tick sequence: "
+                f"{len(missing)} irregular transitions.\n"
+                f"Examples:\n{examples}"
+            )
+
+        return
+
+    # ========================================================
+    # TIMEFRAME
+    # ========================================================
+
+    if not isinstance(
+        timeframe,
+        str,
+    ):
+        raise TypeError(
+            "timeframe must be either an integer tick size "
+            "or a string timeframe such as '1m', '5m', '1h'."
+        )
+
+    # --------------------------------------------------------
+    # Use the same normalization logic as reconstruct().
+    # --------------------------------------------------------
+
+    timeframe = _normalize_timeframe(
+        timeframe
+    )
+
+    duration = pd.to_timedelta(
+        timeframe
+    )
+
+    expected = pd.date_range(
+        start=timestamps.min(),
+        end=timestamps.max(),
+        freq=timeframe,
+    )
+
+    missing = expected.difference(
+        timestamps
+    )
+
+    if len(missing) > 0:
+
+        raise ValueError(
+            f"Missing timestamps for timeframe "
+            f"'{timeframe}': "
+            f"{len(missing)} missing.\n"
+            f"First missing timestamps:\n"
+            f"{missing[:20].tolist()}"
+        )
