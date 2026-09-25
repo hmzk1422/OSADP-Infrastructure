@@ -1,411 +1,126 @@
 import pandas as pd
 import numpy as np
-import pyarrow.parquet as pq
 
 INPUT = "23.parquet"
-
-SUMMARY_OUT = "23_check_summary.csv"
-NULLS_OUT = "23_check_nulls.csv"
-EVENT_TYPES_OUT = "23_check_event_types.csv"
-
+TICK_SIZE = 0.01
 
 df = pd.read_parquet(INPUT)
 
+lob = df[df["event_type"] == "LOB"].copy()
 
-# ============================================================
-# TIMESTAMP
-# ============================================================
+print(f"LOB rows: {len(lob):,}")
 
-if "event_time" in df.columns:
-    time_col = "event_time"
-elif "timestamp" in df.columns:
-    time_col = "timestamp"
-else:
-    raise ValueError(
-        "No event_time or timestamp column found."
-    )
-
-times = (
-    df[time_col]
-    .dropna()
-    .drop_duplicates()
-    .sort_values()
+# Best prices
+lob["spread"] = (
+    lob["book_state__best_ask_price"]
+    - lob["book_state__best_bid_price"]
 )
 
-gaps = times.diff().dropna()
-
-# Detect timestamp unit
-if len(times) > 0:
-    max_time = abs(times.iloc[-1])
-
-    if max_time > 1e17:
-        divisor = 1e9
-        unit = "ns"
-    elif max_time > 1e14:
-        divisor = 1e6
-        unit = "us"
-    elif max_time > 1e11:
-        divisor = 1e3
-        unit = "ms"
-    else:
-        divisor = 1
-        unit = "s"
-else:
-    divisor = 1
-    unit = "unknown"
-
-
-# ============================================================
-# SUMMARY
-# ============================================================
-
-summary = []
-
-
-def add(category, metric, value, unit_value=""):
-    summary.append({
-        "category": category,
-        "metric": metric,
-        "value": value,
-        "unit": unit_value,
-    })
-
-
-add("file", "rows", len(df))
-add("file", "columns", len(df.columns))
-
-add(
-    "time",
-    "timestamp_column",
-    time_col,
+lob["spread_ticks"] = (
+    lob["spread"] / TICK_SIZE
 )
 
-add(
-    "time",
-    "timestamp_unit",
-    unit,
+print("\nSpread statistics:")
+print(
+    lob["spread"].describe(
+        percentiles=[
+            0.01,
+            0.05,
+            0.50,
+            0.95,
+            0.99,
+        ]
+    )
 )
 
-add(
-    "time",
-    "unique_timestamps",
-    len(times),
+print("\nSpread in ticks:")
+print(
+    lob["spread_ticks"].describe(
+        percentiles=[
+            0.01,
+            0.05,
+            0.50,
+            0.95,
+            0.99,
+        ]
+    )
 )
 
-if len(times) > 1:
-    add(
-        "time",
-        "minimum_gap",
-        gaps.min(),
-        unit,
+# Suspicious spreads
+for threshold in [1, 2, 5, 10, 50, 100]:
+    count = (
+        lob["spread_ticks"] > threshold
+    ).sum()
+
+    pct = count / len(lob) * 100
+
+    print(
+        f"> {threshold:>3} ticks: "
+        f"{count:>8,} "
+        f"({pct:.3f}%)"
     )
 
-    add(
-        "time",
-        "1_percent_gap",
-        gaps.quantile(0.01),
-        unit,
-    )
+# Number of populated levels
+bid_levels = [
+    f"book_state__bid_price_{i}"
+    for i in range(2, 21)
+]
 
-    add(
-        "time",
-        "5_percent_gap",
-        gaps.quantile(0.05),
-        unit,
-    )
+ask_levels = [
+    f"book_state__ask_price_{i}"
+    for i in range(2, 21)
+]
 
-    add(
-        "time",
-        "10_percent_gap",
-        gaps.quantile(0.10),
-        unit,
-    )
+lob["bid_levels"] = lob[
+    ["book_state__best_bid_price"] + bid_levels
+].notna().sum(axis=1)
 
-    add(
-        "time",
-        "25_percent_gap",
-        gaps.quantile(0.25),
-        unit,
-    )
+lob["ask_levels"] = lob[
+    ["book_state__best_ask_price"] + ask_levels
+].notna().sum(axis=1)
 
-    add(
-        "time",
-        "median_gap",
-        gaps.quantile(0.50),
-        unit,
-    )
+print("\nBid levels:")
+print(lob["bid_levels"].describe())
 
-    add(
-        "time",
-        "75_percent_gap",
-        gaps.quantile(0.75),
-        unit,
-    )
+print("\nAsk levels:")
+print(lob["ask_levels"].describe())
 
-    add(
-        "time",
-        "90_percent_gap",
-        gaps.quantile(0.90),
-        unit,
-    )
-
-    add(
-        "time",
-        "95_percent_gap",
-        gaps.quantile(0.95),
-        unit,
-    )
-
-    add(
-        "time",
-        "99_percent_gap",
-        gaps.quantile(0.99),
-        unit,
-    )
-
-    add(
-        "time",
-        "maximum_gap",
-        gaps.max(),
-        unit,
-    )
-
-    add(
-        "time",
-        "average_gap",
-        gaps.mean(),
-        unit,
-    )
-
-    add(
-        "time",
-        "average_gap_seconds",
-        gaps.mean() / divisor,
-        "seconds",
-    )
-
-    add(
-        "time",
-        "median_gap_seconds",
-        gaps.quantile(0.50) / divisor,
-        "seconds",
-    )
-
-    add(
-        "time",
-        "1_percent_gap_seconds",
-        gaps.quantile(0.01) / divisor,
-        "seconds",
-    )
-
-    add(
-        "time",
-        "5_percent_gap_seconds",
-        gaps.quantile(0.05) / divisor,
-        "seconds",
-    )
-
-    add(
-        "time",
-        "95_percent_gap_seconds",
-        gaps.quantile(0.95) / divisor,
-        "seconds",
-    )
-
-    add(
-        "time",
-        "99_percent_gap_seconds",
-        gaps.quantile(0.99) / divisor,
-        "seconds",
-    )
-
-    add(
-        "time",
-        "maximum_gap_seconds",
-        gaps.max() / divisor,
-        "seconds",
-    )
-
-    add(
-        "time",
-        "total_time_span_seconds",
-        (
-            times.iloc[-1] - times.iloc[0]
-        ) / divisor,
-        "seconds",
-    )
-
-    add(
-        "time",
-        "gaps_gt_2x_median",
-        int(
-            (gaps > gaps.median() * 2).sum()
-        ),
-    )
-
-    add(
-        "time",
-        "gaps_gt_5x_median",
-        int(
-            (gaps > gaps.median() * 5).sum()
-        ),
-    )
-
-    add(
-        "time",
-        "gaps_gt_10x_median",
-        int(
-            (gaps > gaps.median() * 10).sum()
-        ),
-    )
-
-
-# ============================================================
-# NULL / NaN
-# ============================================================
-
-null_counts = df.isna().sum()
-
-for column in df.columns:
-    count = int(null_counts[column])
-
-    percentage = (
-        count / len(df) * 100
-        if len(df) > 0
-        else 0.0
-    )
-
-    add(
-        "nulls",
-        f"{column}_null_count",
-        count,
-    )
-
-    add(
-        "nulls",
-        f"{column}_null_percent",
-        percentage,
-        "percent",
-    )
-
-
-add(
-    "nulls",
-    "total_null_cells",
-    int(null_counts.sum()),
+print("\nRows with fewer than 20 bid levels:")
+print(
+    (lob["bid_levels"] < 20).sum()
 )
 
-
-# ============================================================
-# INFINITY
-# ============================================================
-
-numeric_cols = df.select_dtypes(
-    include=np.number
-).columns
-
-total_infinity = 0
-
-for column in numeric_cols:
-    values = df[column].to_numpy(
-        dtype=float,
-        na_value=np.nan,
-    )
-
-    count = int(
-        np.isinf(values).sum()
-    )
-
-    total_infinity += count
-
-    if count:
-        add(
-            "infinity",
-            f"{column}_infinity_count",
-            count,
-        )
-
-add(
-    "infinity",
-    "total_infinity_cells",
-    total_infinity,
+print("\nRows with fewer than 20 ask levels:")
+print(
+    (lob["ask_levels"] < 20).sum()
 )
 
-
-# ============================================================
-# DUPLICATES
-# ============================================================
-
-duplicate_rows = int(
-    df.duplicated().sum()
+# Crossed book
+crossed = (
+    lob["book_state__best_bid_price"]
+    >= lob["book_state__best_ask_price"]
 )
 
-add(
-    "duplicates",
-    "completely_duplicate_rows",
-    duplicate_rows,
+print("\nCrossed books:")
+print(crossed.sum())
+
+# Show worst examples
+print("\nWorst 20 spreads:")
+print(
+    lob[
+        [
+            "timestamp",
+            "lob__event_time",
+            "lob__final_update_id",
+            "book_state__best_bid_price",
+            "book_state__best_ask_price",
+            "spread",
+            "spread_ticks",
+            "bid_levels",
+            "ask_levels",
+        ]
+    ]
+    .sort_values("spread", ascending=False)
+    .head(20)
+    .to_string(index=False)
 )
-
-
-# ============================================================
-# EVENT TYPES
-# ============================================================
-
-if "event_type" in df.columns:
-    event_counts = (
-        df["event_type"]
-        .value_counts(dropna=False)
-        .rename_axis("event_type")
-        .reset_index(name="row_count")
-    )
-
-    event_counts["percent"] = (
-        event_counts["row_count"]
-        / len(df)
-        * 100
-    )
-
-    event_counts.to_csv(
-        EVENT_TYPES_OUT,
-        index=False,
-    )
-
-
-# ============================================================
-# WRITE SUMMARY
-# ============================================================
-
-summary_df = pd.DataFrame(summary)
-
-summary_df.to_csv(
-    SUMMARY_OUT,
-    index=False,
-)
-
-# Separate, easy-to-read column null report
-null_report = pd.DataFrame({
-    "column": df.columns,
-    "null_count": [
-        int(null_counts[col])
-        for col in df.columns
-    ],
-})
-
-null_report["null_percent"] = (
-    null_report["null_count"]
-    / len(df)
-    * 100
-)
-
-null_report.to_csv(
-    NULLS_OUT,
-    index=False,
-)
-
-
-print("Done.")
-print(f"Summary:      {SUMMARY_OUT}")
-print(f"Nulls:        {NULLS_OUT}")
-
-if "event_type" in df.columns:
-    print(f"Event types:  {EVENT_TYPES_OUT}")
