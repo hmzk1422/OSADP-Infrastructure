@@ -21,6 +21,49 @@ Designed for high-volume quantitative research and backtesting, with:
 | -------- | -------- | -------- |
 | lob_snapshot_build_source    | Writes directly on PATH to build orderbook snapshot on hour 00 of each day, or optionally, write the snapshots on all rows.     | O(n), where n = number of LOB rows inside parquet but with write all snapshot on, overhead drastically increases    |
 
+## Get Started with L2 Orderbook Replay
+Day start checkpoint
+```bash
+cargo run --release -- ingest-parquet \
+    --input <FILE|DIR> \
+    --output-dir <DIR> \
+    --tick-size <F> \
+    [--snapshot-policy <day_start|every_event>] \
+    [--warm-start]
+```
+Per event reconstruction
+```bash
+cargo run --release -- ingest-parquet \
+    --input ./data/raw_depth/BTCUSDT_2026-01-01.parquet \
+    --output-dir ./data/event_snapshots/ \
+    --tick-size 0.00000001 \
+    --snapshot-policy every_event \
+    --warm-start
+```
+Columnar Replay Event
+```bash
+lob_replay columnar \
+    --input <FILE> \
+    --output <FILE> \
+    --tick-size <F> \
+    --levels <N> \
+    --snapshot-policy <day_start|every_event> \
+    [--snapshot-dir <DIR>] \
+    [--snapshot-levels <N>] \
+    [--seed-snapshot <FILE>] \
+    [--skip-until <MS>] \
+    [--warm-start]
+```
+Single parquet file, full book checkpoint (Legacy)
+```
+lob_replay matched \
+    --input <FILE> \
+    --output <FILE> \
+    --tick-size <F> \
+    [--warm-start]
+```
+
+
 ## Why This Exists
 
 Historical L2 data is not directly usable for strategy research.
