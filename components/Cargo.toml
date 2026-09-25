@@ -15,5 +15,5 @@ path = "rust/lob_builder/btree_ver/main.rs"
 
 [[bin]]
 name = "event_merger"
-path = "rust/event_merger/main.rs"
+path = "rust/event_merger/merger/main.rs"
 

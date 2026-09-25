@@ -49,6 +49,8 @@ fn first_matching_file(root: &std::path::Path, date: &str, hour: u32) -> Option<
             }
             let name = path.file_name().and_then(|value| value.to_str()).unwrap_or_default();
             if name == format!("{hh}.parquet")
+                || name == format!("{hh}_every_event.parquet")
+                || name.ends_with("_every_event.parquet")
                 || name.contains(&format!("{date}_{hh}"))
                 || name.contains(&format!("{date}-{hh}"))
                 || name.contains(&format!("{date}_{date}_{hh}-{hh}"))
@@ -70,6 +72,23 @@ fn matched_lob_path(
 ) -> std::path::PathBuf {
     let hh = format!("{hour:02}");
     let candidates = [
+        work.join("orderflow")
+            .join(date)
+            .join(&hh)
+            .join(format!("{hh}_every_event.parquet")),
+        work.join("orderflow")
+            .join(date)
+            .join(&hh)
+            .join(format!("{hh}.parquet")),
+        work.join(date)
+            .join(&hh)
+            .join(format!("{hh}_every_event.parquet")),
+        work.join(date)
+            .join(&hh)
+            .join(format!("{hh}.parquet")),
+        work.join(&hh).join(format!("{hh}_every_event.parquet")),
+        work.join(&hh).join(format!("{hh}.parquet")),
+        work.join(format!("{hh}_every_event.parquet")),
         work.join("lob_state")
             .join(date)
             .join(format!("{hh}.parquet")),
@@ -168,8 +187,7 @@ pub fn hour_inputs(args: &MergeArgs) -> Result<HourInputs, BoxError> {
         .root
         .join("matched")
         .join(&args.symbol)
-        .join("sparse")
-        .join(&args.date);
+        .join("sparse");
 
     Ok(HourInputs {
         lob_paths,
