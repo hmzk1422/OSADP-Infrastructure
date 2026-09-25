@@ -11,4 +11,9 @@ parquet_rs = { package = "parquet", version = "53", features = ["arrow"] }
 
 [[bin]]
 name = "lob_replay"
-path = "lob_replay/btree_ver/main.rs"
+path = "rust/lob_builder/btree_ver/main.rs"
+
+[[bin]]
+name = "event_merger"
+path = "rust/event_merger/main.rs"
+

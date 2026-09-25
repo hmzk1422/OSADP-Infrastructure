@@ -43,7 +43,7 @@ LOB_CHECKPOINT_HOUR_UTC = 0
 SNAPSHOT_DIRNAME = "snapshots"
 
 SNAPSHOT_POLICY_DAY_START = "day_start"
-SNAPSHOT_POLICY_EVERY_EVENT = "every_event"
+SNAPSHOT_POLICY_EVERY_EVENT = "every_snapshot"
 
 SNAPSHOT_POLICIES = (
     SNAPSHOT_POLICY_DAY_START,
@@ -68,7 +68,9 @@ REPLAY_STATS_KEYS = (
 LOB_REPLAY_BIN = Path(
     os.environ.get(
         "LOB_REPLAY_BIN",
-        "components/rust_components/target/release/lob_replay",
+        "components/target/debug/lob_replay.exe"
+        if os.name == "nt"
+        else "components/target/debug/lob_replay",
     )
 )
 

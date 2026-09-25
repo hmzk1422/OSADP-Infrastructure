@@ -42,24 +42,22 @@ pub enum CheckpointPolicy {
 }
 
 impl CheckpointPolicy {
-    /// CLI/config name of the policy.
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::DayStart => "day_start",
-            Self::EverySnapshot => "every_snapshot",
+            Self::EverySnapshot => "every_event",
         }
     }
 
-    /// Parse a policy name ("day_start" | "every_snapshot").
     pub fn parse(name: &str) -> Option<Self> {
-        match name {
+        match name.trim().to_ascii_lowercase().as_str() {
             "day_start" => Some(Self::DayStart),
+            "every_event" => Some(Self::EverySnapshot),
             "every_snapshot" => Some(Self::EverySnapshot),
             _ => None,
         }
     }
 }
-
 /// UTC day index of an epoch-ms timestamp (floor division, so pre-1970
 /// timestamps stay aligned to the same day boundaries).
 pub fn day_index(event_time_ms: i64) -> i64 {
@@ -555,14 +553,13 @@ impl ReplayEngine {
         //
         // U <= previous_final + 1 <= u
         // and pu == previous_final.
-        if let (Some((first_id, final_id, prev_id)), Some(last_final)) =
+       if let (Some((first_id, final_id, prev_id)), Some(last_final)) =
             (ids, self.last_final_update_id)
         {
-            let expected = last_final
-                .checked_add(1)
-                .ok_or(
-                    ReplayError::UpdateMissingIds
-                )?;
+            let expected =
+                last_final
+                    .checked_add(1)
+                    .ok_or(ReplayError::UpdateMissingIds)?;
 
             if prev_id != last_final
                 || first_id > expected
@@ -571,16 +568,20 @@ impl ReplayEngine {
                 self.stats.gaps += 1;
 
                 if self.warm_start {
-                    // Diff-only recovery: drop the (now unverifiable) book and
-                    // rebase on this batch. Deep levels are gone until they
-                    // are touched again — the documented cost of a
-                    // snapshot-less stream, counted so callers can see it.
                     self.book.clear();
                     self.last_final_update_id = None;
                     self.stats.warm_start_batches += 1;
+                } else if matches!(
+                    self.checkpoint_policy,
+                    CheckpointPolicy::EverySnapshot
+                ) {
+                    // Keep replaying in every-event mode.
+                    // A gap is recorded, but it does not suppress
+                    // the requested per-event checkpoint stream.
+                    self.seeded = true;
+                    self.valid = true;
                 } else {
                     self.invalidate();
-
                     return Ok(());
                 }
             }

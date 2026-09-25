@@ -279,3 +279,102 @@ def write_parquet_batched(
             df,
             index=index,
         )
+
+
+# ============================================================
+# TERMINAL PIPELINE WORK TREE
+# ============================================================
+
+def pipeline_work_dir(
+    root: PathLike | None = None,
+    symbol: str = "BTCUSDT",
+) -> Path:
+    """Disposable pipeline tree; canonical ingest and legacy samples stay read-only."""
+    import components.python.data_pipeline.CryptoL2.datapaths as paths
+
+    root_p = _as_path(root) if root is not None else paths.MARKET_DATA_ROOT
+    return paths.matched_dir(root_p, symbol.upper()) / "_pipeline"
+
+
+def pipeline_source_dir(
+    root: PathLike | None = None,
+    symbol: str = "BTCUSDT",
+    dataset: str | None = None,
+) -> Path:
+    base = pipeline_work_dir(root, symbol) / "source"
+    return base if dataset is None else base / dataset
+
+
+def _materialize_work_file(src: Path, dest: Path) -> None:
+    """Create a disposable work file without modifying the canonical source."""
+    import shutil
+
+    if not src.is_file():
+        raise FileNotFoundError(src)
+    if src.resolve() == dest.resolve():
+        raise ValueError(f"source and destination are identical: {src}")
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    temp = _temporary_path(dest)
+    try:
+        try:
+            os.link(src, temp)
+        except OSError:
+            shutil.copy2(src, temp)
+        os.replace(temp, dest)
+    except Exception:
+        temp.unlink(missing_ok=True)
+        raise
+
+
+# ============================================================
+# FETCH ALL THREE SOURCE DATASETS INTO THE WORK TREE
+# ============================================================
+
+def fetch_source_data(
+    *,
+    root: PathLike | None = None,
+    symbol: str = "BTCUSDT",
+    start: str,
+    end: str,
+) -> list[Path]:
+    """Materialize aggTrades, bookDepth, and orderbook for a UTC date window.
+
+    Canonical files under ``ingest_parquet`` are only read. Work files live under
+    ``matched/<SYMBOL>/_pipeline/source`` so they can be removed safely after a
+    verified merge without deleting source data.
+    """
+    import components.python.data_pipeline.CryptoL2.datapaths as paths
+
+    root_p = _as_path(root) if root is not None else paths.MARKET_DATA_ROOT
+    symbol = symbol.upper()
+    work = pipeline_source_dir(root_p, symbol)
+    materialized: list[Path] = []
+
+    days = set(paths.binance_parquet_days(root_p, symbol, "aggTrades"))
+    days.update(paths.binance_parquet_days(root_p, symbol, "bookDepth"))
+    days.update(paths.orderbook_parquet_days(root_p, symbol))
+    days = {day for day in days if start <= day <= end}
+    for day in sorted(days):
+        for dataset in ("aggTrades", "bookDepth"):
+            src = paths.parquet_dir(root_p, symbol, dataset) / f"{day}.parquet"
+            if src.exists():
+                dest = work / dataset / f"{day}.parquet"
+                _materialize_work_file(src, dest)
+                materialized.append(dest)
+                print(f"[fetch] {dataset} {day} -> {dest}")
+
+        for hour in range(24):
+            src = paths.parquet_chd_file(root_p, symbol, day, hour)
+            if src.exists():
+                dest = work / "orderbook" / day / f"{hour:02d}.parquet"
+                _materialize_work_file(src, dest)
+                materialized.append(dest)
+                print(f"[fetch] orderbook {day} {hour:02d} -> {dest}")
+
+    if not materialized:
+        raise FileNotFoundError(
+            f"no aggTrades/bookDepth/orderbook files in [{start}, {end}] "
+            f"under {paths.parquet_root(root_p) / symbol}"
+        )
+    return sorted(materialized)
+

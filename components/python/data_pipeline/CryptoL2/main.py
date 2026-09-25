@@ -62,7 +62,7 @@ from typing import Optional
 # repo root (nested strategy namespace packages) are importable.
 # ---------------------------------------------------------------------------
 _HERE = Path(__file__).resolve().parent
-_REPO_ROOT = _HERE.parents[2]
+_REPO_ROOT = _HERE.parents[3]
 
 for _path in (str(_REPO_ROOT), str(_HERE)):
     if _path not in sys.path:
@@ -82,6 +82,30 @@ STAGES = {
     "refresh-matched": ("refresh_matched", "ingestion: refresh matched data"),
     "scan-snapshots": ("scan_snapshots", "ingestion: scan for snapshot hours"),
     "validate-replay": ("validate_replay", "ingestion: validate matched replay"),
+    "snapshot-day-start": (
+        "snapshot_day_start",
+        "step 1: build the matched work-tree 00-hour LOB seed",
+    ),
+    "snapshot-per-row": (
+        "snapshot_per_row",
+        "step 3: build work-tree LOB state for every source event",
+    ),
+    "merge-events": (
+        "merge_events",
+        "merge step 4: unify LOB book-state + aggTrades + bookDepth hourly",
+    ),
+    "fetch-source": (
+        "fetch_source",
+        "pipeline step 2: materialize all three canonical datasets into matched work tree",
+    ),
+    "matched-pipeline": (
+        "matched_pipeline",
+        "steps 1-4: seed, materialize sources, materialize LOB, merge/finalize/cleanup",
+    ),
+    "smoke-merge": (
+        "smoke_merge",
+        "copy one aligned date and run the merger against the copies",
+    ),
 }
 
 # zstandard_fix.py is mode-driven, so it gets one wrapper command per mode.
@@ -125,6 +149,12 @@ COMMANDS = {
     "refresh-matched": "rebuild matched/ from the ingest_parquet tree",
     "scan-snapshots": "scan orderbook hours for snapshot events",
     "validate-replay": "validate replayed LOB invariants in matched/",
+    "snapshot-day-start": "step 1: build the work-tree 00-hour LOB seed",
+    "fetch-source": "step 2: materialize all three source datasets into work",
+    "snapshot-per-row": "step 3: build work-tree LOB state for every source event",
+    "merge-events": "step 4: stream and merge LOB, trades, and depth hourly",
+    "matched-pipeline": "steps 1-4: seed, materialize sources, materialize LOB, merge/finalize/cleanup",
+    "smoke-merge": "copy one aligned date and merge only the copies",
     "migrate-layout": "move a legacy provider-first ingest_source tree to the "
                       "ticker-first layout (+ re-point the manifest)",
     "layout": "print the resolved ingestion layout and inventory",
