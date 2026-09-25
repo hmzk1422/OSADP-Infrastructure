@@ -130,7 +130,8 @@ pub fn run_merge(args: &MergeArgs) -> Result<(), BoxError> {
             event.depth_state = Some(depth_state.clone());
         }
         if hours.contains(&hour) {
-            let output = inputs.output_dir.join(format!("{hour:02}.parquet"));
+            // Replace: format!("{hour:02}.parquet")
+            let output = inputs.output_dir.join(format!("{}_{hour:02}.parquet", args.date));
             if !writers.contains_key(&hour) {
                 writers.insert(
                     hour,

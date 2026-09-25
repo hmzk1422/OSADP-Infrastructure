@@ -109,6 +109,9 @@ pub struct Cursor {
     pub batch: Option<RecordBatch>,
     pub row: usize,
     pub path: PathBuf,
+    /// One-row pushback used when a long-format LOB event spans Arrow batches.
+    pub pushed: Option<RecordBatch>,
+    pub pushed_row: usize,
 }
 
 impl Cursor {
@@ -119,6 +122,8 @@ impl Cursor {
             batch: None,
             row: 0,
             path: path.to_path_buf(),
+            pushed: None,
+            pushed_row: 0,
         })
     }
 
@@ -127,6 +132,11 @@ impl Cursor {
     }
 
     pub fn next_row(&mut self) -> Result<bool, BoxError> {
+        if self.pushed.is_some() {
+            self.batch = self.pushed.take();
+            self.row = self.pushed_row;
+            return Ok(true);
+        }
         loop {
             if self.batch.as_ref().is_some_and(|b| self.row < b.num_rows()) {
                 return Ok(true);
@@ -143,6 +153,19 @@ impl Cursor {
                 }
             }
         }
+    }
+
+    /// Push the current physical row back so the next `next_row()` sees it.
+    pub fn push_back(&mut self) {
+        if let Some(batch) = self.batch.clone() {
+            self.pushed = Some(batch);
+            self.pushed_row = self.row;
+        }
+    }
+
+    /// Consume the current physical row and count it.
+    pub fn consume_row(&mut self) {
+        self.row += 1;
     }
 }
 
@@ -166,22 +189,8 @@ impl Source {
 #[derive(Debug, Clone, Default)]
 pub struct LobState {
     pub levels: Vec<Option<f64>>,
-    pub source_fields: Arc<Vec<Field>>,
-    pub source_values: Vec<ArrayRef>,
-    pub received_time: Option<i64>,
     pub event_time: Option<i64>,
-    pub transaction_time: Option<i64>,
-    pub symbol: Option<String>,
-    pub source_event_type: Option<String>,
-    pub side: Option<String>,
-    pub is_bid: Option<bool>,
-    pub is_snapshot: Option<bool>,
-    pub source_price: Option<String>,
-    pub source_quantity: Option<String>,
-    pub first_update_id: Option<i64>,
     pub final_update_id: Option<i64>,
-    pub prev_final_update_id: Option<i64>,
-    pub last_update_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, Default)]

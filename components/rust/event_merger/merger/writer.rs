@@ -16,7 +16,7 @@ use parquet_rs::arrow::ArrowWriter;
 use parquet_rs::file::properties::WriterProperties;
 
 use crate::args::BoxError;
-use crate::model::{Event, LobState, Source};
+use crate::model::{Event, Source};
 
 #[derive(Debug, Clone)]
 pub struct SourceSchema {
@@ -40,20 +40,8 @@ fn state_fields(levels: usize) -> Vec<Field> {
         Field::new("timestamp", DataType::Int64, false),
         Field::new("event_type", DataType::Utf8, false),
         Field::new("event_sequence", DataType::UInt64, false),
-        Field::new("lob__received_time", DataType::Int64, true),
         Field::new("lob__event_time", DataType::Int64, true),
-        Field::new("lob__transaction_time", DataType::Int64, true),
-        Field::new("lob__symbol", DataType::Utf8, true),
-        Field::new("lob__event_type", DataType::Utf8, true),
-        Field::new("lob__side", DataType::Utf8, true),
-        Field::new("lob__is_bid", DataType::Boolean, true),
-        Field::new("lob__is_snapshot", DataType::Boolean, true),
-        Field::new("lob__price", DataType::Utf8, true),
-        Field::new("lob__quantity", DataType::Utf8, true),
-        Field::new("lob__first_update_id", DataType::Int64, true),
         Field::new("lob__final_update_id", DataType::Int64, true),
-        Field::new("lob__prev_final_update_id", DataType::Int64, true),
-        Field::new("lob__last_update_id", DataType::Int64, true),
     ];
     for name in [
         "book_state__best_bid_price",
@@ -134,6 +122,13 @@ pub fn source_schema(
     let mut outputs = Vec::new();
     let mut seen: HashMap<(Source, String), DataType> = HashMap::new();
     for source in sources {
+        // LOB levels are emitted only through the aggregated canonical
+        // book-state fields. Keeping a second verbatim `source_lob__*` copy
+        // would duplicate the same resting levels, so skip the LOB source
+        // schema here.
+        if source.source == Source::Lob {
+            continue;
+        }
         for field in source.schema.fields() {
             let output_name = format!("source_{}__{}", source_prefix(source.source), field.name());
             let key = (source.source, field.name().to_string());
@@ -169,9 +164,6 @@ fn i64s(values: &[Option<i64>]) -> ArrayRef {
 fn f64s(values: &[Option<f64>]) -> ArrayRef {
     Arc::new(Float64Array::from(values.to_vec()))
 }
-fn strings(values: &[Option<String>]) -> ArrayRef {
-    Arc::new(StringArray::from(values.to_vec()))
-}
 fn bools(values: &[Option<bool>]) -> ArrayRef {
     Arc::new(BooleanArray::from(values.to_vec()))
 }
@@ -186,7 +178,9 @@ fn source_arrays(
         for event in events {
             if event.source == source.source {
                 let (fields, values) = match event.source {
-                    Source::Lob => event.lob.as_ref().map(|x| (x.source_fields.as_ref(), x.source_values.as_slice())),
+                    Source::Lob => {
+                        return Err("LOB source output is disabled; LOB levels use book_state__*".into())
+                    }
                     Source::Trade => event.trade.as_ref().map(|x| (x.source_fields.as_ref(), x.source_values.as_slice())),
                     Source::Depth => event.depth.as_ref().map(|x| (x.source_fields.as_ref(), x.source_values.as_slice())),
                 }
@@ -316,31 +310,8 @@ fn build_batch(
             arrays.push(i64s(&v));
         }};
     }
-    macro_rules! ls {
-        ($field:ident) => {{
-            let v: Vec<Option<String>> = events
-                .iter()
-                .map(|e| e.lob.as_ref().and_then(|x| x.$field.clone()))
-                .collect();
-            arrays.push(strings(&v));
-        }};
-    }
-    li!(received_time);
     li!(event_time);
-    li!(transaction_time);
-    ls!(symbol);
-    ls!(source_event_type);
-    ls!(side);
-    for f in [|x: &LobState| x.is_bid, |x: &LobState| x.is_snapshot] {
-        let v: Vec<Option<bool>> = events.iter().map(|e| e.lob.as_ref().and_then(&f)).collect();
-        arrays.push(bools(&v));
-    }
-    ls!(source_price);
-    ls!(source_quantity);
-    li!(first_update_id);
     li!(final_update_id);
-    li!(prev_final_update_id);
-    li!(last_update_id);
     for c in 0..4 * levels {
         let v: Vec<Option<f64>> = events
             .iter()
@@ -469,37 +440,8 @@ pub fn write(path: &Path, events: &[Event], levels: usize) -> Result<(), BoxErro
             arrays.push(i64s(&v));
         }};
     }
-    macro_rules! ls {
-        ($field:ident) => {{
-            let v: Vec<Option<String>> = events
-                .iter()
-                .map(|e| e.lob.as_ref().and_then(|x| x.$field.clone()))
-                .collect();
-            arrays.push(strings(&v));
-        }};
-    }
-    li!(received_time);
     li!(event_time);
-    li!(transaction_time);
-    ls!(symbol);
-    ls!(source_event_type);
-    ls!(side);
-    let v: Vec<Option<bool>> = events
-        .iter()
-        .map(|e| e.lob.as_ref().and_then(|x| x.is_bid))
-        .collect();
-    arrays.push(bools(&v));
-    let v: Vec<Option<bool>> = events
-        .iter()
-        .map(|e| e.lob.as_ref().and_then(|x| x.is_snapshot))
-        .collect();
-    arrays.push(bools(&v));
-    ls!(source_price);
-    ls!(source_quantity);
-    li!(first_update_id);
     li!(final_update_id);
-    li!(prev_final_update_id);
-    li!(last_update_id);
     for c in 0..4 * levels {
         let v: Vec<Option<f64>> = events
             .iter()
