@@ -31,6 +31,31 @@ def _atomic_replace(temp_path: Path, final_path: Path) -> None:
 # LIST PARQUET
 # ============================================================
 
+def _default_path() -> Path:
+    """
+    Resolve the default matched path without depending on the CWD.
+
+    ``config.ingestion.config.MATCHED_PATH`` is built from a *relative*
+    ``DATA_ROOT`` (``Path("market_data")``). Running an interpreter from
+    ``market_data/matched/<TICKER>`` therefore resolved it to a
+    non-existent nested path, ``list_parquet()`` returned ``[]`` and callers
+    subscripted ``None``. Anchoring on the repo root (derived from this
+    file's location) makes the default work from any directory.
+    """
+    project_root = Path(__file__).resolve().parents[4]
+    configured = cfg.MATCHED_PATH
+    if configured is not None:
+        configured = Path(configured)
+        if configured.is_absolute():
+            return configured
+        # Prefer the CWD-relative path when it actually exists (e.g. running
+        # from the repo root), otherwise anchor it at the repo root.
+        if configured.exists():
+            return configured
+        return project_root / configured
+    return project_root / "market_data" / "matched" / cfg.TICKER
+
+
 def list_parquet(
     path: PathLike | None = None,
     *,
@@ -39,11 +64,11 @@ def list_parquet(
     """
     Return parquet files in sorted deterministic order.
 
-    If path is omitted, cfg.MATCHED_PATH is used.
+    If path is omitted, the default matched path is used.
     """
 
     if path is None:
-        path = cfg.MATCHED_PATH
+        path = _default_path()
 
     root = _as_path(path)
 
@@ -99,11 +124,14 @@ def read_parquet(
         -> iterator of DataFrames
 
     When path is omitted:
-        cfg.MATCHED_PATH is used.
+        the default matched path is used.
+
+    CSV/other extensions are routed to ``pandas.read_*`` so a sample
+    exported from the matched tree can be read with the same call.
     """
 
     if path is None:
-        path = cfg.MATCHED_PATH
+        path = _default_path()
 
     path = _as_path(path)
 
@@ -124,7 +152,7 @@ def read_parquet(
         )
 
     # --------------------------------------------------------
-    # Single parquet file
+    # Single file
     # --------------------------------------------------------
 
     if not path.exists():
@@ -135,6 +163,18 @@ def read_parquet(
             f"read_parquet() without batch_size expects "
             f"a parquet file, got: {path}"
         )
+
+    suffix = path.suffix.lower()
+
+    if suffix == ".csv":
+        return pd.read_csv(
+            path,
+            usecols=columns,
+            index_col=False if ignore_index else None,
+        )
+
+    if suffix in (".json", ".jsonl"):
+        return pd.read_json(path)
 
     return pd.read_parquet(
         path,

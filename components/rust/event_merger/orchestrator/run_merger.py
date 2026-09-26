@@ -172,7 +172,6 @@ def find_sparse_hours(*, root: str | Path, symbol: str, date: str) -> dict[int, 
         except OSError:
             return
         candidates.setdefault(hour, []).append((path, mtime))
-
     nested = base / date
     if nested.is_dir():
         for path in nested.glob("*.parquet"):

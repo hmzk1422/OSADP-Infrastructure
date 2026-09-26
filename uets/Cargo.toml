@@ -17,6 +17,11 @@ extension-module = ["pyo3/extension-module"]
 
 [dependencies]
 binance = "0.21"
+# The live canonical-row engine: turns typed market events into the merged
+# 128-column table. It is std-only, so this adds no transitive weight; the
+# point of the path dependency is that `executor` and the merger cannot drift
+# apart on schema.
+event_merger_live = { path = "../components/rust/event_merger/live" }
 pyo3 = "0.29"
 # Same major as what the `binance` crate pulls in (see Cargo.lock: 0.21.0) so
 # both resolve to one build. No TLS feature: tungstenite 0.21 enables

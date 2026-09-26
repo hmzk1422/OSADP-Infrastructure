@@ -47,6 +47,101 @@ def rule(selection=1):
 
 
 # ============================================================
+# MERGED-SCHEMA ADAPTER
+# ============================================================
+
+# The merged orderbook namespaced its columns by source
+# (``agg__price``, ``book_state__best_bid_price``, ...). Downstream
+# transforms predate that layout and still ask for flat names
+# (``price``, ``quantity``, ``is_buyer_maker``, ``price_close`` ...).
+# This table maps the namespaced names onto the flat ones; it is applied
+# automatically by :func:`normalize_merged_frame`.
+_LEGACY_COLUMN_ALIASES: dict[str, str] = {
+    "agg__price": "price",
+    "agg__quantity": "quantity",
+    "agg__is_buyer_maker": "is_buyer_maker",
+    "agg__agg_trade_id": "agg_trade_id",
+    "agg__first_trade_id": "first_trade_id",
+    "agg__last_trade_id": "last_trade_id",
+    "agg__transact_time": "transact_time",
+    "depth__depth": "depth",
+    "depth__notional": "notional",
+    "depth__percentage": "percentage",
+}
+
+# Columns that only duplicate a namespaced counterpart and are not
+# needed by the strategy layer.
+_REDUNDANT_PREFIXES = (
+    "source_agg__",
+    "source_depth__",
+    "lob__",
+    "depth__",
+    "depth_state__",
+)
+
+
+def _legacy_book_state_names(columns) -> dict[str, str]:
+    """
+    Flatten ``book_state__<name>`` to ``<name>`` (and ``best_bid``/``best_ask``
+    stay as-is, which is what the transforms expect).
+    """
+    mapping: dict[str, str] = {}
+    for column in columns:
+        if column.startswith("book_state__"):
+            mapping[column] = column[len("book_state__"):]
+    return mapping
+
+
+def normalize_merged_frame(
+    df: pd.DataFrame,
+    *,
+    drop_redundant: bool = True,
+) -> pd.DataFrame:
+    """
+    Adapt a merged-orderbook frame to the flat schema the strategy layer uses.
+
+    - ``agg__price`` -> ``price``, ``agg__quantity`` -> ``quantity``, ...
+    - ``book_state__best_bid_price`` -> ``best_bid_price``, ...
+    - ``timestamp`` is converted to ``datetime64[ns]`` (unit auto-detected)
+    - redundant ``source_*`` / ``depth_*`` duplicates are dropped
+
+    Existing flat columns are never overwritten, so legacy frames pass
+    through untouched.
+    """
+    if df is None:
+        raise TypeError("normalize_merged_frame() got None (did a reader return None?)")
+
+    frame = df.copy()
+
+    if "Unnamed: 0" in frame.columns:
+        frame = frame.drop(columns=["Unnamed: 0"])
+
+    if "timestamp" in frame.columns:
+        frame["timestamp"] = _convert_timestamp(frame["timestamp"])
+
+    renames = dict(_LEGACY_COLUMN_ALIASES)
+    renames.update(_legacy_book_state_names(frame.columns))
+    renames = {
+        source: target
+        for source, target in renames.items()
+        if source in frame.columns and target not in frame.columns
+    }
+    if renames:
+        frame = frame.rename(columns=renames)
+
+    if drop_redundant:
+        drop = [
+            column
+            for column in frame.columns
+            if any(column.startswith(prefix) for prefix in _REDUNDANT_PREFIXES)
+        ]
+        if drop:
+            frame = frame.drop(columns=drop)
+
+    return frame
+
+
+# ============================================================
 # TIMEFRAME NORMALIZATION
 # ============================================================
 
@@ -124,25 +219,72 @@ def _normalize_timeframe(timeframe):
 # TIMESTAMP CONVERSION
 # ============================================================
 
-def _convert_timestamp(series):
-    """
-    Convert timestamp safely.
+# Magnitude thresholds used to infer the unit of a numeric epoch
+# timestamp. Values are chosen from the float64 mantissa so the
+# comparison never needs to touch the data:
+#
+#     1.7e18 -> 2025-06-30 in nanoseconds
+#     1.7e15 -> 2025-06-30 in microseconds
+#     1.7e12 -> 2025-06-30 in milliseconds
+#     1.7e9  -> 2025-06-30 in seconds
+#
+# Anything above NANOSECOND_THRESHOLD cannot be milliseconds without
+# overflowing the pandas datetime range (it would land in the year
+# 55,000,000), so a naive "assume ms" would explode downstream.
+_UNIT_THRESHOLDS = (
+    (1e17, "ns"),
+    (1e14, "us"),
+    (1e11, "ms"),
+    (None, "s"),
+)
 
-    Numeric timestamps are assumed to be milliseconds.
-    Datetime/string timestamps are parsed normally.
-    """
 
+def infer_time_unit(series) -> str | None:
+    """
+    Infer the epoch unit of a numeric timestamp column.
+
+    Returns ``"ns" | "us" | "ms" | "s"``, or ``None`` when the column holds
+    no usable numeric value.
+    """
+    values = pd.to_numeric(series, errors="coerce")
+    if values.empty:
+        return None
+
+    finite = values[np.isfinite(values.to_numpy(dtype="float64", na_value=np.nan))]
+    if finite.empty:
+        return None
+
+    # The widest magnitude decides: one ns-scale row is enough.
+    magnitude = float(np.abs(finite.to_numpy(dtype="float64", na_value=np.nan)).max())
+
+    for threshold, unit in _UNIT_THRESHOLDS:
+        if threshold is None or magnitude >= threshold:
+            return unit
+    return "s"
+
+
+def _convert_timestamp(series, unit: str | None = None):
+    """
+    Convert a timestamp column to ``datetime64[ns]``.
+
+    Numeric input is interpreted as an epoch value whose unit is inferred
+    from its magnitude unless ``unit`` is given. The merged orderbook stores
+    **nanoseconds**, so hard-coding milliseconds (the previous behaviour)
+    produced year ~55,000,000 timestamps, which then blew up every
+    resample downstream.
+
+    Datetime/string input is parsed normally.
+    """
     if pd.api.types.is_numeric_dtype(series):
-        return pd.to_datetime(
-            series,
-            unit="ms",
-            errors="coerce",
-        )
+        resolved = unit or infer_time_unit(series)
+        if resolved is None:
+            return pd.to_datetime(series, errors="coerce")
+        return pd.to_datetime(series, unit=resolved, errors="coerce")
 
-    return pd.to_datetime(
-        series,
-        errors="coerce",
-    )
+    if isinstance(series, pd.Series) and pd.api.types.is_datetime64_any_dtype(series):
+        return series
+
+    return pd.to_datetime(series, errors="coerce")
 
 
 # ============================================================
@@ -154,6 +296,8 @@ def reconstruct(
     timeframe,
     rules=None,
     time_col="timestamp",
+    normalize: bool = True,
+    columns=None,
 ):
     """
     Reconstruct raw event/trade data into completed
@@ -171,13 +315,39 @@ def reconstruct(
         ticks 1..10 -> timestamp of tick 10
 
     Incomplete final bars are removed.
+
+    Parameters
+    ----------
+    normalize:
+        Run :func:`normalize_merged_frame` first, so a merged-orderbook
+        frame (``agg__price``, ``book_state__*``, nanosecond timestamps) can
+        be passed in directly. Set False for a frame that already uses the
+        flat legacy schema.
+    columns:
+        Optional whitelist of columns to aggregate. Everything else is
+        dropped before grouping. This matters for merged frames, which carry
+        ~128 columns where only a handful are useful, and each numeric column
+        adds an OHLC expansion (4 columns per numeric).
     """
+    if df is None:
+        raise TypeError(
+            "reconstruct() got None for 'df'. A reader (read_parquet / "
+            "load_day_snapshot / ...) returned None — check the path exists "
+            "and the file is a readable parquet."
+        )
+
+    if normalize:
+        df = normalize_merged_frame(df)
 
     # --------------------------------------------------------
     # Copy
     # --------------------------------------------------------
 
     df = df.copy()
+
+    if columns is not None:
+        keep = [time_col] + [c for c in columns if c != time_col and c in df.columns]
+        df = df[keep]
 
     # --------------------------------------------------------
     # Validate timestamp

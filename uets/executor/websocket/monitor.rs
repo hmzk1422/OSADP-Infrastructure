@@ -20,13 +20,13 @@
 //! field, including trade direction ("m"), event times, and the raw
 //! lastUpdateId.
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tungstenite::{connect, Message};
+use tungstenite::{Message, connect};
 
 /// Aggregated trade + book state for the monitored symbol.
 #[derive(Default)]
@@ -66,11 +66,19 @@ fn on_trade(state: &Arc<Mutex<State>>, text: &str) {
     }
     let price: f64 = v["p"].as_str().and_then(|s| s.parse().ok()).unwrap_or(0.0);
     let qty: f64 = v["q"].as_str().and_then(|s| s.parse().ok()).unwrap_or(0.0);
-    let side = if v["m"].as_bool().unwrap_or(false) { "sell" } else { "buy" };
+    let side = if v["m"].as_bool().unwrap_or(false) {
+        "sell"
+    } else {
+        "buy"
+    };
     let event_ms = v["E"].as_u64().unwrap_or(0);
 
     let mut st = state.lock().expect("state poisoned");
-    st.prev_price = if st.trade_count > 0 { st.last_price } else { price };
+    st.prev_price = if st.trade_count > 0 {
+        st.last_price
+    } else {
+        price
+    };
     st.last_price = price;
     if st.first_price == 0.0 {
         st.first_price = price;
@@ -82,7 +90,8 @@ fn on_trade(state: &Arc<Mutex<State>>, text: &str) {
     }
     st.trade_count += 1;
     st.last_trade_ms = event_ms;
-    st.recent.push(json!({"t": event_ms, "p": price, "q": qty, "side": side}));
+    st.recent
+        .push(json!({"t": event_ms, "p": price, "q": qty, "side": side}));
     if st.recent.len() > 8 {
         st.recent.remove(0);
     }

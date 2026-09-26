@@ -9,9 +9,25 @@
 //! it with `maturin develop` (maturin enables the extension-module feature
 //! automatically).
 
+use std::path::PathBuf;
 use std::process::ExitCode;
 
-use uets::websocket::{monitor, reader};
+use uets::websocket::{live, monitor, reader};
+
+/// Default capture directory, `market_data/live_db` at the repo root.
+///
+/// Resolved from the manifest directory rather than the process CWD, because
+/// this binary is normally run through `cargo run` from anywhere and a capture
+/// landing in a random CWD is worse than one landing in a predictable place.
+fn default_live_db_dir() -> String {
+    // CARGO_MANIFEST_DIR is <repo>/uets, so exactly one parent reaches the
+    // repo root. Two would land beside the repo.
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .map(|root| root.join("market_data").join("live_db"))
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| "market_data/live_db".to_string())
+}
 
 fn print_help() {
     println!(
@@ -24,6 +40,10 @@ fn print_help() {
          \x20 ticker [SYMBOL]         24h rolling ticker (default: btcusdt)\n\
          \x20 all-tickers             all-symbols mini-ticker stream (!miniTicker@arr)\n\
          \x20 multi [SYMBOLS...]      multiple diff-depth streams on one connection\n\
+         \x20 record [SYMBOL] [DIR]    live capture -> merged CSV under DIR\n\
+         \x20                         (default DIR: market_data/live_db)\n\
+         \x20                         flags: --rows N   stop after N rows\n\
+         \x20                                --append  keep the existing file\n\
          \x20 monitor [SYMBOL]        live tape + 20-level orderbook monitor;\n\
          \x20                         view with:  python uets/display.py [SYMBOL]\n\
          \x20 user-stream             REST listen-key lifecycle (needs API key)\n\
@@ -34,6 +54,7 @@ fn print_help() {
          \x20 dev_test market btcusdt aggTrade\n\
          \x20 dev_test depth btcusdt\n\
          \x20 dev_test multi ethbtc bnbusdt\n\
+         \x20 dev_test record btcusdt            # -> market_data/live_db\n\
          \n\
          All streams run until interrupted (Ctrl+C)."
     );
@@ -47,20 +68,36 @@ fn main() -> ExitCode {
 
     match cmd {
         "market" => {
-            let symbol = if first().is_empty() { "btcusdt".into() } else { first() };
+            let symbol = if first().is_empty() {
+                "btcusdt".into()
+            } else {
+                first()
+            };
             let datatype = rest.get(1).cloned().unwrap_or_else(|| "aggTrade".into());
             reader::market_websocket(&symbol, &datatype);
         }
         "depth" => {
-            let symbol = if first().is_empty() { "btcusdt".into() } else { first() };
+            let symbol = if first().is_empty() {
+                "btcusdt".into()
+            } else {
+                first()
+            };
             reader::market_websocket(&symbol, "depth@100ms");
         }
         "kline" => {
-            let symbol = if first().is_empty() { "btcusdt".into() } else { first() };
+            let symbol = if first().is_empty() {
+                "btcusdt".into()
+            } else {
+                first()
+            };
             reader::kline_websocket(&symbol);
         }
         "ticker" => {
-            let symbol = if first().is_empty() { "btcusdt".into() } else { first() };
+            let symbol = if first().is_empty() {
+                "btcusdt".into()
+            } else {
+                first()
+            };
             reader::ticker_websocket(&symbol);
         }
         "all-tickers" => reader::all_trades_websocket(),
@@ -72,8 +109,52 @@ fn main() -> ExitCode {
             };
             reader::multiple_streams(&symbols);
         }
+        "record" => {
+            // Live capture -> the merged 128-column CSV, byte-compatible with
+            // the historical table. Streams until Ctrl+C unless a row cap is
+            // given as `--rows N` in the output-dir position's sibling flag.
+            let symbol = if first().is_empty() {
+                "btcusdt".into()
+            } else {
+                first()
+            };
+            // A flag is not a positional. Without this, `record btcusdt
+            // --rows 10` would take "--rows" as the output directory and write
+            // the capture into a directory literally named `--rows`.
+            let dir = rest
+                .iter()
+                .skip(1)
+                .find(|a| !a.starts_with("--") && !a.chars().all(|c| c.is_ascii_digit()))
+                .cloned()
+                .unwrap_or_else(default_live_db_dir);
+            let mut config = live::CaptureConfig::new(&symbol, dir);
+            // `--rows N` bounds the capture, which is what makes it testable
+            // and scriptable instead of only interactive.
+            if let Some(index) = rest.iter().position(|a| a == "--rows") {
+                if let Some(value) = rest.get(index + 1) {
+                    match value.parse::<u64>() {
+                        Ok(n) => config.max_rows = Some(n),
+                        Err(_) => {
+                            eprintln!("--rows expects a number, got: {value}");
+                            return ExitCode::FAILURE;
+                        }
+                    }
+                }
+            }
+            if rest.iter().any(|a| a == "--append") {
+                config.append = true;
+            }
+            if let Err(e) = live::run_capture(config) {
+                eprintln!("capture failed: {e}");
+                return ExitCode::FAILURE;
+            }
+        }
         "monitor" => {
-            let symbol = if first().is_empty() { "btcusdt".into() } else { first() };
+            let symbol = if first().is_empty() {
+                "btcusdt".into()
+            } else {
+                first()
+            };
             monitor::monitor_websocket(&symbol);
         }
         "user-stream" => {

@@ -2,7 +2,7 @@ import pandas as pd
 
 path = r"C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\market_data\matched\BTCUSDT\merged_2025-06-30_01.parquet"
 
-df = pd.read_parquet(path)
+df = pd.read_parquet(path).to_csv("sample.csv")
 
 # Ensure the timestamp column is datetime format and sorted chronologically
 df['timestamp'] = pd.to_datetime(df['timestamp'])

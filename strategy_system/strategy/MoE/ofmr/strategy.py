@@ -3,6 +3,7 @@ import pandas as pd
 from strategy_system.strategy.MoE.ofmr.state_builder import build_state
 from components.python.diagnostic.lossless import lob_report
 from components.python.data_pipeline.matched.reconstruct import (
+    normalize_merged_frame,
     reconstruct,
     rule,
     join_timeframes,
@@ -24,46 +25,42 @@ from pathlib import Path
 
 
 # ============================================================
-# READ MULTIPLE PARQUET FILES
-# ============================================================
+def load_state(*, file_limit: int | None = 10) -> pd.DataFrame:
+    """Load matched files and build the causal OFMR state table.
 
-files = list_parquet()
+    The merged matched files use namespaced columns and nanosecond epoch
+    timestamps.  ``normalize_merged_frame`` is the single boundary adapter
+    for that storage schema; in particular, timestamps must not be forced to
+    milliseconds here.
+    """
+    files = list_parquet()
+    if file_limit is not None:
+        files = files[:file_limit]
+    if not files:
+        raise FileNotFoundError(
+            "No matched parquet files were found in the configured matched path."
+        )
 
-files = files[:10]
-
-df = pd.concat(
-    (
-        read_parquet(file)
-        for file in files
-    ),
-    ignore_index=True,
-)
-
-# ============================================================
-# SORT RAW DATA
-# ============================================================
-
-df["timestamp"] = pd.to_datetime(
-    df["timestamp"],
-    unit="ms",
-    errors="coerce",
-)
-
-df = (
-    df
-    .dropna(subset=["timestamp"])
-    .sort_values(
-        ["timestamp", "agg_trade_id"],
-        kind="mergesort",
+    df = pd.concat(
+        (read_parquet(file) for file in files),
+        ignore_index=True,
     )
-    .reset_index(drop=True)
-)
+
+    df = normalize_merged_frame(df)
+
+    sort_columns = ["timestamp"]
+    if "agg_trade_id" in df.columns:
+        sort_columns.append("agg_trade_id")
+    df = (
+        df
+        .dropna(subset=["timestamp"])
+        .sort_values(sort_columns, kind="mergesort")
+        .reset_index(drop=True)
+    )
+
+    return build_state(df)
 
 
-# ============================================================
-# RECONSTRUCT
-# ============================================================
-
-state = build_state(df)
-
-print(state)
+if __name__ == "__main__":
+    state = load_state()
+    print(state)
