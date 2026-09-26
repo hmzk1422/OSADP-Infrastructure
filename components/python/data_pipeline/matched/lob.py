@@ -109,6 +109,32 @@ def day_string(event_time_ms: int) -> str:
     ).strftime("%Y-%m-%d")
 
 
+def _repo_root() -> Path:
+    """
+    Repo root derived from this file's location.
+
+    ``config.ingestion.config.DATA_ROOT`` is a *relative* ``Path("market_data")``,
+    so every path built from it silently depends on the current working
+    directory. Anchoring here makes the defaults work from anywhere.
+    """
+    return Path(__file__).resolve().parents[4]
+
+
+def matched_root() -> Path:
+    """
+    ``<repo>/market_data/matched/<TICKER>``, independent of the CWD.
+    """
+    configured = cfg.MATCHED_PATH
+    if configured is not None:
+        configured = Path(configured)
+        if configured.is_absolute():
+            return configured
+        if configured.exists():
+            return configured
+        return _repo_root() / configured
+    return _repo_root() / "market_data" / "matched" / cfg.TICKER
+
+
 def snapshot_path(
     day: str,
     snapshot_dir: Path | None = None,
@@ -117,10 +143,7 @@ def snapshot_path(
     Return the checkpoint path for a UTC day.
     """
     if snapshot_dir is None:
-        snapshot_dir = (
-            Path(cfg.MATCHED_PATH)
-            / SNAPSHOT_DIRNAME
-        )
+        snapshot_dir = matched_root() / SNAPSHOT_DIRNAME
 
     return Path(snapshot_dir) / f"{day}.parquet"
 
@@ -145,6 +168,7 @@ def is_day_start_event(event_time_ms: int) -> bool:
 def load_day_snapshot(
     day: str,
     snapshot_dir: Path | None = None,
+    strict: bool = True,
 ) -> dict | None:
     """
     Load the first stored snapshot for a day.
@@ -160,7 +184,12 @@ def load_day_snapshot(
             "path": Path(...)
         }
 
-    or None if the snapshot does not exist.
+    or None if the snapshot does not exist and ``strict`` is False.
+
+    ``strict`` defaults to True because the previous behaviour returned a bare
+    ``None`` for a missing file, which surfaced downstream as the unhelpful
+    ``TypeError: 'NoneType' object is not subscriptable``. Pass
+    ``strict=False`` to keep the old "return None" contract.
     """
     path = snapshot_path(
         day,
@@ -168,11 +197,19 @@ def load_day_snapshot(
     )
 
     if not path.exists():
+        if strict:
+            raise FileNotFoundError(
+                f"no day-start snapshot for {day} at {path}. Run the "
+                "day-start seed stage first (01_ingest.py without --no-seed, "
+                "or snapshot_builder.py)."
+            )
         return None
 
     frame = pl.read_parquet(path)
 
     if frame.height == 0:
+        if strict:
+            raise ValueError(f"day-start snapshot is empty: {path}")
         return None
 
     def read_side(prefix: str) -> list[tuple[float, float]]:
@@ -500,10 +537,7 @@ def build_multilevel_lob(
 
     if write_snapshots:
         if snapshot_dir is None:
-            snapshot_dir = (
-                Path(cfg.MATCHED_PATH)
-                / SNAPSHOT_DIRNAME
-            )
+            snapshot_dir = matched_root() / SNAPSHOT_DIRNAME
 
         snapshot_dir.mkdir(
             parents=True,

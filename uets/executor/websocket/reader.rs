@@ -5,7 +5,7 @@
 //! routes to these functions via `executor.rs`:
 //!
 //!     cargo run --bin dev_test -- help
-//! 
+//!
 use binance::api::*;
 use binance::userstream::*;
 use binance::websockets::*;
@@ -16,9 +16,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tungstenite::Message;
 
 fn now_us() -> u128 {
-    SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_micros()
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_micros()
 }
-
 
 // Manages a "user data stream" over REST (not a websocket by itself).
 // A user data stream gives you a `listen_key` which you then feed into
