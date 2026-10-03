@@ -1,0 +1,159 @@
+# OFMR scalp — single source of truth for every tunable parameter.
+# Loaded by strategy.py::load_settings() and handed down the pipeline:
+#   data      -> exchange/loader.py
+#   features  -> features.py::compute_features
+#   ood       -> ood/ raw-temporal state detector
+#   gp        -> gp/ state-conditioned feature search
+#   outcome   -> outcome/ forward targets and triple-barrier labels
+#   policy    -> policies/orderflow_prediction.py
+
+data:
+  # orderbook: matched L2 parquet (exchange/loader.py)
+  # ohlcv:     CryptoL1 candles
+  source: orderbook
+  orderbook:
+    file_limit: 10        # one parquet file per hour
+    start: 0
+  ohlcv:
+    symbol: BTC/USDT
+    timeframe: 1m
+    since: "2025-01-01T00:00:00Z"
+    until: "2025-06-01T00:00:00Z"
+    exchange_id: binance
+
+features:
+  htf_timeframe: 1min     # macro group: RSI(2) + d² price
+  ltf_timeframe: 100ms    # micro group: order-flow / microstructure
+  delay: 1                # bars shifted before use (anti-lookahead)
+  rsi_period: 2
+  d2_ewm_span: 3
+  oversold: 30.0
+  overbought: 70.0
+
+ood:                       # temporal OOD states from fixed raw primitives
+  timestamp_col: null      # auto-detect timestamp, then DatetimeIndex; otherwise preserve input row order
+  primitive_columns: null  # null -> infer price / book / trade primitives
+  sequence_window: 32      # raw observations per temporal pattern
+  embedding_bins: 8        # preserve coarse chronological shape within window
+  normalization_window: 500 # fast rolling normalization for transient shape
+  normalization_min_periods: 50
+  clip_z: 8.0
+  slow_feature_window: 5000 # slow volatility/liquidity level features
+  slow_min_periods: 50
+  slow_level_weight: 1.0
+  max_states: 10
+  match_threshold: 3.0     # per-state diagonal-Mahalanobis distance
+  novel_threshold: 0.8     # RMS distance for grouping unseen candidates
+  min_novel_observations: 200 # observations accumulated across recurrence episodes
+  min_novel_episodes: 3    # distinct episodes required; adjacent overlapping windows are one episode
+  candidate_episode_gap: 32 # missing observations between episodes; keep >= sequence_window
+  candidate_expiry_observations: 5000 # remove candidate clusters that stop recurring
+  max_novel_clusters: 128  # oldest candidate is evicted if the buffer is full
+  mature_state_observations: 200 # post-promotion known observations before maturity
+  state_expiry_observations: 100000 # prune prototypes that are inactive beyond this many observations
+  min_state_scale: 0.1
+  centroid_update_rate: 0.0 # freeze identity centers by default; state radius still adapts
+  model_ready_states: []   # latent IDs with a fitted deployable model; empty means no trades allowed
+  require_model_for_trade: true
+  learn_novel: true
+
+gp:                        # bounded state-conditioned genetic programming
+  enabled: false           # opt in after reviewing cost and train/validation design
+  target_columns:          # supervised objectives from outcome.forward_returns
+    - future_return__1s
+    - future_return__5s
+    - future_return__10s
+    - future_mfe_long__5s
+    - future_mae_long__5s
+    - future_mfe_short__5s
+    - future_mae_short__5s
+    - future_mfe_long__10s
+    - future_mae_long__10s
+    - future_mfe_short__10s
+    - future_mae_short__10s
+  input_columns: null      # null -> numeric causal feature columns from compute_features
+  normalization_window: 500
+  normalization_min_periods: 50
+  clip_z: 8.0
+  train_fraction: 0.70     # chronological prefix; selected labels are purged at boundary
+  purge_rows: 0            # fallback only when target timestamp columns are unavailable
+  max_height: 5
+  population_size: 32
+  generations: 8
+  tournament_size: 4
+  elite_count: 2
+  mutation_rate: 0.30
+  crossover_rate: 0.70
+  temporal_windows: [2, 4, 8, 16]
+  max_features_per_state_target: 2
+  min_state_samples: 200
+  max_states: 10
+  complexity_penalty: 0.0005
+  block_count: 5
+  min_block_samples: 20
+  min_valid_blocks: 3
+  require_block_sign_agreement: true
+  block_std_penalty: 0.5
+  min_train_ic: 0.03
+  min_validation_ic: 0.02
+  validation_ic_retention: 0.25
+  correlation_threshold: 0.98
+  immigrant_fraction: 0.10
+  seed: 7
+
+outcome:
+  forward_returns:        # regression targets; labels stay out of live features
+    price_col: price_close
+    timestamp_col: null
+    max_lag: null          # default permits at most one extra horizon of observation-time overshoot
+    excursions:
+      enabled: true        # build side-specific MFE/MAE labels for GP and barrier research
+      high_col: null       # optional raw bar high; null uses observed price_close path
+      low_col: null        # optional raw bar low; null uses observed price_close path
+    horizons:             # first observation at/after each clock-time horizon
+      - 1s
+      - 5s
+      - 10s
+      - 20s
+      - 40s
+      - 60s
+      - 2min
+      - 3min
+      - 4min
+      - 5min
+
+  triple_barrier:
+    mode: fixed           # fixed, dynamic, or predicted; all modes are available
+    signal_col: htf_rsi_d2_signal
+    price_col: price_close
+    horizon_bars: 30      # row horizon; alternatively set horizon to a duration or horizon_col per event
+    horizon: null         # e.g. 10s; uses first observation at/after entry time + duration
+    horizon_col: null     # optional per-event positive bar count or duration column
+    timestamp_col: null   # optional timestamp column; DatetimeIndex is used when null
+    bid_col: null         # set bid_col + ask_col to use ask-entry/bid-exit for longs, inverse for shorts
+    ask_col: null
+    fee_bps_per_side: 0.0 # one-way fee charged on entry and exit; spread is represented by bid/ask
+    high_col: null        # set both high_col and low_col to use OHLC touch checks
+    low_col: null
+    drop_incomplete: true # omit events too close to end of data
+    fixed:
+      pt: 0.005           # 0.5% profit target
+      sl: 0.003           # 0.3% stop loss
+    dynamic:
+      volatility_col: null # null -> rolling std of simple bar returns
+      volatility_lookback: 60
+      volatility_min_periods: 20
+      pt_sigma: 2.0
+      sl_sigma: 1.0
+    predicted:
+      predicted_mfe_col: predicted_mfe # causal out-of-sample predicted favorable excursion
+      predicted_mae_col: predicted_mae # causal out-of-sample signed adverse excursion
+      pt_scale: 1.0
+      sl_scale: 1.0
+
+policy:                   # orderflow prediction policy (the rules)
+  price_col: mid_price
+  rolling_window: 36000   # 1h of 100ms bars
+  step: 600
+  top_n: 5
+  spearman_block_size: 32

@@ -61,6 +61,8 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
+from components.pipelines.ingestion.synthetic.controls import validate_generator_controls
+
 
 # ============================================================
 # REGIME DEFINITION
@@ -274,9 +276,9 @@ def _build_transition_matrix(
     Synth1 intentionally keeps this symmetric and clean.
     More realistic asymmetric transitions belong in Synth2/3.
     """
-    if not 0.0 < persistence < 1.0:
+    if not 0.0 <= persistence <= 1.0:
         raise ValueError(
-            "persistence must be between 0 and 1"
+            "persistence must be in [0, 1]"
         )
 
     transition = np.full(
@@ -371,6 +373,9 @@ def simulate_market_data(
     seed: int = 84,
     feature_noise: float = 0.5,
     initial_price: float = 100.0,
+    volatility_scale: float = 1.0,
+    directional_bias: float = 0.0,
+    regime_persistence: float | None = None,
 ) -> pd.DataFrame:
     """
     Generate Synth1 clean synthetic market data.
@@ -394,6 +399,18 @@ def simulate_market_data(
 
     initial_price:
         Initial asset price.
+
+    volatility_scale:
+        Multiplies the generated per-bar volatility. Defaults to 1.0.
+
+    directional_bias:
+        Additive log-return drift per bar. Use positive or negative values
+        to create bullish or bearish stress paths; 0.0 preserves the original
+        regime-specific drift behavior.
+
+    regime_persistence:
+        Optional HMM self-transition probability in [0, 1]. ``None`` keeps
+        Synth1's original 0.965 persistence.
 
     Returns
     -------
@@ -435,6 +452,12 @@ def simulate_market_data(
             "initial_price must be > 0"
         )
 
+    validate_generator_controls(
+        volatility_scale,
+        directional_bias,
+        regime_persistence,
+    )
+
     rng = np.random.default_rng(
         seed
     )
@@ -449,7 +472,9 @@ def simulate_market_data(
 
     transition = _build_transition_matrix(
         n_states=n_states,
-        persistence=0.965,
+        persistence=(
+            0.965 if regime_persistence is None else regime_persistence
+        ),
     )
 
     states = _sample_hmm_states(
@@ -753,7 +778,7 @@ def simulate_market_data(
                     sigma,
                     0.001,
                     0.050,
-                )
+                ) * volatility_scale
             )
 
             realized_volatility[t] = (
@@ -829,6 +854,7 @@ def simulate_market_data(
 
             log_return = (
                 previous_regime.drift
+                + directional_bias
                 + directional_component
                 + momentum_component
                 + mean_reversion_component
@@ -857,7 +883,7 @@ def simulate_market_data(
         else:
             # No previous information exists yet.
             realized_volatility[t] = (
-                current_regime.volatility
+                current_regime.volatility * volatility_scale
             )
 
             reference[t] = (

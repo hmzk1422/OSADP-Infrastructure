@@ -83,6 +83,11 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
+from components.pipelines.ingestion.synthetic.controls import (
+    validate_generator_controls,
+    with_regime_persistence,
+)
+
 
 # ============================================================
 # REGIME DEFINITION
@@ -367,6 +372,9 @@ def simulate_market_stochastic(
     seed: int = 84,
     feature_noise: float = 0.80,
     initial_price: float = 100.0,
+    volatility_scale: float = 1.0,
+    directional_bias: float = 0.0,
+    regime_persistence: float | None = None,
 ) -> pd.DataFrame:
     """
     Generate Synth2 stochastic synthetic market data.
@@ -390,6 +398,17 @@ def simulate_market_stochastic(
 
     initial_price:
         Initial asset price.
+
+    volatility_scale:
+        Multiplies the generated per-bar volatility. Defaults to 1.0.
+
+    directional_bias:
+        Additive log-return drift per bar. Positive and negative values
+        create directional stress paths without changing the latent states.
+
+    regime_persistence:
+        Optional shared self-transition probability for the base HMM matrix.
+        ``None`` preserves Synth2's original asymmetric transition matrix.
 
     Returns
     -------
@@ -424,6 +443,12 @@ def simulate_market_stochastic(
             "initial_price must be > 0"
         )
 
+    validate_generator_controls(
+        volatility_scale,
+        directional_bias,
+        regime_persistence,
+    )
+
     rng = np.random.default_rng(
         seed
     )
@@ -436,8 +461,9 @@ def simulate_market_stochastic(
         n_states
     )
 
-    transition = (
-        _build_synth2_transition_matrix()
+    transition = with_regime_persistence(
+        _build_synth2_transition_matrix(),
+        regime_persistence,
     )
 
     states = _sample_synth2_states(
@@ -911,7 +937,7 @@ def simulate_market_stochastic(
                     sigma,
                     0.001,
                     0.060,
-                )
+                ) * volatility_scale
             )
 
             realized_volatility[t] = sigma
@@ -1001,6 +1027,7 @@ def simulate_market_stochastic(
 
             log_return = (
                 previous_regime.drift
+                + directional_bias
                 + directional_component
                 + momentum_component
                 + mean_reversion_component
@@ -1028,7 +1055,7 @@ def simulate_market_stochastic(
         else:
 
             realized_volatility[t] = (
-                regime.volatility
+                regime.volatility * volatility_scale
             )
 
             reference[t] = (
