@@ -2,8 +2,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from itertools import permutations
 from strategy_system.strategy.MoE.latent.diagnostic.similarity import similarity_metric
-from components.python.data_pipeline.synthetic.synth1 import simulate_market_data
-from components.python.data_pipeline.synthetic.synth2 import simulate_market_stochastic
+from components.pipelines.ingestion.synthetic.synth1 import simulate_market_data
+from components.pipelines.ingestion.synthetic.synth2 import simulate_market_stochastic
 from strategy_system.strategy.MoE.latent.vqvae.vqvae import LatentStateModel
 from strategy_system.strategy.MoE.latent.diagnostic.hypothesis import informative_temporality, test_latent_clusterability, find_best_similarity_model
 import random

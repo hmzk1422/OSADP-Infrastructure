@@ -30,7 +30,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-import components.python.data_pipeline.CryptoL2.datapaths as paths
+import components.pipelines.ingestion.CryptoL2.datapaths as paths
 
 DEFAULT_SYMBOL = "BTCUSDT"
 
@@ -168,7 +168,7 @@ def clone_sources(root: str | Path, symbol: str, date: str) -> list[Path]:
     paths — 26 per complete day.
     """
     # Imported lazily so `--help` does not drag in config/ingestion.
-    from components.python.data_pipeline.matched.parquet import fetch_source_data
+    from components.pipelines.event_merger.matched.parquet import fetch_source_data
 
     try:
         cloned = fetch_source_data(root=str(root), symbol=symbol, start=date, end=date)

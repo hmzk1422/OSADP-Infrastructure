@@ -88,8 +88,8 @@ from itertools import permutations
 from scipy.stats import pearsonr, spearmanr
 import matplotlib.pyplot as plt
 from sklearn.ensemble import RandomForestClassifier
-from components.python.data_pipeline.synthetic.synth1 import simulate_market_data
-from components.python.data_pipeline.synthetic.synth2 import simulate_market_stochastic
+from components.pipelines.ingestion.synthetic.synth1 import simulate_market_data
+from components.pipelines.ingestion.synthetic.synth2 import simulate_market_stochastic
 try:
     from strategy_system.strategy.MoE.latent.vqvae.vqvae import LatentStateModel
 except ImportError:

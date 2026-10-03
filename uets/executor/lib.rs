@@ -1,6 +1,8 @@
-pub mod ml_feature;
-pub mod strategy;
-pub mod websocket;
+pub mod connectors;
+pub mod core;
+pub mod exchange;
+#[path = "../live_strategy/mod.rs"]
+pub mod live_strategy;
 use pyo3::prelude::*;
 
 #[pymodule]
