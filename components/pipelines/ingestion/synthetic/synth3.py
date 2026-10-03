@@ -62,6 +62,11 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
+from components.pipelines.ingestion.synthetic.controls import (
+    validate_generator_controls,
+    with_regime_persistence,
+)
+
 
 # ============================================================
 # REGIME DEFINITION
@@ -460,6 +465,9 @@ def simulate_market_realistic(
     seed: int = 84,
     feature_noise: float = 0.90,
     initial_price: float = 100.0,
+    volatility_scale: float = 1.0,
+    directional_bias: float = 0.0,
+    regime_persistence: float | None = None,
 ) -> pd.DataFrame:
     """
     Generate Synth3 stochastic synthetic market data.
@@ -483,6 +491,19 @@ def simulate_market_realistic(
 
     initial_price:
         Initial asset price.
+
+    volatility_scale:
+        Multiplies the baseline of the persistent volatility process, including
+        explicit jump size. Defaults to 1.0.
+
+    directional_bias:
+        Additive log-return drift per bar. Positive and negative values create
+        directional stress paths independently of the endogenous regimes.
+
+    regime_persistence:
+        Optional shared self-transition probability for the base regime matrix.
+        ``None`` preserves Synth3's original matrix. Endogenous stress effects
+        still modify transitions around this baseline.
 
     Returns
     -------
@@ -527,6 +548,12 @@ def simulate_market_realistic(
             "initial_price must be > 0"
         )
 
+    validate_generator_controls(
+        volatility_scale,
+        directional_bias,
+        regime_persistence,
+    )
+
     # ========================================================
     # RNG
     # ========================================================
@@ -543,8 +570,9 @@ def simulate_market_realistic(
         n_states
     )
 
-    base_transition = (
-        _build_synth3_transition_matrix()
+    base_transition = with_regime_persistence(
+        _build_synth3_transition_matrix(),
+        regime_persistence,
     )
 
     # ========================================================
@@ -693,7 +721,7 @@ def simulate_market_realistic(
     states[0] = initial_state
 
     initial_volatility = (
-        regimes[initial_state].volatility
+        regimes[initial_state].volatility * volatility_scale
     )
 
     fast_log_sigma = np.log(
@@ -1314,7 +1342,7 @@ def simulate_market_realistic(
             # =================================================
 
             target_log_sigma = np.log(
-                previous_regime.volatility
+                previous_regime.volatility * volatility_scale
             )
 
             standardized_abs_return = (
@@ -1399,8 +1427,8 @@ def simulate_market_realistic(
             sigma = float(
                 np.clip(
                     sigma,
-                    0.001,
-                    0.080,
+                    0.001 * volatility_scale,
+                    0.080 * volatility_scale,
                 )
             )
 
@@ -1544,7 +1572,7 @@ def simulate_market_realistic(
                     0.015
                     + 0.025
                     * liquidity[t]
-                )
+                ) * volatility_scale
 
                 jump_component = (
                     jump_scale
@@ -1561,6 +1589,7 @@ def simulate_market_realistic(
 
             log_return = (
                 previous_regime.drift
+                + directional_bias
                 + directional_component
                 + momentum_component
                 + mean_reversion_component
@@ -1593,7 +1622,7 @@ def simulate_market_realistic(
 
             # No lagged information exists at t=0.
             realized_volatility[t] = (
-                regime.volatility
+                regime.volatility * volatility_scale
             )
 
             reference[t] = (

@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from collections.abc import Mapping
 
 from tqdm import tqdm
 
@@ -8,55 +9,246 @@ from strategy_system.strategy.MoE.ofmr.hypothesis.vdc.vdc_runner import (
     run_vdc_strategy,
 )
 from components.pipelines.ingestion.CryptoL1.price import get_ohlcv
-from components.pipelines.ingestion.synthetic.synth2 import simulate_market_stochastic 
+from components.pipelines.ingestion.synthetic.synth1 import simulate_market_data
+from components.pipelines.ingestion.synthetic.synth2 import simulate_market_stochastic
+from components.pipelines.ingestion.synthetic.synth3 import simulate_market_realistic
 
-def vdc_monte_carlo(result_df, n_paths=40):
+
+_VDC_SYNTHETIC_GENERATORS = {
+    "synth1": simulate_market_data,
+    "synth2": simulate_market_stochastic,
+    "synth3": simulate_market_realistic,
+}
+
+
+def vdc_monte_carlo(
+    result_df=None,
+    n_paths=40,
+    *,
+    n_assets_per_scenario=1,
+    generator="synth2",
+    n_bars=5_000,
+    n_features=50,
+    n_states=4,
+    seed=0,
+    feature_noise=None,
+    initial_price=100.0,
+    volatility_scale=1.0,
+    volatility_scale_range=None,
+    directional_bias_range=None,
+    directional_bias_per_hour_range=(-0.05, 0.05),
+    regime_persistence=None,
+    regime_persistence_range=None,
+    bar_seconds=1.0,
+    generator_kwargs=None,
+    strategy_kwargs=None,
+    portfolio_context_columns=(
+        "price", "underlying_ret", "pair_value", "fund_divergence",
+        "hedge_notional", "state", "volatility",
+    ),
+    plot_output=True,
+):
+    """Run VDC on reproducible, configurable synthetic stress paths.
+
+    ``generator`` accepts ``"synth1"``, ``"synth2"``, ``"synth3"``, or a
+    compatible generator callable. ``n_paths`` is the number of independent
+    Monte Carlo scenarios; ``n_assets_per_scenario`` creates that many
+    contemporaneous assets inside each scenario. Scenarios remain separate
+    when these results are passed to ``vdc_portfolio``.
+
+    ``directional_bias_per_hour_range`` samples log-return drift per clock
+    hour and converts it to a per-bar bias using ``bar_seconds``. The legacy
+    ``directional_bias_range`` remains available in per-bar units and, when
+    supplied, overrides the per-hour range. Set both ranges to ``None`` to use
+    ``generator_kwargs['directional_bias']`` as a fixed per-bar value.
+    ``volatility_scale_range`` and ``regime_persistence_range`` optionally
+    sample the corresponding controls per path instead of using their fixed
+    values.
+
+    The result keeps the legacy percent-valued ``strategy_paths`` and
+    ``final_returns`` arrays, and adds ``plotted_paths`` in fractional-return
+    units so the same output can feed :func:`vdc_portfolio_index`.
+    """
+    if n_paths <= 0 or n_assets_per_scenario <= 0 or n_bars < 2:
+        raise ValueError("n_paths and n_assets_per_scenario must be > 0; n_bars must be >= 2")
+    if not np.isfinite(bar_seconds) or bar_seconds <= 0:
+        raise ValueError("bar_seconds must be finite and > 0")
+    if not np.isfinite(volatility_scale) or volatility_scale <= 0:
+        raise ValueError("volatility_scale must be finite and > 0")
+    if volatility_scale_range is not None:
+        if len(volatility_scale_range) != 2:
+            raise ValueError("volatility_scale_range must be a (low, high) pair")
+        vol_low, vol_high = map(float, volatility_scale_range)
+        if not np.isfinite(vol_low) or not np.isfinite(vol_high) or vol_low <= 0.0 or vol_low > vol_high:
+            raise ValueError("volatility_scale_range must be finite, positive, and low <= high")
+    if regime_persistence_range is not None:
+        if len(regime_persistence_range) != 2:
+            raise ValueError("regime_persistence_range must be a (low, high) pair")
+        persistence_low, persistence_high = map(float, regime_persistence_range)
+        if (
+            not np.isfinite(persistence_low)
+            or not np.isfinite(persistence_high)
+            or persistence_low < 0.0
+            or persistence_high > 1.0
+            or persistence_low > persistence_high
+        ):
+            raise ValueError("regime_persistence_range must satisfy 0 <= low <= high <= 1")
+    if directional_bias_range is not None:
+        if len(directional_bias_range) != 2:
+            raise ValueError("directional_bias_range must be a (low, high) pair")
+        bias_low, bias_high = map(float, directional_bias_range)
+        if not np.isfinite(bias_low) or not np.isfinite(bias_high) or bias_low > bias_high:
+            raise ValueError("directional_bias_range must be finite with low <= high")
+    else:
+        bias_low = bias_high = None
+    if directional_bias_per_hour_range is not None:
+        if len(directional_bias_per_hour_range) != 2:
+            raise ValueError("directional_bias_per_hour_range must be a (low, high) pair")
+        bias_hour_low, bias_hour_high = map(float, directional_bias_per_hour_range)
+        if not np.isfinite(bias_hour_low) or not np.isfinite(bias_hour_high) or bias_hour_low > bias_hour_high:
+            raise ValueError("directional_bias_per_hour_range must be finite with low <= high")
+    else:
+        bias_hour_low = bias_hour_high = None
+
+    generator_name = generator if isinstance(generator, str) else getattr(generator, "__name__", "custom")
+    if isinstance(generator, str):
+        try:
+            generator_fn = _VDC_SYNTHETIC_GENERATORS[generator.lower()]
+            generator_name = generator.lower()
+        except KeyError as exc:
+            raise ValueError("generator must be 'synth1', 'synth2', 'synth3', or a callable") from exc
+    elif callable(generator):
+        generator_fn = generator
+    else:
+        raise TypeError("generator must be a generator name or callable")
+
+    default_noise = {"synth1": 0.5, "synth2": 0.8, "synth3": 0.9}.get(generator_name, 0.8)
+    feature_noise = default_noise if feature_noise is None else feature_noise
+    generator_kwargs = dict(generator_kwargs or {})
+    strategy_kwargs = dict(strategy_kwargs or {})
+    if isinstance(portfolio_context_columns, str):
+        portfolio_context_columns = (portfolio_context_columns,)
+    else:
+        portfolio_context_columns = tuple(portfolio_context_columns or ())
     strategy_paths = []
     final_returns = []
     invalid_paths = []
+    portfolio_paths = []
+    sampled_biases = []
+    sampled_biases_per_hour = []
+    sampled_volatility_scales = []
+    sampled_persistences = []
 
-    for seed in tqdm(range(n_paths), desc="Simulating Monte Carlo Paths"):
-        # 1. Generate stochastic market path
-        df_path = simulate_market_stochastic(
-            n_bars=5000,
-            n_features=50,
-            n_states=4,
-            seed=seed,
-            feature_noise=0.8,
-            initial_price=100,
+    n_simulations = n_paths * n_assets_per_scenario
+    for path_number in tqdm(range(n_simulations), desc="Simulating Monte Carlo Paths"):
+        path_seed = int(seed + path_number)
+        bias_rng = np.random.default_rng(np.random.SeedSequence([path_seed, 0xD1B1A5]))
+        if directional_bias_range is not None:
+            directional_bias = float(bias_rng.uniform(bias_low, bias_high))
+            directional_bias_per_hour = directional_bias * 3600.0 / bar_seconds
+        elif directional_bias_per_hour_range is not None:
+            directional_bias_per_hour = float(bias_rng.uniform(bias_hour_low, bias_hour_high))
+            directional_bias = directional_bias_per_hour * bar_seconds / 3600.0
+        else:
+            directional_bias = float(generator_kwargs.get("directional_bias", 0.0))
+            directional_bias_per_hour = directional_bias * 3600.0 / bar_seconds
+        path_volatility_scale = (
+            float(bias_rng.uniform(vol_low, vol_high))
+            if volatility_scale_range is not None
+            else float(volatility_scale)
         )
+        path_regime_persistence = (
+            float(bias_rng.uniform(persistence_low, persistence_high))
+            if regime_persistence_range is not None
+            else regime_persistence
+        )
+        path_generator_kwargs = {
+            **generator_kwargs,
+            "n_bars": n_bars,
+            "n_features": n_features,
+            "n_states": n_states,
+            "seed": path_seed,
+            "feature_noise": feature_noise,
+            "initial_price": initial_price,
+            "volatility_scale": path_volatility_scale,
+            "directional_bias": directional_bias,
+            "regime_persistence": path_regime_persistence,
+        }
+        df_path = generator_fn(**path_generator_kwargs)
+        if not isinstance(df_path, pd.DataFrame) or "price" not in df_path.columns:
+            raise TypeError("synthetic generator must return a DataFrame with a 'price' column")
 
-        # Ensure DataFrame has a DatetimeIndex (required for sessionize=True)
         if not isinstance(df_path.index, pd.DatetimeIndex):
-            df_path.index = pd.date_range("2026-01-01 00:00", periods=len(df_path), freq="1s", tz="UTC")
-
-        # 2. Run VDC strategy per path. A path whose interval return violates
-        # 1 +/- L*r > 0 is mathematically undefined for this fund model, so
-        # reject it instead of clipping or fabricating a fund value.
-        try:
-            result_df, summary = run_vdc_strategy(
-                df=df_path,
-                position=1,
-                price_column="price",   # Matches df_path["price"]
-                h_interval=1,         # 1-second fund reset / hedge interval
-                h_lev=3.0,              # 3x target leverage
-                friction_bps=0.0,       # Ignore costs for pair/hedge parity check
-                execution_mode="minimum_margin",  # Underlying-only replication
-                min_change_pct=0,       # 0 noise filter
-                sessionize=True,        # Reset fund state daily
-                report_output=False,    # Disable individual report prints
-                plot_output=False,     # Keep Monte Carlo to its aggregate plot
+            df_path.index = pd.date_range(
+                "2026-01-01 00:00",
+                periods=len(df_path),
+                freq=pd.to_timedelta(bar_seconds, unit="s"),
+                tz="UTC",
             )
+
+        try:
+            run_kwargs = {
+                "price_column": "price",
+                "h_interval": bar_seconds,
+                "h_lev": 3.0,
+                "friction_bps": 0.0,
+                "position": -1,
+                "execution_mode": "pair",
+                "min_change_pct": 0.0,
+                "sessionize": True,
+                "report_output": False,
+                "plot_output": False,
+                **strategy_kwargs,
+            }
+            result_df, summary = run_vdc_strategy(df=df_path, **run_kwargs)
         except ValueError as exc:
             if "A leveraged fund became <= 0" not in str(exc):
                 raise
-            invalid_paths.append({"seed": seed, "reason": str(exc)})
+            invalid_paths.append({
+                "seed": path_seed,
+                "directional_bias": directional_bias,
+                "directional_bias_per_hour": directional_bias_per_hour,
+                "volatility_scale": path_volatility_scale,
+                "regime_persistence": path_regime_persistence,
+                "reason": str(exc),
+            })
             continue
 
-        # 3. Store path cumulative return trajectory (%)
         cum_ret = result_df["cumulative_return"].to_numpy() * 100.0
         strategy_paths.append(cum_ret)
         final_returns.append(summary["final_cumulative_return"] * 100.0)
+        sampled_biases.append(directional_bias)
+        sampled_biases_per_hour.append(directional_bias_per_hour)
+        sampled_volatility_scales.append(path_volatility_scale)
+        sampled_persistences.append(path_regime_persistence)
+
+        context_columns = [
+            column for column in portfolio_context_columns
+            if column in result_df.columns
+        ]
+        path_fraction = result_df["cumulative_return"].to_numpy(dtype=np.float64)
+        path_returns = (
+            result_df["net_pnl"].to_numpy(dtype=np.float64)
+            / float(run_kwargs.get("initial_capital", 1.0))
+        )
+        portfolio_paths.append({
+            "ticker": f"{generator_name}_seed_{path_seed}",
+            "scenario_id": f"scenario_{path_number // n_assets_per_scenario}",
+            "asset_id": f"asset_{path_number % n_assets_per_scenario}",
+            "asset_class": generator_name,
+            "source": "monte_carlo",
+            "fold": 1,
+            "path": path_fraction,
+            "path_unit": "fraction",
+            "returns": path_returns,
+            "timestamps": result_df.index.copy(),
+            "context": result_df[context_columns].copy(),
+            "final_return_pct": float(path_fraction[-1] * 100.0),
+            "directional_bias": directional_bias,
+            "directional_bias_per_hour": directional_bias_per_hour,
+            "volatility_scale": path_volatility_scale,
+            "regime_persistence": path_regime_persistence,
+        })
 
     strategy_paths = np.array(strategy_paths)
     final_returns = np.array(final_returns)
@@ -72,34 +264,32 @@ def vdc_monte_carlo(result_df, n_paths=40):
     unprofitable_count = len(final_returns) - profitable_count
     win_rate = (profitable_count / len(final_returns)) * 100.0
 
-    # 5. Plot Monte Carlo Results
-    plt.figure(figsize=(14, 7))
-
-    for i, path in enumerate(strategy_paths):
-        color = "tab:green" if final_returns[i] > 0 else "tab:red"
-        plt.plot(path, alpha=0.25, color=color, linewidth=1)
-
-    # Highlight breakeven baseline
-    plt.axhline(0, color="black", linestyle="--", linewidth=1.5, label="Breakeven (0%)")
-
-    plt.xlabel("Bar")
-    plt.ylabel("Cumulative Return (%)")
-    plt.title(
-        f"VDC Strategy Monte Carlo Simulation ({len(final_returns)} Valid Paths)\n"
-        f"Profitable Paths: {profitable_count}/{len(final_returns)} ({win_rate:.1f}%) | "
-        f"Unprofitable Paths: {unprofitable_count}/{len(final_returns)} | "
-        f"Rejected: {len(invalid_paths)}"
-    )
-    plt.grid(True, alpha=0.3)
-    plt.legend(loc="upper left")
-    plt.tight_layout()
-    plt.show()
+    if plot_output:
+        plt.figure(figsize=(14, 7))
+        for i, path in enumerate(strategy_paths):
+            color = "tab:green" if final_returns[i] > 0 else "tab:red"
+            plt.plot(path, alpha=0.25, color=color, linewidth=1)
+        plt.axhline(0, color="black", linestyle="--", linewidth=1.5, label="Breakeven (0%)")
+        plt.xlabel("Bar")
+        plt.ylabel("Cumulative Return (%)")
+        plt.title(
+            f"VDC {generator_name} Monte Carlo ({len(final_returns)} Valid Paths)\n"
+            f"Profitable: {profitable_count}/{len(final_returns)} ({win_rate:.1f}%) | "
+            f"Unprofitable: {unprofitable_count}/{len(final_returns)} | "
+            f"Rejected: {len(invalid_paths)}"
+        )
+        plt.grid(True, alpha=0.3)
+        plt.legend(loc="upper left")
+        plt.tight_layout()
+        plt.show()
 
     # Print summary metrics
     print("=" * 50)
     print("MONTE CARLO SIMULATION SUMMARY")
     print("=" * 50)
-    print(f"Total Paths Simulated : {n_paths}")
+    print(f"Scenarios Simulated   : {n_paths}")
+    print(f"Assets per Scenario   : {n_assets_per_scenario}")
+    print(f"Total Paths Simulated : {n_simulations}")
     print(f"Valid Paths           : {len(final_returns)}")
     print(f"Rejected Paths        : {len(invalid_paths)}")
     print(f"Profitable Paths      : {profitable_count} ({win_rate:.1f}%)")
@@ -107,6 +297,10 @@ def vdc_monte_carlo(result_df, n_paths=40):
     print(f"Median Final Return   : {np.median(final_returns):.2f}%")
     print(f"Best Path Return      : {np.max(final_returns):.2f}%")
     print(f"Worst Path Return     : {np.min(final_returns):.2f}%")
+    print(f"Bias Per Hour Range   : {directional_bias_per_hour_range}")
+    print(f"Bias Per Bar Range    : {directional_bias_range}")
+    print(f"Volatility Scale Range: {volatility_scale_range or (volatility_scale, volatility_scale)}")
+    print(f"Regime Persistence Range: {regime_persistence_range or (regime_persistence, regime_persistence)}")
     print("=" * 50)
     if invalid_paths:
         print("Rejected-path example:", invalid_paths[0])
@@ -115,6 +309,16 @@ def vdc_monte_carlo(result_df, n_paths=40):
         "strategy_paths": strategy_paths,
         "final_returns": final_returns,
         "invalid_paths": invalid_paths,
+        "plotted_paths": portfolio_paths,
+        "sampled_directional_biases": np.asarray(sampled_biases, dtype=np.float64),
+        "sampled_directional_biases_per_hour": np.asarray(sampled_biases_per_hour, dtype=np.float64),
+        "sampled_volatility_scales": np.asarray(sampled_volatility_scales, dtype=np.float64),
+        "sampled_regime_persistences": np.asarray(sampled_persistences, dtype=object),
+        "generator": generator_name,
+        "volatility_scale": float(volatility_scale),
+        "regime_persistence": regime_persistence,
+        "n_scenarios": n_paths,
+        "n_assets_per_scenario": n_assets_per_scenario,
     }
 def vdc_asset_test(
     time_slice=1,
@@ -132,6 +336,14 @@ def vdc_asset_test(
     execution_mode="pair",
     min_change_pct=0.0,
     sessionize=True,
+    initial_capital=1.0,
+    assets=None,
+    asset_data=None,
+    scenario_id="asset_test",
+    portfolio_context_columns=(
+        "price", "underlying_ret", "pair_value", "fund_divergence",
+        "hedge_notional", "state", "volatility",
+    ),
     report_output=False,
     plot_output=True,
 ):
@@ -163,6 +375,11 @@ def vdc_asset_test(
     ``time_slice`` controls how many most-recent walk-forward test windows
     are evaluated for each asset.
 
+    ``assets`` may replace the default ticker-to-class mapping with a mapping
+    or a sequence of tickers. Supply ``asset_data={ticker: frame}`` to run
+    locally loaded data across large universes without fetching each asset
+    inside this function. Otherwise data is fetched with ``get_ohlcv``.
+
     Returns
     -------
     dict
@@ -190,7 +407,7 @@ def vdc_asset_test(
     # class.
     # =========================================================
 
-    assets = {
+    default_assets = {
         "BTCUSDT": "large_cap",
         "ETHUSDT": "large_cap",
         "BNBUSDT": "exchange",
@@ -200,6 +417,23 @@ def vdc_asset_test(
         "UNIUSDT": "defi",
         "DOGEUSDT": "meme",
     }
+
+    if assets is None:
+        assets = default_assets
+    elif isinstance(assets, Mapping):
+        assets = dict(assets)
+    elif isinstance(assets, str):
+        assets = {assets: "unclassified"}
+    else:
+        assets = {str(ticker): "unclassified" for ticker in assets}
+    if not assets:
+        raise ValueError("assets must contain at least one ticker")
+    if asset_data is not None and not isinstance(asset_data, Mapping):
+        raise TypeError("asset_data must map ticker names to DataFrames")
+    if isinstance(portfolio_context_columns, str):
+        portfolio_context_columns = (portfolio_context_columns,)
+    else:
+        portfolio_context_columns = tuple(portfolio_context_columns or ())
 
     if time_slice <= 0:
         raise ValueError(
@@ -344,13 +578,18 @@ def vdc_asset_test(
 
             try:
 
-                df = get_ohlcv(
-                    symbol=ticker,
-                    timeframe=timeframe,
-                    since=since,
-                    until=until,
-                    exchange_id="binance",
-                )
+                if asset_data is not None:
+                    if ticker not in asset_data:
+                        raise KeyError(f"{ticker}: missing from asset_data")
+                    df = asset_data[ticker].copy()
+                else:
+                    df = get_ohlcv(
+                        symbol=ticker,
+                        timeframe=timeframe,
+                        since=since,
+                        until=until,
+                        exchange_id="binance",
+                    )
 
                 if not isinstance(
                     df,
@@ -520,6 +759,8 @@ def vdc_asset_test(
 
                         sessionize=sessionize,
 
+                        initial_capital=initial_capital,
+
                         report_output=False,
 
                         plot_output=False,
@@ -578,7 +819,7 @@ def vdc_asset_test(
                     test_result[
                         "test_strategy_nav"
                     ] = (
-                        1.0
+                        initial_capital
                         + test_result[
                             "test_cumulative_pnl"
                         ]
@@ -590,6 +831,7 @@ def vdc_asset_test(
                         test_result[
                             "test_cumulative_pnl"
                         ]
+                        / initial_capital
                     )
 
                     # -----------------------------------------
@@ -602,9 +844,7 @@ def vdc_asset_test(
                         ].iloc[-1]
                     )
 
-                    final_test_return = (
-                        final_test_pnl
-                    )
+                    final_test_return = final_test_pnl / initial_capital
 
                     # -----------------------------------------
                     # Test underlying return.
@@ -833,12 +1073,36 @@ def vdc_asset_test(
                         * 100.0
                     )
 
+                    available_context_columns = [
+                        column
+                        for column in portfolio_context_columns
+                        if column in test_result.columns
+                    ]
+                    portfolio_context = test_result[
+                        available_context_columns
+                    ].copy()
+                    portfolio_returns = (
+                        test_result["net_pnl"].to_numpy(dtype=np.float64)
+                        / initial_capital
+                    )
+                    portfolio_path_fraction = test_result[
+                        "test_cumulative_return"
+                    ].to_numpy(dtype=np.float64)
+
                     plotted_paths.append(
                         {
                             "ticker": ticker,
+                            "scenario_id": scenario_id,
+                            "asset_id": ticker,
                             "asset_class": asset_class,
                             "fold": fold_number,
                             "path": normalized_path,
+                            "path_unit": "percent",
+                            "path_fraction": portfolio_path_fraction,
+                            "returns": portfolio_returns,
+                            "timestamps": test_result.index.copy(),
+                            "context": portfolio_context,
+                            "source": "asset_walk_forward",
                             "final_return_pct":
                                 final_test_return * 100.0,
                         }
@@ -1380,7 +1644,137 @@ def vdc_asset_test(
         "invalid_paths": invalid_paths,
         "plotted_paths": plotted_paths,
     }
-def vdc_portfolio_index(
+
+
+def vdc_synthetic_asset_test(
+    asset_data,
+    h_interval=1.0,
+    bar_seconds=1.0,
+    h_lev=3.0,
+    friction_bps=0.0,
+    position=-1,
+    execution_mode="pair",
+    min_change_pct=0.0,
+    sessionize=True,
+    initial_capital=1.0,
+    scenario_id="uncorrelated_synthetic",
+    strategy_kwargs=None,
+    portfolio_context_columns=(
+        "price", "underlying_ret", "pair_value", "fund_divergence",
+        "hedge_notional", "state", "volatility",
+    ),
+    report_output=False,
+    plot_output=False,
+):
+    """Run VDC over pre-generated synthetic assets and return portfolio paths.
+
+    This consumes the ``asset_data`` mapping returned by
+    ``generate_uncorrelated_synthetic_assets`` (or another mapping of aligned
+    price frames). Each valid asset becomes one constituent in one shared
+    scenario, so ``vdc_portfolio`` diversifies across them.
+    """
+    if not isinstance(asset_data, Mapping) or not asset_data:
+        raise ValueError("asset_data must be a nonempty mapping of ticker IDs to DataFrames")
+    if not np.isfinite(initial_capital) or initial_capital <= 0.0:
+        raise ValueError("initial_capital must be finite and > 0")
+    if not np.isfinite(bar_seconds) or bar_seconds <= 0.0:
+        raise ValueError("bar_seconds must be finite and > 0")
+    if isinstance(portfolio_context_columns, str):
+        portfolio_context_columns = (portfolio_context_columns,)
+    else:
+        portfolio_context_columns = tuple(portfolio_context_columns or ())
+    strategy_kwargs = dict(strategy_kwargs or {})
+    plotted_paths = []
+    summaries = []
+    invalid_paths = []
+
+    for asset_id, source_frame in asset_data.items():
+        if not isinstance(source_frame, pd.DataFrame) or "price" not in source_frame.columns:
+            invalid_paths.append({"ticker": str(asset_id), "reason": "expected a DataFrame with a 'price' column"})
+            continue
+        frame = source_frame.copy()
+        if not isinstance(frame.index, pd.DatetimeIndex):
+            frame.index = pd.date_range(
+                "2026-01-01T00:00:00Z",
+                periods=len(frame),
+                freq=pd.to_timedelta(bar_seconds, unit="s"),
+            )
+        try:
+            run_kwargs = {
+                "price_column": "price",
+                "h_interval": h_interval,
+                "h_lev": h_lev,
+                "friction_bps": friction_bps,
+                "position": position,
+                "execution_mode": execution_mode,
+                "min_change_pct": min_change_pct,
+                "sessionize": sessionize,
+                "initial_capital": initial_capital,
+                "report_output": False,
+                "plot_output": False,
+                **strategy_kwargs,
+            }
+            effective_initial_capital = float(run_kwargs["initial_capital"])
+            result_df, summary = run_vdc_strategy(df=frame, **run_kwargs)
+        except (ValueError, KeyError) as exc:
+            invalid_paths.append({"ticker": str(asset_id), "reason": str(exc)})
+            continue
+
+        if result_df.empty:
+            invalid_paths.append({"ticker": str(asset_id), "reason": "VDC returned no observations"})
+            continue
+        return_values = result_df["net_pnl"].to_numpy(dtype=np.float64) / effective_initial_capital
+        cumulative = result_df["cumulative_return"].to_numpy(dtype=np.float64)
+        context_columns = [column for column in portfolio_context_columns if column in result_df.columns]
+        plotted_paths.append({
+            "ticker": str(asset_id),
+            "asset_id": str(asset_id),
+            "asset_class": "synthetic",
+            "source": "synthetic_asset_test",
+            "scenario_id": scenario_id,
+            "fold": 1,
+            "path_fraction": cumulative,
+            "path_unit": "fraction",
+            "returns": return_values,
+            "timestamps": result_df.index.copy(),
+            "context": result_df[context_columns].copy(),
+            "final_return_pct": float(cumulative[-1] * 100.0),
+        })
+        summaries.append({"ticker": str(asset_id), **summary})
+
+    if not plotted_paths:
+        raise RuntimeError("No valid VDC synthetic asset paths were produced")
+    final_returns = np.asarray([item["final_return_pct"] for item in plotted_paths], dtype=np.float64)
+    if report_output:
+        print("=" * 60)
+        print("VDC SYNTHETIC ASSET SUMMARY")
+        print("=" * 60)
+        print(f"Valid assets      : {len(plotted_paths)}")
+        print(f"Rejected assets   : {len(invalid_paths)}")
+        print(f"Mean final return : {np.mean(final_returns):.4f}%")
+        print(f"Median return     : {np.median(final_returns):.4f}%")
+        print(f"Profitable assets : {np.mean(final_returns > 0.0) * 100.0:.2f}%")
+        print("=" * 60)
+    if plot_output:
+        plt.figure(figsize=(14, 7))
+        for item in plotted_paths:
+            color = "tab:green" if item["final_return_pct"] > 0.0 else "tab:red"
+            plt.plot(item["timestamps"], item["path_fraction"] * 100.0, color=color, alpha=0.25)
+        plt.axhline(0.0, color="black", linestyle="--", linewidth=1.0)
+        plt.xlabel("Time")
+        plt.ylabel("Cumulative Return (%)")
+        plt.title(f"VDC on {len(plotted_paths)} Filtered Synthetic Assets")
+        plt.grid(True, alpha=0.3)
+        plt.tight_layout()
+        plt.show()
+
+    return {
+        "asset_summary": pd.DataFrame(summaries),
+        "final_returns": final_returns,
+        "invalid_paths": invalid_paths,
+        "plotted_paths": plotted_paths,
+    }
+def _legacy_vdc_portfolio_index(
     vdc_results,
     weighting="equal",
     initial_capital=1.0,
@@ -2003,3 +2397,10 @@ def vdc_portfolio_index(
         "summary":
             summary,
     }
+
+
+# Keep the historical import path while exposing the clearer portfolio name.
+from strategy_system.strategy.MoE.ofmr.tests.vdc_portfolio import (  # noqa: E402
+    vdc_portfolio,
+    vdc_portfolio_index,
+)
