@@ -38,9 +38,9 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from components.commands import _common as common  # noqa: E402
-from components.rust.event_merger.orchestrator import run_merger  # noqa: E402
-from components.rust.lob_builder.orchestrator import run_lob  # noqa: E402
-from components.rust.lob_builder.orchestrator import snapshot_builder  # noqa: E402
+from components.pipelines.event_merger.orchestrator import run_merger  # noqa: E402
+from components.pipelines.lob_builder.orchestrator import run_lob  # noqa: E402
+from components.pipelines.lob_builder.orchestrator import snapshot_builder  # noqa: E402
 
 
 def build_parser() -> argparse.ArgumentParser:
