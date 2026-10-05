@@ -1,13 +1,28 @@
-"""Out-of-distribution detection over causal raw-market temporal patterns."""
+"""Causal recurring regime discovery and diagnostics."""
 
-from .detector import OODRegimeDetector, detect_ood_regimes
-from .encoder import TemporalPrimitiveEncoder, build_primitive_observations
-from .regimes import OnlineRegimeRegistry
+from .base_regime_encoder import (
+    BaseRegimeEncoder,
+    TCNRegimeEncoder,
+    TS2VecRegimeEncoder,
+    TransformerRegimeEncoder,
+    TemporalWindowEncoder,
+    build_temporal_windows,
+    encode_windows,
+    prepare_regime_input,
+)
+from .base_regime_segmenter import (
+    BaseRegimeSegmenter,
+    HysteresisClusterRegimeSegmenter,
+    StickyHMMRegimeSegmenter,
+)
+from .ood import OODRegimeDetector, OODSystem, build_primitive_observations
+from .regime_validator import RegimeValidator
 
 __all__ = [
-    "OODRegimeDetector",
-    "detect_ood_regimes",
-    "TemporalPrimitiveEncoder",
+    "BaseRegimeEncoder", "TemporalWindowEncoder", "TCNRegimeEncoder",
+    "TS2VecRegimeEncoder", "TransformerRegimeEncoder", "prepare_regime_input",
+    "build_temporal_windows", "encode_windows", "BaseRegimeSegmenter",
+    "HysteresisClusterRegimeSegmenter", "StickyHMMRegimeSegmenter",
+    "RegimeValidator", "OODSystem", "OODRegimeDetector",
     "build_primitive_observations",
-    "OnlineRegimeRegistry",
 ]

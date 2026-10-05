@@ -104,47 +104,47 @@ and remember this is state-based problem, not time based problem. so if the feat
 
 ## OOD state detection
 
-`ood/` is independent of GP-evolved features. It builds fixed observations
-from raw price/return, spread, bid/ask queue and depth, trade-flow, activity,
-and liquidation columns. Its embedding combines fast rolling-z temporal shape
-with slow rolling volatility/liquidity levels normalized against expanding
-past statistics. This preserves persistent high-volatility or wide-spread
-conditions after the fast rolling baseline adapts. During either encoder
-warmup, `latent_id` is `null` and the row is non-tradeable.
+`ood/` is independent of GP-evolved features and forward outcomes. Its four
+modules separate the swappable `BaseRegimeEncoder`, swappable
+`BaseRegimeSegmenter`, `RegimeValidator`, and top-level `OODSystem`. The default
+encoder is a causal ordered-window baseline; `TCNRegimeEncoder`,
+`TS2VecRegimeEncoder`, and `TransformerRegimeEncoder` implement the same encoder
+contract. Hysteresis clustering and the sticky state model implement the same
+segmenter contract. Inject a concrete encoder or segmenter to compare methods
+without changing strategy integration.
 
-The online registry matches known prototypes using a per-state diagonal
-Mahalanobis distance and an observed state-specific radius. Candidate centers
-are promoted only after both `min_novel_observations` and
-`min_novel_episodes` are met; observations closer together than
-`candidate_episode_gap` count as one episode, so overlapping windows cannot
-promote a single transient. Stale candidates expire, the oldest candidate is
-evicted if its buffer is full, and inactive prototypes expire after
-`state_expiry_observations`. Prototype centers are frozen by default to keep
-state identities from drifting together. The promotion row remains `null`.
+Discovery consumes raw or explicitly selected primitive columns. The default
+encoder combines causally normalized within-window patterns with slow
+volatility/liquidity level channels, so persistent conditions remain visible
+after the fast rolling baseline adapts. It returns one timestamp-aligned
+embedding per row and does not read outcomes.
+New prototypes remain `null` until they have both
+`min_novel_observations` support and `min_novel_episodes` separated recurrence
+episodes. This prevents one close embedding from defining a known regime. The
+promotion row remains null. `min_dwell` causally debounces every label,
+including `null`; while a transition is pending, the public label stays stable
+and `trade_allowed` is false. Raw and filtered assignments are both returned
+so validation can compare their episode durations and transition stability.
 
-A promoted state then needs `mature_state_observations` post-promotion matches.
-Execution also requires a fitted state model: configure its ID in
-`ood.model_ready_states`, or call
-`detector.set_model_ready_states(state_ids)` before detection. The
-default empty list deliberately blocks execution when no fitted model has been
-registered. `strategy()` attaches `latent_id`, `state_mature`, `model_ready`,
-and `trade_allowed` to both all-row forward targets and triple-barrier events.
-For a model fitted to one state, use a separate row filter such as
-`result.outcomes['latent_id'].eq(state_id) & result.outcomes['trade_allowed']`;
-keep that filter separate from the chronological train/validation mask.
-Outcome labels remain available for research during null and maturing periods.
+The validator reports embedding similarity, temporal-pattern similarity,
+episode-duration similarity, and persistence separately. Forward expectancy
+is calculated only when forward outcome columns are explicitly supplied to
+`validate_regimes`; outcomes never enter encoder fitting, prototype creation,
+or state assignment. Similarity and expectancy are diagnostics, not a combined
+regime score. Supply benchmark labels as `ground_truth` to
+`validate_regimes()` for ARI, NMI, recurrence purity, and assignment coverage.
 
-The default `strategy()` call starts a fresh registry. For continuity across
-chunks or runs, keep one detector and pass a raw context prefix for feature and
-encoder warmup. Set `ood_process_from` to the first new row so the context is
-not processed twice:
+The default `strategy()` call starts a fresh OOD system. For continuity across
+chunks or runs, keep one system and pass a raw context prefix for encoder
+warmup. Set `ood_process_from` to the first new row so context rows are not
+processed twice:
 
 ```python
-from strategy_system.strategy.MoE.ofmr_scalp.ood import OODRegimeDetector
+from strategy_system.strategy.MoE.ofmr_scalp.ood import OODSystem
 from strategy_system.strategy.MoE.ofmr_scalp.strategy import load_settings, strategy
 
 settings = load_settings()
-detector = OODRegimeDetector(**settings.get("ood", {}))
+detector = OODSystem(**settings.get("ood", {}))
 # Keep a raw context prefix; only new rows update the learned registry.
 result = strategy(
     raw_context_and_new_rows,
@@ -152,51 +152,47 @@ result = strategy(
     ood_detector=detector,
     ood_process_from=len(raw_context),
 )
-saved_registry = detector.state_dict()
-# Later: detector = OODRegimeDetector.from_state_dict(saved_registry)
+detector.save("ood-system.pkl")
+# Later: detector = OODSystem.load("ood-system.pkl")
 ```
 
-Keep raw primitive columns and their order fixed when reusing a registry. The
-encoder uses preceding observations as normalization history, so a new chunk
-needs a raw warmup prefix; pass `process_from` at the first new row so context
-does not update the registry a second time. With `ood.timestamp_col: null`,
-the detector auto-detects a `timestamp` column, then a DatetimeIndex, and
-otherwise preserves input row order. IDs
-are online labels, not semantic regime names; a separate model registry should
-store the meaning and fitted model for each ID. Top-of-book queue measurements
-are not duplicated as depth-level-1 measurements in auto primitive mode.
+Keep raw primitive columns and their order fixed when reusing a saved system.
+The encoder uses preceding observations as normalization history, so each new
+chunk needs a raw warmup prefix; pass `process_from` at the first new row to
+avoid processing context twice. With `ood.timestamp_col: null`, the system
+auto-detects a `timestamp` column, then a DatetimeIndex, and otherwise
+preserves row order. IDs are persistent prototype keys, not semantic names;
+keep model names and fitted policies in a separate registry.
 
 ## Genetic programming
 
-`gp/` evolves bounded expression trees from causal numeric columns in the
-feature frame plus timestamp-aligned raw market primitives. The grammar includes protected `+`, `-`, `*`, `/`, signed
-nonlinear transforms, lag/difference/finite-difference derivative, rolling
-mean/std, and analytic partial derivatives with respect to a selected input.
-Trees are capped by `gp.max_height`; operations are vectorized over the time
-series and use trailing windows only.
+`gp/` is the offline feature discovery package. Its public modules separate
+grammar, population/evolution, evaluation, and per-latent feature-library
+persistence. Expressions are bounded by `gp.max_height`; arithmetic can
+recurse while temporal and calculus operations are restricted. Window
+operations are rolling and causal; block summaries update only from the current
+fixed block's observed prefix.
 
-`extrapolate_features()` requires an explicit chronological training prefix,
-state labels, and separate targets. It runs one search per known latent state
-and target, excludes `null`, and purges training labels whose target endpoints
-reach the validation boundary. It scores candidates by chronological block IC
-consistency, applies a tree-size penalty, and injects random trees to preserve
-population diversity. Candidates must clear the train IC and block-sign gates;
-a validation veto then rejects features with weak, collapsed, or reversed IC.
-The validation set does not rank candidates. Selected features are pruned by
-correlation rather than expression text alone, and their direction is saved in
-`SelectedExpression` for downstream use. State-specific transformed columns
-are masked outside their state. The serializable
-`GeneticFeatureModel` stores expression trees as data, not executable source.
+`extrapolate_features()` runs one search per known latent and target. `null`
+rows are excluded by default; `gp.include_null: true` allows an explicit
+offline search after `gp.min_null_samples` are available. The search screens
+generated expressions by target correlation, Ridge, and redundancy; fitness
+uses model-family-balanced scores and a search-size-adjusted t-stat gate.
+Purged expanding folds hold out recurring latent episodes, followed by joint
+feature-set evaluation and a later chronological holdout veto. Report columns
+keep model errors, directional accuracy, expectancy, recurrence consistency,
+and stability separate.
 
-To run it through the strategy engine, set `gp.enabled: true` in
-`settings.yaml`. The result exposes `result.gp.report` and
-`result.gp.features`; the latter can be passed as inputs to the downstream
-barrier classifier or timeout regression. The stored `result.gp.model` can
-recreate those columns on the same causal feature/raw-primitive frame.
+The expression model is stored as data by latent ID. `result.gp.features` are
+the selected columns, `result.gp.report` contains diagnostics, and
+`result.gp.feature_library` contains the versioned library. Set
+`gp.feature_library_path` to persist it. The GP switch is false by default and
+must be explicitly enabled for offline retraining; no evolution is performed
+for live observations. The ordinary strategy output and live OOD labels do not
+trigger GP retraining.
 
-GP is opt-in (`gp.enabled: false` by default). When enabled in `strategy()`,
-the chronological split purges training rows whose selected target timestamp
-crosses into validation. Set `gp.target_columns` to the outcomes configured in
-`outcome.forward_returns`; adjust population size, generations, state sample
-minimums, and expression height to control search cost. GP selection does not
-change OOD state definitions or the outcome labels.
+# Summary Structure
+All three are maintained to be as decoupled to each other as possible.
+1. OOD -> Resamples market data to many kinds of latent data (AutoEncoder passes temporality similarity and similarity score between recurring regimes). Market data is chunked in this order. Either include precomputed, meaningful features or not (look at its effectiveness).
+2. GP (Optional) -> **Main point is to use RankIC and Linreg (or tree if its non-linear) w features to correlate with t+1, t+2, ... t+n time.** Either use precomputed, meaningful features or use GP to automate feature development. Those precomputed, meaningful features should pass purged chronological walkforwards on latent states.
+3. Triple Barrier -> Optimizer. Tree model evaluates MFE/MAE based on computed linreg prediction on future prices. Tree model can take the precomputed features or GP features to re-evalutae as metalabeller.

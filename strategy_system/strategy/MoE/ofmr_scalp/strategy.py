@@ -33,7 +33,7 @@ from .outcome import (
 from .exchange.loader import load_ohlcv_state, load_orderbook_state
 from .features import compute_features
 from .gp import GPEvolutionResult, extrapolate_features
-from .ood import OODRegimeDetector, build_primitive_observations
+from .ood import OODSystem, build_primitive_observations
 from .policies.orderflow_prediction import (
     evaluate_orderflow_policy,
     format_report,
@@ -228,7 +228,7 @@ def load_data(settings: dict) -> pd.DataFrame:
 def strategy(
     df: pd.DataFrame,
     settings: dict | None = None,
-    ood_detector: OODRegimeDetector | None = None,
+    ood_detector: OODSystem | None = None,
     ood_process_from: int = 0,
 ) -> StrategyResult:
     """Run the OFMR scalp pipeline on a raw state table.
@@ -262,7 +262,7 @@ def strategy(
 
     # 2. OOD states are built from the original raw stream, not the GP or
     # engineered feature frame. Null states are explicitly non-tradeable.
-    detector = ood_detector if ood_detector is not None else OODRegimeDetector(**cfg.get("ood", {}))
+    detector = ood_detector if ood_detector is not None else OODSystem(**cfg.get("ood", {}))
     regimes = detector.detect(df, process_from=ood_process_from)
 
     # 3. Outcomes. Forward returns are targets for model fitting/evaluation;

@@ -4,7 +4,70 @@ from __future__ import annotations
 
 import numpy as np
 
-from .grammar import Node, all_paths, has_nested_partial, random_tree, replace_at_path
+from .grammar import (Node, all_paths, evaluate_expression, has_nested_partial,
+                      random_tree, replace_at_path, validate_expression)
+
+
+def create_random_expression(rng, primitive_features, max_depth=5, temporal_windows=(2, 4, 8, 16)):
+    return random_tree(rng, tuple(primitive_features), max_depth, tuple(temporal_windows))
+
+
+def create_initial_population(rng, primitive_features, population_size=32, max_depth=5, temporal_windows=(2, 4, 8, 16)):
+    return initialize_population(rng, tuple(primitive_features), population_size, max_depth, tuple(temporal_windows))
+
+
+def deduplicate_population(population):
+    return list({str(node): node for node in population}.values())
+
+
+def filter_invalid_features(population, primitive_features=None, max_depth=10):
+    return [node for node in population if validate_expression(node, primitive_features, max_depth)]
+
+
+def filter_constant_features(population, frame, min_unique=2, sample_mask=None):
+    kept = []
+    for node in population:
+        try:
+            values = evaluate_expression(node, frame)
+            if sample_mask is not None:
+                mask = np.asarray(sample_mask, dtype=bool)
+                if len(mask) != len(frame):
+                    raise ValueError("sample_mask must match the frame rows")
+                values = values.iloc[np.flatnonzero(mask)]
+            values = values.replace([np.inf, -np.inf], np.nan).dropna()
+            if values.nunique() >= min_unique:
+                kept.append(node)
+        except (ValueError, KeyError, TypeError, FloatingPointError, AttributeError):
+            continue
+    return kept
+
+
+def filter_redundant_features(population, frame, threshold=0.98, min_samples=30, sample_mask=None):
+    """Keep the first representative from each highly correlated expression group."""
+    if not 0 < threshold <= 1:
+        raise ValueError("threshold must be in (0, 1]")
+    kept, values = [], []
+    for node in population:
+        try:
+            series = evaluate_expression(node, frame).to_numpy(dtype=float)
+        except (ValueError, KeyError, TypeError, FloatingPointError, AttributeError):
+            continue
+        mask = np.ones(len(series), dtype=bool) if sample_mask is None else np.asarray(sample_mask, dtype=bool)
+        if len(mask) != len(series):
+            raise ValueError("sample_mask must match the frame rows")
+        series = series[mask]
+        duplicate = False
+        for prior in values:
+            valid = np.isfinite(series) & np.isfinite(prior)
+            if valid.sum() >= min_samples and np.std(series[valid]) > 1e-12 and np.std(prior[valid]) > 1e-12:
+                corr = np.corrcoef(series[valid], prior[valid])[0, 1]
+                if np.isfinite(corr) and abs(corr) >= threshold:
+                    duplicate = True
+                    break
+        if not duplicate:
+            kept.append(node)
+            values.append(series)
+    return kept
 
 
 def initialize_population(
@@ -57,7 +120,7 @@ def crossover(
         left_path = left_paths[int(rng.integers(len(left_paths)))]
         right_path = right_paths[int(rng.integers(len(right_paths)))]
         child = replace_at_path(left, left_path, _node_at(right, right_path))
-        if child.height <= max_depth and not has_nested_partial(child):
+        if child.height <= max_depth and not has_nested_partial(child) and validate_expression(child, max_depth=max_depth):
             return child
     return left
 
@@ -91,7 +154,7 @@ def mutate(
             allow_partial=not inside_partial,
         )
         child = replace_at_path(node, path, replacement)
-        if child.height <= max_depth and not has_nested_partial(child):
+        if child.height <= max_depth and not has_nested_partial(child) and validate_expression(child, variables, max_depth=max_depth):
             return child
     return node
 
