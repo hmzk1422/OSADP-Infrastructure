@@ -30,35 +30,39 @@ features:
   oversold: 30.0
   overbought: 70.0
 
-ood:                       # temporal OOD states from fixed raw primitives
+ood:                       # causal temporal regime discovery
   timestamp_col: null      # auto-detect timestamp, then DatetimeIndex; otherwise preserve input row order
-  primitive_columns: null  # null -> infer price / book / trade primitives
-  sequence_window: 32      # raw observations per temporal pattern
-  embedding_bins: 8        # preserve coarse chronological shape within window
-  normalization_window: 500 # fast rolling normalization for transient shape
+  primitive_columns: null  # null -> derive available raw price / book / trade primitives
+  encoder_type: temporal_window # temporal_window, tcn, ts2vec, transformer
+  encoder_params: {}      # encoder-specific train settings; injected objects also supported
+  sequence_window: 32      # temporal window length (input rows)
+  embedding_bins: 8        # ordered bins preserve coarse pattern shape
+  normalization_window: 500 # causal rolling normalization; uses preceding rows
   normalization_min_periods: 50
   clip_z: 8.0
-  slow_feature_window: 5000 # slow volatility/liquidity level features
+  slow_feature_window: 5000 # retain persistent volatility/liquidity levels
   slow_min_periods: 50
   slow_level_weight: 1.0
+  segmenter_type: hysteresis # hysteresis or sticky_hmm; segmenter is independently swappable
   max_states: 10
-  match_threshold: 3.0     # per-state diagonal-Mahalanobis distance
-  novel_threshold: 0.8     # RMS distance for grouping unseen candidates
-  min_novel_observations: 200 # observations accumulated across recurrence episodes
-  min_novel_episodes: 3    # distinct episodes required; adjacent overlapping windows are one episode
-  candidate_episode_gap: 32 # missing observations between episodes; keep >= sequence_window
-  candidate_expiry_observations: 5000 # remove candidate clusters that stop recurring
-  max_novel_clusters: 128  # oldest candidate is evicted if the buffer is full
-  mature_state_observations: 200 # post-promotion known observations before maturity
-  state_expiry_observations: 100000 # prune prototypes that are inactive beyond this many observations
-  min_state_scale: 0.1
-  centroid_update_rate: 0.0 # freeze identity centers by default; state radius still adapts
+  match_threshold: 1.5     # state-local normalized embedding distance
+  novel_threshold: 0.25    # tighter candidate grouping; validate/tune on Synth2
+  min_novel_observations: 200 # accumulated support before prototype promotion
+  min_novel_episodes: 3    # distinct separated episodes required before promotion
+  candidate_episode_gap: 32 # row gap that separates recurrence episodes
+  candidate_expiry_observations: 5000 # discard candidates that stop recurring
+  max_novel_clusters: 128  # cap candidate memory
+  min_dwell: 5             # debounce regime and null assignments causally
+  sticky_bias: 2.5         # log-odds self-transition preference for sticky_hmm
+  mature_state_observations: 200 # known assignments after promotion before maturity
   model_ready_states: []   # latent IDs with a fitted deployable model; empty means no trades allowed
   require_model_for_trade: true
   learn_novel: true
 
 gp:                        # bounded state-conditioned genetic programming
-  enabled: false           # opt in after reviewing cost and train/validation design
+  enabled: false           # explicit offline retraining switch; never run per live observation
+  feature_library_path: null # optional persisted, validated expression library
+  evaluation_models: [ridge, ols, tree, neural_network]
   target_columns:          # supervised objectives from outcome.forward_returns
     - future_return__1s
     - future_return__5s
@@ -86,7 +90,9 @@ gp:                        # bounded state-conditioned genetic programming
   crossover_rate: 0.70
   temporal_windows: [2, 4, 8, 16]
   max_features_per_state_target: 2
-  min_state_samples: 200
+  min_state_samples: 60
+  include_null: false      # optional explicit offline research on accumulated unknown-state rows
+  min_null_samples: 60
   max_states: 10
   complexity_penalty: 0.0005
   block_count: 5
@@ -96,6 +102,9 @@ gp:                        # bounded state-conditioned genetic programming
   block_std_penalty: 0.5
   min_train_ic: 0.03
   min_validation_ic: 0.02
+  min_train_tstat: 2.0
+  min_validation_tstat: 1.96
+  multiple_testing_alpha: 0.05
   validation_ic_retention: 0.25
   correlation_threshold: 0.98
   immigrant_fraction: 0.10

@@ -1,0 +1,67 @@
+GP AUDIT CONTINUATION - CHANGE LOG (part 1/2)
+Workspace: intraday-momentum-composite | Date UTC: 2026-10-05
+Scope: continue prior audit (crashes + scoring first, then driver/API,
+recurrence diagnostics, model-name validation). Only session edits logged.
+
+CONTEXT: tree already had large uncommitted GP fixes. This session verified
+them and closed leftovers: (a) walk-forward guards too narrow, (b) model-name
+validators not exported, (c) purge_rows ignored for custom target names.
+
+1) MODIFIED: strategy_system/strategy/MoE/ofmr_scalp/gp/__init__.py
+ADDED import lines 19-25: canonical_model_name, validate_evaluation_models
+  from .evaluation import (... ridge_select_features,
+                           canonical_model_name, validate_evaluation_models)
+ADDED __all__ line 49: "canonical_model_name", "validate_evaluation_models",
+WHY: validators existed + called inside extrapolate_features but NOT importable
+  via `import ...gp as g` (verified False before, True after).
+  g.validate_evaluation_models(['Ridge','OLS','Tree','Neural Network'])
+    -> ('ridge','ols','tree','neural_network').
+
+2) MODIFIED: strategy_system/strategy/MoE/ofmr_scalp/gp/population.py
+CHANGED filter_constant_features except line 40:
+  BEFORE: except (ValueError, KeyError, TypeError, FloatingPointError):
+  AFTER:  except (ValueError, KeyError, TypeError, FloatingPointError, AttributeError):
+CHANGED filter_redundant_features except line 53: same BEFORE->AFTER.
+WHY: audit crash 1 was power op .where on float -> AttributeError. Grammar fixed,
+  but filters stay crash-safe (skip bad node, keep searching).
+
+3) MODIFIED: strategy_system/strategy/MoE/ofmr_scalp/gp/evolution.py
+CHANGED 3 walk-forward guards (lines ~737, ~814, ~903):
+  BEFORE all three: except (ValueError, np.linalg.LinAlgError): continue
+  AFTER all three: except (ValueError, KeyError, TypeError, AttributeError,
+    FloatingPointError, OverflowError, np.linalg.LinAlgError): continue
+WHY: one bad candidate must never abort whole state/target search.
+CHANGED _purge_target_overlap DatetimeIndex fallback (lines 369-374):
+  BEFORE: unparsable horizon label -> raise ValueError immediately.
+  AFTER: if purge_rows is None: raise; else apply row embargo
+    result[max(0, split-int(purge_rows)):split] = False; continue.
+WHY: custom target 'tgt' + DatetimeIndex + purge_rows=2 still raised. Datetime
+  branch now honours explicit purge_rows like integer-index path.
+
+4) CREATED: gp_audit_synthetic_check.py (repo root helper, keep or delete)
+Tests: power Node(x0,x1) via evaluate_expression; test_feature_set ridge on
+  DatetimeIndex; extrapolate_features tiny run (pop 6 x gen 2, ridge+ols).
+Session tweaks: added purge_rows=2; fixed out.selected -> out.model.selected
+  (GPEvolutionResult has .model: GeneticFeatureModel).
+
+VALIDATION
+- py_compile gp/__init__, evolution, population, grammar, evaluation,
+  feature_library -> EXIT 0.
+- Public API: validate_evaluation_models + canonical_model_name importable OK.
+- python gp_audit_synthetic_check.py (pandas 3.0.3, numpy 2.4.6):
+  power node OK 400/400; walk-forward OK expectancy=-0.0116 stability=0.8416;
+  extrapolate_features OK report 0 rows, selected 0. ALL PASSED.
+  (0 selected on noise + tiny pop is EXPECTED: t-stat/block gates reject noise.)
+
+VERIFIED ALREADY-CORRECT (no edit): np.asarray DatetimeIndex comparisons;
+power tangent exponent*x.pow(e-1)*dx; fitness -inf on non-finite + scale norm;
+evolve_population->evolve_generation/select_parents/stop_evolution/hall-of-fame;
+episode-holdout folds + episode_expectancy_std/recurrence_consistency/episode_count;
+up-front validate_evaluation_models; casefold null handling; __test__=False.
+
+NOT CHANGED: window vs rolling_mean (now sum vs mean, not identical); ridge/ols
+grouped by family already; NULL trigger lives in ood/; tangent cost; harmless
+_node_from_dict alias; pre-existing ood deletions untouched.
+INSPECT: git diff -- gp/__init__.py gp/population.py gp/evolution.py
+RERUN: python gp_audit_synthetic_check.py
+
