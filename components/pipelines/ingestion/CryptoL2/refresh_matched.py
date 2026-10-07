@@ -7,12 +7,12 @@ Rebuild the matched aggTrades x L2 parquet files in
 `<market_data>/matched/<TICKER>/` from the newest ingestion parquet tree.
 
 The matching *implementation* stays with the strategy layer
-(`.../MoE/data/live.py`) because it is research logic. This module is the
+(`.../data/live.py`) because it is research logic. This module is the
 ingestion-side wrapper: it locates that data layer, supplies the current
 `market_data` layout paths, forwards the CLI flags, and reports clearly when
 the strategy side is not usable.
 
-The data layer is DISCOVERED by walking the repo for `MoE/data/live.py`
+The data layer is DISCOVERED by walking the repo for a `data/live.py`
 rather than hard-coded, so renaming the top-level package (research ->
 strategies -> strategy_system -> ...) does not break ingestion. `dataconfig`
 is optional; when it is missing, this module supplies its own defaults from
@@ -50,10 +50,10 @@ _SEARCH_SKIP = {
 
 
 def _discover_data_layer_package() -> Optional[str]:
-    """Return the dotted package of a `.../MoE/data/` holding `live.py`.
+    """Return the dotted package of a `.../data/` holding `live.py`.
 
-    E.g. `<repo>/strategy_system/strategy/MoE/data/live.py` ->
-    `strategy_system.strategy.MoE.data`. Returns None when not found.
+    E.g. `<repo>/strategy_system/strategy/data/live.py` ->
+    `strategy_system.strategy.data`. Returns None when not found.
     """
     root = paths.PROJECT_ROOT
     for dirpath, dirnames, filenames in os.walk(root):
@@ -80,7 +80,7 @@ def _resolve_data_layer():
     if package is None:
         raise ImportError(
             "Could not find a MoE data layer (a directory named 'data' "
-            "containing live.py, e.g. <repo>/*/strategy/MoE/data/live.py).\n"
+            "containing live.py, e.g. <repo>/*/strategy/data/live.py).\n"
             "Matched data cannot be rebuilt without it."
         )
 

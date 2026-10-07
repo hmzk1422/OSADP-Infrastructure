@@ -1,0 +1,112 @@
+MOE STRATEGY REFACTOR PLAN (agreed)
+Date UTC: 2026-10-07
+Scope: strategy_system/strategy/moe/{strategy.py, outcome/}. OOD and GP already fixed, untouched.
+Rule: outcome/timeout.py stays in outcome/, fully dormant, idea-only, byte-untouched.
+
+S0. PREREQUISITE - BROKEN IMPORT (repair, not design)
+strategy.py:34 does `from ...exchange.loader import load_ohlcv_state, load_orderbook_state`,
+but strategy_system/exchange/loader.py exposes only load_L2 / load_L1. Verified ImportError:
+strategy.py cannot import or run at all. Fix load_data + DATA_LOADERS to the new loader
+names first. Nothing below is testable until strategy.py imports.
+
+S1. FINAL-DF COLUMN CONTRACT (one frame, one builder)
+After refactor exactly one assembled modeling frame exists, built only by
+outcome/alignment.build_model_frame. Columns:
+  price_close,
+  feat_* (macro RSI(2)+d2, micro orderflow, mid_price from compute_features),
+  raw__* (raw primitives from build_primitive_observations; GP terminals only),
+  gp_feat1..gp_featN (from GeneticFeatureModel.transform, gp/evolution.py:198;
+    state-masked, non-null only on the latent state that evolved them),
+  latent_id, similarity, trade_allowed, state_mature, model_ready,
+  future_return__* (t+1..t+n) + future_mfe/mae__* supervision targets alongside,
+    never fed as live inputs.
+So: standard feats + gp_feat1..gp_featN + latent_id (+ terminals/flags/targets alongside).
+gp_feat* naming is kept; only the assembly point changes (today scattered across
+strategy() -> _build_gp_source -> example_sequence).
+
+S2. FILE STRUCTURE (AFTER)
+moe/strategy.py          THIN orchestrator only. No math, no shifting, no masks.
+moe/features.py + feature/  unchanged.  moe/ood/  unchanged.  moe/gp/  unchanged.
+moe/outcome/__init__.py  re-exports live API only; timeout.py NOT exported.
+moe/outcome/triple_barrier.py  UNCHANGED internals (fixed/dynamic/predicted + sequence).
+moe/outcome/timeout.py   KEPT IN PLACE, DORMANT (see S4).
+moe/outcome/alignment.py NEW: all timestamp/index shifting + frame assembly.
+moe/outcome/outcomes.py  NEW: live linreg t+1..t+n -> predicted MFE/MAE -> metalabel tree -> barriers.
+
+S3A. outcome/alignment.py (NEW - every merge_asof/shift/mask moves here)
+align_regimes_to_index(regimes, target_index) -- from strategy._align_regimes_to_index
+  (:62-101), verbatim. Backward merge_asof of latent_id/similarity/trade_allowed/
+  state_mature/model_ready onto any target index. Unknown -> latent_id="null", no trade.
+  The single causal-alignment primitive; everything else calls it.
+attach_raw_columns(raw, frame, columns, timestamp_col) -- from
+  strategy._align_raw_outcome_columns (:133-175), verbatim. Attaches raw OHLC/quote
+  columns (barrier price/high/low, excursion highs/lows) to the feature index causally.
+build_gp_source(raw, features, timestamp_col) -- from strategy._build_gp_source
+  (:104-130), verbatim. Concatenates raw__-prefixed primitives (GP terminals).
+chronological_train_mask(n_rows, train_fraction, purge_rows) -- from strategy._gp_train_mask
+  (:178-194), verbatim. Pure time-prefix split; per-horizon purging stays inside GP.
+build_model_frame(raw, feat_df, regimes, gp_model) -- NEW composition. Calls the four
+  above in order -> (frame, aligned_regimes, gp_feature_names). The one assembly point
+  from S1. strategy.py never concatenates again.
+
+S3B. outcome/outcomes.py (NEW - live regression -> metalabel -> barrier pipeline)
+fit_state_linregs(frame, targets, latent, train_mask, *, feature_columns, min_state_rows,
+  ridge, purge_rows) -- hoisted from example_sequence linreg loop (strategy.py:496-528).
+  One multi-output OLS per non-null latent state on future_return__* (t+1..t+n), run on the
+  gp_feat* frame. Under-supported states stay NaN. Returns (predictions, report).
+  This is the "regression based on GP".
+predict_excursions(predictions, side) -- hoisted from strategy.py:534-543. Side-adjusts
+  t+1..t+n predictions -> row-wise max/min = predicted_mfe/predicted_mae, i.e.
+  regression-implied TP/SL widths. Pure function, no fitting.
+fit_metalabel_tree(frame, predictions, excursions, labels, latent, ...) -- NEW.
+  Tree-as-metalabeler. Inputs = linreg predictions PLUS linreg errors (predicted minus
+  realized per horizon) plus gp_feat*/base features. Output = per-row take_probability /
+  take_flag: whether the regression can be trusted here. Objective is expectancy, not
+  hit-rate. Returns fitted tree + importances + OOS expectancy report.
+build_predicted_barriers(frame, excursions, metalabel, barrier_cfg) -- NEW thin wrapper.
+  Calls existing build_triple_barrier_sequence(mode="predicted") with predicted MFE/MAE
+  as PT/SL, excluding take_flag==False rows first. triple_barrier.py untouched.
+run_outcomes(model_frame, targets, cfg) -- NEW entry point composing the four above.
+  Owns the outcome.model settings section. Returns OutcomeResult(predictions, excursions,
+  metalabel, events, report).
+
+S3C. outcome/timeout.py (KEPT IN PLACE, DORMANT - user instruction)
+File stays exactly where it is. Zero code changes. Removed from outcome/__init__.py
+exports; nothing imports LinearTimeoutModel, select_timeout_horizon, or anything else
+from it. Consequence, stated explicitly: the live forward-target + linreg code it
+currently hosts (build_forward_return_targets, build_forward_excursion_targets,
+fit_timeout_regression) is RE-HOMED into outcomes.py/alignment.py as live code, and
+timeout.py remains as the idea-only reference. Still importing the builders from
+timeout.py would violate "don't use it", so full dormancy + re-homed live path is the plan.
+
+S3D. outcome/triple_barrier.py (UNCHANGED)
+build_triple_barrier_fixed/_dynamic/_predicted/_sequence stay byte-identical. Only the
+caller changes (from strategy() spaghetti to outcomes.build_predicted_barriers).
+
+S3E. strategy.py (THIN)
+load_settings(path) -- unchanged. load_data(settings) -- repaired to new exchange loader
+(S0). run_ood(raw, cfg, detector=None, process_from=0) -- extracted from strategy()
+lines 264-267; raw stream -> regimes; owns detector construction/reuse. This is def OOD().
+run_gp(source, outcomes, latent, mask, cfg) -- extracted from lines 355-384; opt-in search,
+None when disabled. This is def GP(). run_triple_barrier(model_frame, outcomes, cfg) --
+one call into outcomes.run_outcomes. This is def triple_barrier(). strategy(df, settings,
+...) -- straight-line only (~30 lines): load -> compute_features -> run_ood -> targets ->
+build_model_frame -> run_gp -> run_triple_barrier -> policy -> StrategyResult. No
+merge_asof, no masks, no config surgery, no linreg loop. example_sequence DELETED; its
+linreg->barrier logic becomes permanent pipeline code in outcomes.py; __main__ keeps
+only the strategy() print path. StrategyResult keeps fields; features becomes the S1
+assembled frame (column contract in docstring); add a metalabel field for the tree result.
+
+S4. SETTINGS + WORK ORDER
+settings.yaml: add [outcome.model] (horizons, ridge, min_state_rows, side, tree params);
+fold [example] into it; outcome.triple_barrier.mode stays fixed until the linreg+tree
+path beats it on expectancy, then flips to predicted. Order: (1) S0 import repair ->
+(2) alignment.py verbatim moves, re-point strategy() -> (3) outcomes.py (hoist
+linreg/excursions verbatim, add tree + wrapper) -> (4) thin strategy.py, delete
+example_sequence, dormancy-ify timeout.py exports -> (5) single validation run,
+predicted vs fixed on expectancy.
+
+S5. ACCEPTANCE CRITERIA
+strategy.py imports cleanly. No merge_asof/mask/linreg code remains in strategy.py.
+timeout.py unreferenced repo-wide except this txt. Final frame matches S1 contract.
+Single validation run gates the predicted default flip.
