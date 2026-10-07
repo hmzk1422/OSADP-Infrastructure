@@ -1,6 +1,7 @@
 """Leakage-aware feature and model evaluation for offline GP research."""
 from __future__ import annotations
 
+from tqdm.auto import tqdm
 import numpy as np
 import pandas as pd
 
@@ -226,7 +227,7 @@ def run_purged_walk_forward(X, y, *, model_type="ridge", model_params=None, fold
                 train_pos = positions[positions < max(0, start - int(purge_rows))]
                 splits.append((train_pos, chunk, None))
     fold_metrics = []
-    for train_pos, test_pos, episode_id in splits:
+    for train_pos, test_pos, episode_id in tqdm(splits, desc="Evaluating Folds", leave=False):
         train_pos = train_pos[train_pos < max(0, int(test_pos[0]) - int(purge_rows))]
         if len(train_pos) < min_samples or len(test_pos) == 0:
             continue

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from typing import Any
-
+from tqdm.auto import tqdm
 import numpy as np
 import pandas as pd
 
@@ -73,7 +73,7 @@ def evolve_population(rng, primitive_features, evaluator, *, population_size=32,
         rng, primitive_features, population_size, max_depth, temporal_windows)
     history = []
     hall_of_fame = {}
-    for _ in range(generations):
+    for gen in tqdm(range(generations), desc="Evolving Generations", leave=False):
         if population_filter is not None:
             population = population_filter(population)
         while len(population) < population_size:
@@ -83,7 +83,7 @@ def evolve_population(rng, primitive_features, evaluator, *, population_size=32,
         for expression, score in scored:
             hall_of_fame[str(expression)] = (expression, score)
         history.append(max((score for _, score in scored), default=-np.inf))
-        if _ == generations - 1 or stop_evolution(history, patience=patience):
+        if gen == generations - 1 or stop_evolution(history, patience=patience):
             break
         population = evolve_generation(rng, scored, primitive_features, population_size=population_size,
                                        max_depth=max_depth, temporal_windows=temporal_windows,
@@ -650,9 +650,9 @@ def extrapolate_features(
     train_inputs = inputs.iloc[:train_end]
 
     # Each state-target pair has an independent population and objective.
-    for state_id in states:
+    for state_id in tqdm(states, desc="GP State Search"):
         state_mask = state_keys == state_id.casefold()
-        for target_column in targets_to_use:
+        for target_column in tqdm(targets_to_use, desc=f"Targets [{state_id}]", leave=False):
             y = target_values[target_column]
             train_mask_pair = train & state_mask & np.isfinite(y)
             validation_mask_pair = validation & state_mask & np.isfinite(y)

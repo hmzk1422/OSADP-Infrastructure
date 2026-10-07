@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Mapping, Sequence
+from tqdm.auto import tqdm
 
 import numpy as np
 import pandas as pd
@@ -312,7 +313,8 @@ class HysteresisClusterRegimeSegmenter(BaseRegimeSegmenter):
         if self.prototypes and embeddings.shape[1] != len(next(iter(self.prototypes.values()))):
             raise ValueError("embedding dimensions differ from fitted prototypes")
         rows = []
-        for value in embeddings.to_numpy(dtype=np.float64):
+        values = embeddings.to_numpy(dtype=np.float64)
+        for value in tqdm(values, desc="Segmenting Regimes"):
             position = self.observations_seen
             self.observations_seen += 1
             raw = self.update_state(value, position)

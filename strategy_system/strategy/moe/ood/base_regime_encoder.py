@@ -8,6 +8,7 @@ available at or before the anchor row.
 
 from __future__ import annotations
 
+from tqdm.auto import tqdm
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from pathlib import Path
@@ -63,7 +64,14 @@ def prepare_regime_input(
 
 
 def build_temporal_windows(values: pd.DataFrame | np.ndarray, window: int) -> np.ndarray:
-    """Build row-aligned trailing windows; leading incomplete windows are NaN."""
+    """Build row-aligned trailing windows; leading incomplete windows are NaN.
+
+    Materializes the full ``(rows, window, features)`` float64 cube, so peak
+    memory is ``rows * window * features * 8`` bytes (12+ GiB at ~1.1M rows of
+    45 features with window 32), plus a transient copy while filling it. Only
+    the unused torch encoder path still calls this; ``TemporalWindowEncoder``
+    reads trailing windows as views instead of paying that cost.
+    """
     if not isinstance(window, int) or window < 2:
         raise ValueError("window must be an integer >= 2")
     matrix = values.to_numpy(dtype=np.float64) if isinstance(values, pd.DataFrame) else np.asarray(values, dtype=np.float64)
@@ -226,19 +234,27 @@ class TemporalWindowEncoder(BaseRegimeEncoder):
         slow_z = slow_z.mask(slow_flat & slow_delta.gt(1e-12), self.clip_z)
         slow_z = slow_z.mask(slow_flat & slow_delta.lt(-1e-12), -self.clip_z)
         slow_z = (self.slow_level_weight * slow_z).clip(-self.clip_z, self.clip_z)
-        windows = build_temporal_windows(z, self.window)
+        # Memory fix: never materialize the (rows, window, features) cube. At
+        # ~1.1M rows x window 32 x 45 features that is a 12.1 GiB allocation
+        # (build_temporal_windows) plus an equally large fancy-index copy --
+        # the exact ArrayMemoryError seen in production. One float64 matrix
+        # plus per-row trailing-window *views* gives identical values: a row
+        # is skipped iff its window is not all-finite, which is exactly what
+        # the materialized path left as an all-NaN row.
+        matrix = z.to_numpy(dtype=np.float64)
         out = np.full((len(values), len(self.embedding_columns_)), np.nan)
         if len(values) >= self.window:
             bin_indices = np.array_split(np.arange(self.window), self.bins)
+            centered = np.linspace(-1.0, 1.0, self.window)
+            centered -= centered.mean()
+            centered_norm = max(float(centered @ centered), 1e-12)
             for row in range(self.window - 1, len(values)):
-                sequence = windows[row]
+                sequence = matrix[row - self.window + 1: row + 1]
                 if not np.isfinite(sequence).all():
                     continue
                 means = [sequence[idx].mean(axis=0) for idx in bin_indices]
                 dispersion = sequence.std(axis=0, ddof=0)
-                centered = np.linspace(-1.0, 1.0, self.window)
-                centered -= centered.mean()
-                slope = centered @ sequence / max(float(centered @ centered), 1e-12)
+                slope = centered @ sequence / centered_norm
                 slow_row = slow_z.iloc[row].to_numpy(dtype=np.float64)
                 if not np.isfinite(slow_row).all():
                     continue
@@ -373,7 +389,7 @@ class _TorchTemporalEncoder(BaseRegimeEncoder):
         optimizer = torch.optim.Adam(self._torch_model.parameters(), lr=self.learning_rate)
         batches = DataLoader(TensorDataset(torch.from_numpy(samples)), batch_size=self.batch_size, shuffle=True)
         self._torch_model.train()
-        for _ in range(self.epochs):
+        for epoch in tqdm(range(self.epochs), desc="Training Epochs"):
             for (batch,) in batches:
                 optimizer.zero_grad()
                 view = None
@@ -402,7 +418,7 @@ class _TorchTemporalEncoder(BaseRegimeEncoder):
         valid_rows = np.flatnonzero(np.isfinite(windows).all(axis=(1, 2)))
         self._torch_model.eval()
         with torch.no_grad():
-            for start in range(0, len(valid_rows), self.batch_size):
+            for start in tqdm(range(0, len(valid_rows), self.batch_size), desc="Encoding Windows"):
                 rows = valid_rows[start:start + self.batch_size]
                 latent, _ = self._torch_model(torch.as_tensor(windows[rows], dtype=torch.float32))
                 output[rows] = latent.cpu().numpy()

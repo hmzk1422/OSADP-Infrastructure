@@ -36,7 +36,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 from typing import NamedTuple
-
+from tqdm import tqdm
 import pandas as pd
 import yaml
 
@@ -233,6 +233,7 @@ def strategy(
     settings: dict | None = None,
     ood_detector: OODSystem | None = None,
     ood_process_from: int = 0,
+    show_progress: bool = True
 ) -> StrategyResult:
     """Run the OFMR scalp pipeline on a raw state table.
 
@@ -262,33 +263,109 @@ def strategy(
     """
     cfg = load_settings() if settings is None else settings
 
-    # 1. Features.
-    feat_df, feat_cols = compute_features(df, **cfg["features"])
+    steps = [
+        "Features",
+        "OOD states",
+        "Supervision targets",
+        "GP search",
+        "Model frame",
+        "Triple barrier / outcomes",
+        "Policy",
+    ]
 
-    # 2. OOD states are built from the original raw stream, not the GP or
-    # engineered feature frame.
-    regimes = run_ood(df, cfg, detector=ood_detector, process_from=ood_process_from)
-
-    # 3. Supervision targets: forward returns are labels for model
-    # fitting/evaluation, never live inputs.
-    targets = build_supervision_targets(df, feat_df, cfg.get("outcome"))
-
-    # 4. Opt-in GP search first so its fitted model can contribute the
-    # gp_feat* columns, then the single model-frame assembly (S1).
-    gp_result = run_gp(df, feat_df, targets, regimes, cfg)
-    model_frame, _aligned_regimes, _gp_feature_names = build_model_frame(
-        df,
-        feat_df,
-        regimes,
-        gp_result.model if gp_result is not None else None,
-        targets=targets,
+    progress = tqdm(
+        total=len(steps),
+        desc="OFMR pipeline",
+        unit="step",
+        disable=not show_progress,
     )
 
-    # 5. Outcomes: per-state linreg -> metalabel -> triple barrier.
-    outcome = run_triple_barrier(model_frame, targets, cfg, raw=df)
+    try:
+        # 1. Features.
+        progress.set_description("OFMR pipeline")
+        progress.set_postfix_str("Features", refresh=True)
 
-    # 6. Policies: the rules of the strategy.
-    policy = evaluate_orderflow_policy(feat_df, feat_cols, **cfg["policy"])
+        feat_df, feat_cols = compute_features(
+            df,
+            **cfg["features"],
+        )
+
+        progress.update(1)
+
+        # 2. OOD states.
+        progress.set_postfix_str("OOD states", refresh=True)
+
+        regimes = run_ood(
+            df,
+            cfg,
+            detector=ood_detector,
+            process_from=ood_process_from,
+        )
+
+        progress.update(1)
+
+        # 3. Supervision targets.
+        progress.set_postfix_str("Supervision targets", refresh=True)
+
+        targets = build_supervision_targets(
+            df,
+            feat_df,
+            cfg.get("outcome"),
+        )
+
+        progress.update(1)
+
+        # 4. Optional GP.
+        progress.set_postfix_str("GP search", refresh=True)
+
+        gp_result = run_gp(
+            df,
+            feat_df,
+            targets,
+            regimes,
+            cfg,
+        )
+
+        progress.update(1)
+
+        # 5. Assemble model frame.
+        progress.set_postfix_str("Model frame", refresh=True)
+
+        model_frame, _aligned_regimes, _gp_feature_names = build_model_frame(
+            df,
+            feat_df,
+            regimes,
+            gp_result.model if gp_result is not None else None,
+            targets=targets,
+        )
+
+        progress.update(1)
+
+        # 6. Outcomes / barriers.
+        progress.set_postfix_str("Triple barrier / outcomes", refresh=True)
+
+        outcome = run_triple_barrier(
+            model_frame,
+            targets,
+            cfg,
+            raw=df,
+        )
+
+        progress.update(1)
+
+        # 7. Policy.
+        progress.set_postfix_str("Policy", refresh=True)
+
+        policy = evaluate_orderflow_policy(
+            feat_df,
+            feat_cols,
+            **cfg["policy"],
+        )
+
+        progress.update(1)
+
+    finally:
+        progress.close()
 
     return StrategyResult(
         features=model_frame,

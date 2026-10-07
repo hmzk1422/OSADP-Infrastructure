@@ -1,0 +1,102 @@
+OOD ArrayMemoryError FIX -- CHANGE LOG
+=====================================
+Date: 2026-10-07
+File changed: strategy_system/strategy/moe/ood/base_regime_encoder.py
+Status: FIXED + VERIFIED (equivalence test identical, full 20-file run passed the old crash point)
+
+1. THE PROBLEM
+--------------
+Running `python -m strategy_system.strategy.moe.strategy` at file_limit 20
+(~1.13M rows) crashed inside OOD with:
+
+    numpy._core._exceptions._ArrayMemoryError:
+    Unable to allocate 12.1 GiB for an array with shape (1129778, 32, 45)
+    and data type float64
+
+Traceback chain:
+    strategy.py run_ood -> ood.py detect/transform
+    -> base_regime_encoder.py TemporalWindowEncoder.transform, line 230
+    -> build_temporal_windows(z, self.window)
+    -> np.full((len(matrix), window, matrix.shape[1]), np.nan)  [line 73]
+
+2. ROOT CAUSE
+-------------
+`build_temporal_windows` materializes the ENTIRE (rows, window, features)
+float64 cube up front: 1,129,778 x 32 x 45 x 8 bytes = 12.1 GiB, plus a
+second ~12 GiB transient copy during the fancy-index fill
+(`result[window-1:][valid] = raw[valid]`). Peak ~24 GiB.
+
+The cube is never needed: the only consumer on the configured
+(`temporal_window`) encoder path is a per-row loop that reads exactly
+`windows[row]` = z[row-31 : row+1], one 32x45 slice at a time.
+
+3. THE FIX (TemporalWindowEncoder.transform only)
+-------------------------------------------------
+BEFORE:
+    windows = build_temporal_windows(z, self.window)
+    ...
+    for row in range(self.window - 1, len(values)):
+        sequence = windows[row]
+        ...
+        centered = np.linspace(...)   # rebuilt every row (waste)
+        centered -= centered.mean()
+        slope = centered @ sequence / max(...)
+
+AFTER:
+    matrix = z.to_numpy(dtype=np.float64)   # ONE 2-D matrix, ~0.4 GiB
+    ...
+    centered / centered_norm hoisted OUT of the loop (identical values)
+    for row in range(self.window - 1, len(values)):
+        sequence = matrix[row - self.window + 1 : row + 1]   # view, no copy
+        if not np.isfinite(sequence).all():
+            continue
+        ... (bin means / dispersion / slope / slow_row unchanged)
+
+Why identical: the old code skipped a row iff its window was not all-finite
+(materializer left those rows all-NaN, and NaN fails the isfinite check).
+The slice + same isfinite check skips exactly the same rows. Proven by
+equiv_ood.py (600-row synthetic frame with NaN hole, all-NaN row, inf cell):
+`pd.testing.assert_frame_equal(new_out, old_out)` PASSED, 42 cols identical,
+26 skipped rows in both.
+
+Memory saved: ~12 GiB cube + ~12 GiB transient copy eliminated. The output
+embedding array (~4.2 GiB at 1.13M rows x 495 cols float64) is now the
+high-water mark, which fits.
+
+4. ALSO CHANGED (docs only, no behavior)
+----------------------------------------
+- `build_temporal_windows` docstring now documents the memory ceiling
+  (rows*window*features*8 bytes) and notes only the unused torch encoder
+  path still calls it. Function body untouched.
+- Inline comment block at the fix site explaining the 12.1 GiB figure and
+  the equivalence argument.
+
+5. DELIBERATELY NOT TOUCHED
+---------------------------
+- `build_temporal_windows` body (torch path `_TorchTemporalEncoder` still
+  uses it; torch is not the configured encoder, out of scope).
+- The `from tqdm.auto import tqdm` import (line 11) and its uses (lines
+  392, 421): pre-existing uncommitted work, not mine.
+- ood.py, settings.yaml, strategy.py, file_limit.
+
+6. VERIFICATION
+---------------
+- `py_compile base_regime_encoder.py` -> COMPILE OK
+- `python equiv_ood.py` -> EQUIVALENCE OK: 600 rows x 42 cols identical;
+  26 skipped rows (NaN/inf cases match exactly)
+- Full run `python -m strategy_system.strategy.moe.strategy` (file_limit 20,
+  the exact crashing workload): sailed past "OOD states" (the old crash
+  point at step 1/7), reached step 6/7 Policy with no memory error.
+  Log: full_run.log.
+
+7. KNOWN RESIDUAL LIMIT
+-----------------------
+At ~1.1M rows the embedding output itself is inherently ~4.2 GiB float64.
+If the box still struggles, levers are file_limit or a future chunking
+follow-up -- NOT a silent dtype change (would alter segmenter numerics).
+
+8. TEMP FILES
+-------------
+- equiv_ood.py (repo root, untracked): the equivalence proof script. Keep or
+  delete at your discretion.
+- full_run.log (repo root, untracked): background full-run output.

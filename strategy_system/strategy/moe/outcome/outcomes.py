@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from typing import NamedTuple
-
+from tqdm.auto import tqdm
 import numpy as np
 import pandas as pd
 from sklearn.tree import DecisionTreeClassifier
@@ -225,7 +225,10 @@ def build_forward_excursion_targets(
         mae_long = np.full(len(data), np.nan, dtype=np.float64)
         mfe_short = np.full(len(data), np.nan, dtype=np.float64)
         mae_short = np.full(len(data), np.nan, dtype=np.float64)
-        for row in np.flatnonzero(valid):
+
+        valid_rows = np.flatnonzero(valid)
+
+        for row in tqdm(valid_rows, desc=f"Calculating Excursions ({key})", leave=False):
             end = int(end_indices[row])
             path_high = highs[row + 1:end + 1]
             path_low = lows[row + 1:end + 1]
