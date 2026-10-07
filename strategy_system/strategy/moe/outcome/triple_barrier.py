@@ -6,6 +6,7 @@ They do not depend on GP-generated features, OOD embeddings, or a model.
 
 from __future__ import annotations
 
+from tqdm.auto import tqdm
 import numpy as np
 import pandas as pd
 
@@ -155,7 +156,7 @@ def _entry_events(
     time_ns = timestamps.asi8 if timestamps is not None else None
     fee_rate = float(fee_bps_per_side) / 10_000.0
 
-    for i, raw_side in enumerate(sides_raw):
+    for i, raw_side in enumerate(tqdm(sides_raw, desc="Evaluating Triple Barriers")):
         if raw_side == 0 or not np.isfinite(raw_side):
             continue
         if raw_side not in (-1, 1):

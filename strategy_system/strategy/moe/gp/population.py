@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
-
+from tqdm.auto import tqdm
 from .grammar import (Node, all_paths, evaluate_expression, has_nested_partial,
                       random_tree, replace_at_path, validate_expression)
 
@@ -47,7 +47,7 @@ def filter_redundant_features(population, frame, threshold=0.98, min_samples=30,
     if not 0 < threshold <= 1:
         raise ValueError("threshold must be in (0, 1]")
     kept, values = [], []
-    for node in population:
+    for node in tqdm(population, desc="Filtering Redundant Expressions", leave=False):
         try:
             series = evaluate_expression(node, frame).to_numpy(dtype=float)
         except (ValueError, KeyError, TypeError, FloatingPointError, AttributeError):
