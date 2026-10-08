@@ -10,6 +10,35 @@ from tqdm.auto import tqdm
 import numpy as np
 import pandas as pd
 
+#: BTCUSDT instrument tick -- same formula as loader.quantize_price and
+#: uets VenueSpec::round_price: (price / tick).round() * tick.
+TICK_SIZE = 0.01
+
+
+def quantize_price(price, tick: float = TICK_SIZE):
+    """Snap price(s) to the instrument tick (exact Decimal grid value)."""
+    from decimal import Decimal, ROUND_HALF_UP
+    q = Decimal(str(tick))
+
+    def _one(v):
+        import math
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            return v
+        if not math.isfinite(f):
+            return v
+        if isinstance(v, float) and math.isnan(f):
+            return v
+        return float(Decimal(str(f)).quantize(q, rounding=ROUND_HALF_UP))
+
+    try:
+        if hasattr(price, "apply"):
+            return price.apply(_one)
+        return _one(price)
+    except Exception:
+        return price
+
 
 _EVENT_COLUMNS = [
     "t0", "t1", "entry_price", "reference_entry_price", "side",
@@ -199,11 +228,11 @@ def _entry_events(
             continue
 
         reference_entry = entry
-        entry_fill = asks[i] if side > 0 else bids[i]
+        entry_fill = quantize_price(asks[i] if side > 0 else bids[i], TICK_SIZE)
         if not np.isfinite(entry_fill) or entry_fill <= 0.0:
             continue
-        profit_level = entry_fill * (1.0 + side * pt_width)
-        stop_level = entry_fill * (1.0 - side * sl_width)
+        profit_level = quantize_price(entry_fill * (1.0 + side * pt_width), TICK_SIZE)
+        stop_level = quantize_price(entry_fill * (1.0 - side * sl_width), TICK_SIZE)
         if profit_level <= 0.0 or stop_level <= 0.0:
             continue
         exit_idx = end
@@ -223,7 +252,7 @@ def _entry_events(
                 break
 
         reference_exit = profit_level if barrier == "profit" else stop_level if barrier == "stop" else prices[exit_idx]
-        exit_fill = bids[exit_idx] if side > 0 else asks[exit_idx]
+        exit_fill = quantize_price(bids[exit_idx] if side > 0 else asks[exit_idx], TICK_SIZE)
         if not np.isfinite(reference_exit) or reference_exit <= 0.0 or not np.isfinite(exit_fill) or exit_fill <= 0.0:
             continue
 

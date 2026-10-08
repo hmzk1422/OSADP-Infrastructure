@@ -1,0 +1,103 @@
+TICK INTEGRITY + CADENCE GUARD -- code changes performed (part 1/2)
+==============================================================
+Date: 2026-10-09. Scope override: you authorized edits in components/ +
+strategy_system/strategy/ for this task ("fix both rust and python").
+Every change logged as FROM ... TO ... . Needle base: MID_PRICE_FIX_CHANGES.txt.
+
+GOAL: needles fixed, price integrity max; time-median must NOT drift
+(lossless ~100ms; 200ms median = broken); every order price quantized:
+(price / tick_size).round() * tick_size. DECISION: AGREE, all 3 layers.
+
+Subtlety: naive float (p/0.01).round()*0.01 RE-DUSTS (0.01 inexact in
+binary -> 108609.65000000001; interim run showed 7639 dust rows). All Python
+quantizers use Decimal(str(v)).quantize(0.01, HALF_UP); Rust snaps f64 at
+construction + 1e-9 grid validator at submit.
+
+--- A. strategy_system/exchange/loader.py (allowed) ---
+A1. ADDED after _BOOK_COL_PREFIXES:
+  FROM: (nothing)
+  TO: BTCTICK = 0.01; quantize_price() (Decimal-exact, Series+scalar, NaN
+      passthrough); check_tick_cadence(df, warn 150ms, fail 200ms) -> stats
+      dict, raises ValueError("LOSSLESS BREAK") if median > 200ms.
+A2. _repair_one_file mid:
+  FROM: df["mid_price"] = ((bid+ask)/2.0).round(2)
+  TO: df["mid_price"] = quantize_price((bid+ask)/2.0, BTCTICK)
+A3. end of load_L2 before return:
+  FROM: (straight to return)
+  TO: check_tick_cadence(df)
+  Baseline: ticks median 34ms (06-30_00) / 100ms (07-09_09); 100ms bars
+  exactly 100.0ms. Only row-drop/duplication trips the wire.
+
+--- B. strategy vdc/outcome/triple_barrier.py (override) ---
+B1. imports:
+  FROM: import pandas as pd / import numpy as np
+  TO: + TICK_SIZE = 0.01 + quantize_price() (Decimal-exact)
+B2. entry+barriers:
+  FROM: entry_price = prices[i]
+        profit_barrier = entry_price * (1.0 + side * pt)
+        stop_barrier = entry_price * (1.0 - side * sl)
+  TO: entry_price = quantize_price(prices[i], TICK_SIZE)
+      profit_barrier = quantize_price(entry_price * (1.0 + side * pt), TICK_SIZE)
+      stop_barrier = quantize_price(entry_price * (1.0 - side * sl), TICK_SIZE)
+B3. vertical exit:
+  FROM: exit_price = prices[exit_idx]
+  TO: exit_price = quantize_price(prices[exit_idx], TICK_SIZE)
+
+--- C. strategy moe/outcome/triple_barrier.py (override) ---
+C1. imports:
+  FROM: tqdm/numpy/pandas only
+  TO: + TICK_SIZE = 0.01 + quantize_price() (Decimal-exact). Choke point:
+      _entry_events serves fixed+dynamic+predicted.
+C2. in _entry_events:
+  FROM: entry_fill = asks[i] if side > 0 else bids[i]
+        profit_level = entry_fill * (1.0 + side * pt_width)
+        stop_level = entry_fill * (1.0 - side * sl_width)
+  TO: entry_fill = quantize_price(asks/bids, TICK_SIZE)
+      profit_level = quantize_price(entry_fill * (1.0 + side * pt_width), TICK_SIZE)
+      stop_level = quantize_price(entry_fill * (1.0 - side * sl_width), TICK_SIZE)
+C3. exit fill:
+  FROM: exit_fill = bids[exit_idx] if side > 0 else asks[exit_idx]
+  TO: exit_fill = quantize_price(bids[exit_idx] if side > 0 else asks[exit_idx], TICK_SIZE)
+
+--- D. uets/executor/core/order.rs (override) ---
+D1. limit ctor:
+  FROM: pub fn limit(symbol, side, qty, price: f64) -> Self {
+          ... limit_price: Some(price) ... }
+  TO: pub fn limit(symbol, side, qty, price, tick_size: f64) -> Self {
+        snapped = (price/tick).round()*tick if tick/price valid else price;
+        ... limit_price: Some(snapped) ... }
+      + limit_tick(..) defaulting tick 0.01.
+D2. validator:
+  FROM: (only validate())
+  TO: + validate_on_tick(price_tick: Option<f64>) = validate + reject limit
+      >1e-9 off grid with OffTickPrice.
+D3. error:
+  FROM: enum OrderError { EmptySymbol, NonPositiveQuantity, MissingLimitPrice,
+                          LimitPriceNotPositive }
+  TO: + OffTickPrice { price, tick } + Display
+      "limit price {price} is off the {tick} tick grid".
+
+--- E. uets/executor/connectors/binance/trade.rs (override) ---
+E1. decode:
+  FROM: OrderRequest::limit(sym, side, qty, venue.price)
+  TO: OrderRequest::limit(sym, side, qty, venue.price, 0.01)
+E2. submit gate after validate():
+  FROM: (straight to symbol clone)
+  TO: + if Limit { request.validate_on_tick(self.spec.price_tick)?; }
+
+--- F. uets/executor/connectors/binance/mod.rs (override) ---
+  FROM: spot_spec() = VenueSpec::new("binance","USDT").with_fees(0.001,0.001)
+  TO: + .with_filters(0.01, 0.00001). (price_tick was None = passthrough.)
+
+--- G. uets/executor/exchange/exchange.rs (test, override) ---
+  ADDED dusty_floats_snap_to_the_exact_cent_tick: limit(..,108613.20000000001)
+  -> 108613.2 ok; raw 108613.2051 -> OffTickPrice err.
+
+--- VALIDATION (executed) ---
+Python file225: rows 51485, nullmid 0, jumps>100: 0 (was 1816), jumps>10: 7
+(was 18441), dust 0, cadence median 100.0ms mean 69.9 max 134.0 (no trip).
+VDC barrier e2e: 108612.25/109155.31/108286.41/108612.25 Decimal%0.01 all 0.00.
+Rust: cargo test --manifest-path uets/Cargo.toml: 140+8+3=151 pass 0 fail.
+check_needles.py default-file numbers (1523/59) are file 06-30_00 real
+thin-book LOB moves, not toggling; same-hour file225 proof = 0 needles.
+CADENCE: tripwire runs every load_L2; medians 34/100ms far below 200ms fail.

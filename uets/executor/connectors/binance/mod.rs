@@ -25,6 +25,12 @@ pub use trade::BinanceTrade;
 use crate::exchange::VenueSpec;
 
 /// The published spot schedule, used until the account reports its own.
+///
+/// BTCUSDT tick is 0.01 (1 cent): with filters set, `round_price` snaps every
+/// limit to the grid and `submit` rejects off-tick limits locally instead of
+/// paying a round trip for the venue's INVALID_TICK_SIZE.
 pub fn spot_spec() -> VenueSpec {
-    VenueSpec::new("binance", "USDT").with_fees(0.001, 0.001)
+    VenueSpec::new("binance", "USDT")
+        .with_fees(0.001, 0.001)
+        .with_filters(0.01, 0.00001)
 }

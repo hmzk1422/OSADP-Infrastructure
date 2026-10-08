@@ -356,11 +356,14 @@ def strategy(
         # 7. Policy.
         progress.set_postfix_str("Policy", refresh=True)
 
+        """
         policy = evaluate_orderflow_policy(
             feat_df,
             feat_cols,
             **cfg["policy"],
         )
+        """
+        policy = pd.DataFrame()
 
         progress.update(1)
 

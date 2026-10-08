@@ -90,6 +90,12 @@ impl MarketDataConnector for BinanceTrade {
 impl ExecutionConnector for BinanceTrade {
     fn submit(&mut self, request: &OrderRequest) -> Result<Vec<Fill>, ConnectorError> {
         request.validate()?;
+        // Tick-grid gate: an off-tick limit fails HERE with a local
+        // OffTickPrice rejection instead of costing a round trip for the
+        // venue's INVALID_TICK_SIZE.
+        if request.order_type == OrderType::Limit {
+            request.validate_on_tick(self.spec.price_tick)?;
+        }
         let symbol = request.symbol.clone();
         // Snap to the venue's step *before* sending: an oversized lot is
         // rejected outright, and a rejection costs a round trip that the check
@@ -298,7 +304,9 @@ pub fn order_from_venue(venue: &VenueOrder) -> Result<Order, ConnectorError> {
     };
     let qty = qty_from_str(&venue.orig_qty);
     let request = match order_type {
-        OrderType::Limit => OrderRequest::limit(venue.symbol.clone(), side, qty, venue.price),
+        // Venue-reported price is already on-tick; re-snap defensively so a
+        // decoded order always carries the tick-grid value.
+        OrderType::Limit => OrderRequest::limit(venue.symbol.clone(), side, qty, venue.price, 0.01),
         OrderType::Market => OrderRequest::market(venue.symbol.clone(), side, qty),
     };
     let mut order = Order::new(OrderId::new(venue.client_order_id.clone()), request);

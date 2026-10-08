@@ -160,16 +160,40 @@ impl OrderRequest {
     }
 
     /// A resting limit order.
-    pub fn limit(symbol: impl Into<String>, side: Side, qty: f64, price: f64) -> Self {
+    ///
+    /// The price is snapped to `tick_size` with `(price / tick).round() *
+    /// tick` at construction, so an order built from a dusty float (e.g.
+    /// `108613.20000000001`) can never reach the venue off-tick and every
+    /// `==` comparison downstream sees the tick-grid value. Non-finite or
+    /// non-positive prices are left for `validate()` to reject.
+    pub fn limit(
+        symbol: impl Into<String>,
+        side: Side,
+        qty: f64,
+        price: f64,
+        tick_size: f64,
+    ) -> Self {
+        let snapped = if tick_size.is_finite() && tick_size > 0.0 && price.is_finite() && price > 0.0
+        {
+            (price / tick_size).round() * tick_size
+        } else {
+            price
+        };
         Self {
             symbol: symbol.into(),
             side,
             qty,
             order_type: OrderType::Limit,
-            limit_price: Some(price),
+            limit_price: Some(snapped),
             time_in_force: TimeInForce::Gtc,
             reduce_only: false,
         }
+    }
+
+    /// Backwards-compatible constructor without a tick grid: prefers the
+    /// canonical BTCUSDT cent tick (0.01). Prefer `limit(.., tick_size)`.
+    pub fn limit_tick(symbol: impl Into<String>, side: Side, qty: f64, price: f64) -> Self {
+        Self::limit(symbol, side, qty, price, 0.01)
     }
 
     /// Mark the request as an exit: the venue must not flip the position.
@@ -203,6 +227,25 @@ impl OrderRequest {
             _ => Ok(()),
         }
     }
+
+    /// Venue-aware validation: as `validate()`, plus rejects a limit price
+    /// that is not on the venue tick grid (within 1e-9). Call this at every
+    /// order-routing boundary with the destination venue's `price_tick`, so
+    /// an off-tick price fails locally instead of as INVALID_TICK_SIZE.
+    pub fn validate_on_tick(&self, price_tick: Option<f64>) -> Result<(), OrderError> {
+        self.validate()?;
+        if self.order_type == OrderType::Limit {
+            if let (Some(tick), Some(price)) = (price_tick, self.limit_price) {
+                if tick.is_finite() && tick > 0.0 && price.is_finite() && price > 0.0 {
+                    let snapped = (price / tick).round() * tick;
+                    if (price - snapped).abs() > 1e-9 {
+                        return Err(OrderError::OffTickPrice { price, tick });
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 /// Why a request is malformed. Caught locally, never by the venue.
@@ -212,6 +255,9 @@ pub enum OrderError {
     NonPositiveQuantity { qty: f64 },
     MissingLimitPrice,
     LimitPriceNotPositive { price: f64 },
+    /// Limit price is not on the venue tick grid: reject locally instead of
+    /// paying a round trip for the venue's INVALID_TICK_SIZE.
+    OffTickPrice { price: f64, tick: f64 },
 }
 
 impl fmt::Display for OrderError {
@@ -224,6 +270,9 @@ impl fmt::Display for OrderError {
             Self::MissingLimitPrice => write!(f, "a limit order needs a price"),
             Self::LimitPriceNotPositive { price } => {
                 write!(f, "limit price must be positive, got {price}")
+            }
+            Self::OffTickPrice { price, tick } => {
+                write!(f, "limit price {price} is off the {tick} tick grid")
             }
         }
     }
