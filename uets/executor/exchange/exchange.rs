@@ -417,6 +417,28 @@ mod tests {
     }
 
     #[test]
+    fn dusty_floats_snap_to_the_exact_cent_tick() {
+        use crate::core::order::{OrderRequest, OrderType, Side, TimeInForce};
+        // The needle-fix float dust: must become exactly 108613.2 on-grid.
+        let req = OrderRequest::limit("BTCUSDT", Side::Buy, 0.001, 108613.20000000001, 0.01);
+        let price = req.limit_price.unwrap();
+        assert!((price - 108613.2).abs() < 1e-9, "got {price}");
+        assert!(req.validate_on_tick(Some(0.01)).is_ok());
+        // Off-tick limit (built raw, bypassing the snapping constructor)
+        // fails locally, not as a venue INVALID_TICK_SIZE.
+        let bad = OrderRequest {
+            symbol: "BTCUSDT".to_string(),
+            side: Side::Buy,
+            qty: 0.001,
+            order_type: OrderType::Limit,
+            limit_price: Some(108613.2051),
+            time_in_force: TimeInForce::Gtc,
+            reduce_only: false,
+        };
+        assert!(bad.validate_on_tick(Some(0.01)).is_err());
+    }
+
+    #[test]
     fn a_pair_is_split_by_its_quote_convention() {
         assert_eq!(AccountSnapshot::base_asset("BTCUSDT"), "BTC");
         assert_eq!(AccountSnapshot::quote_asset("BTCUSDT"), "USDT");

@@ -1,6 +1,41 @@
 import pandas as pd
 import numpy as np
 
+#: BTCUSDT instrument tick. Order/barrier prices are snapped with
+#: (price / tick).round() * tick -- identical formula to
+#: strategy_system.exchange.loader.quantize_price and
+#: uets VenueSpec::round_price. Keeps backtest fills, equality checks and
+#: live orders on-tick so the venue never returns INVALID_TICK_SIZE.
+TICK_SIZE = 0.01
+
+
+def quantize_price(price, tick: float = TICK_SIZE):
+    """Snap price(s) to the instrument tick (exact Decimal grid value).
+
+    Series- and scalar-safe; NaN passes through.
+    """
+    from decimal import Decimal, ROUND_HALF_UP
+    q = Decimal(str(tick))
+
+    def _one(v):
+        import math
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            return v
+        if not math.isfinite(f):
+            return v
+        if isinstance(v, float) and math.isnan(f):
+            return v
+        return float(Decimal(str(f)).quantize(q, rounding=ROUND_HALF_UP))
+
+    try:
+        if hasattr(price, "apply"):
+            return price.apply(_one)
+        return _one(price)
+    except Exception:
+        return price
+
 def add_triple_barrier_sequence(
     df: pd.DataFrame,
     signal_col: str = "rsi_d2_signal",
@@ -134,22 +169,16 @@ def add_triple_barrier_sequence(
 
         side = int(signal)
 
-        entry_price = prices[i]
+        entry_price = quantize_price(prices[i], TICK_SIZE)
 
         # ---------------------------------------------------
-        # Side-aware barriers.
-        #
-        # Long:
-        #   PT = +pt
-        #   SL = -sl
-        #
-        # Short:
-        #   PT = -pt
-        #   SL = +sl
+        # Side-aware barriers, snapped to the instrument tick so generated
+        # limit / stop / take-profit prices are venue-valid and equality
+        # comparisons against tick-grid book prices behave.
         # ---------------------------------------------------
 
-        profit_barrier = entry_price * (1.0 + side * pt)
-        stop_barrier = entry_price * (1.0 - side * sl)
+        profit_barrier = quantize_price(entry_price * (1.0 + side * pt), TICK_SIZE)
+        stop_barrier = quantize_price(entry_price * (1.0 - side * sl), TICK_SIZE)
 
         # ---------------------------------------------------
         # Vertical barrier.
@@ -229,7 +258,7 @@ def add_triple_barrier_sequence(
             exit_price = stop_barrier
 
         else:
-            exit_price = prices[exit_idx]
+            exit_price = quantize_price(prices[exit_idx], TICK_SIZE)
 
         # ---------------------------------------------------
         # Side-adjusted return.

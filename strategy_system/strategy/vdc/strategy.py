@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm  # Added progress bar import
 
 from components.pipelines.diagnostic.lossless import lob_report
-from strategy_system.exchange.loader import load_L1
+from strategy_system.exchange.loader import load_L1, load_L2
 from strategy_system.strategy.vdc.features import compute_feature
 from strategy_system.strategy.vdc.outcome.triple_barrier import add_triple_barrier_sequence
 from strategy_system.strategy.vdc.policies.orderflow_prediction import orderflow_study_1
@@ -41,7 +41,7 @@ from components.pipelines.event_merger.matched.parquet import (
 )
 from components.pipelines.ingestion.CryptoL1.price import get_ohlcv
 
-VDC_EXAMPLE_MODE = "asset_portfolio"
+VDC_EXAMPLE_MODE = "monte_carlo"
 
 
 def simple_vdc_regime_detection(snapshot):
@@ -177,15 +177,24 @@ def build_state(df, vdc_example_mode=VDC_EXAMPLE_MODE):
             "or 'uncorrelated_synthetic'"
         )
 
+    # L2 tick frames carry book + trade prices, not OHLCV candles: build the
+    # VDC price series here (mid-price, falling back to last trade price).
+    df = df.copy()
+    if "mid_price" not in df.columns and {"best_bid_price", "best_ask_price"} <= set(df.columns):
+        df["mid_price"] = (df["best_bid_price"] + df["best_ask_price"]) / 2.0
+    if "mid_price" in df.columns and "price" in df.columns:
+        df["mid_price"] = df["mid_price"].fillna(df["price"])
+
     df, summary = run_vdc_strategy(
         df=df,
-        price_column="close",   # Matches df_path["price"]
+        price_column="mid_price",  # L2 ticks have no "close"; mid-price is the VDC default
         h_interval=1,           # Synthetic fund reset interval, in seconds
         h_lev=3.0,              # 3x target leverage
         friction_bps=0.0,       # 0.04% one-way transaction cost
         execution_mode="minimum_margin",   # Direct short pair mode
         min_change_pct=0,       # 0 noise filter
         sessionize=True,        # Reset fund state daily
+        timestamp_column="timestamp" if "timestamp" in df.columns else None,
         report_output=True,     # Print the VDC summary
         plot_output=True,       # Show the individual VDC plot
     )
@@ -245,5 +254,5 @@ def build_state(df, vdc_example_mode=VDC_EXAMPLE_MODE):
     """
 
 if __name__ == "__main__":
-    data = load_L1()
+    data = load_L2()
     build_state(data)
