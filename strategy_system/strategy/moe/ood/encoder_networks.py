@@ -7,7 +7,12 @@ Plain ``torch.nn.Module`` architectures for :class:`TorchRegimeEncoder`.
 Every network implements the same two-method contract, so any of them (or your
 own) can be dropped into the encoder:
 
-    net.encode(x)  -> (batch, embedding_dim)   deterministic embedding, eval path
+    net.encode(x)  -> (batch, W)              deterministic embedding, eval path.
+                                              W == embedding_dim for every net EXCEPT
+                                              VQVAENet with pooling="histogram" (num_codes)
+                                              or "mean_std" (2*embedding_dim); the encoder
+                                              wrapper (TorchRegimeEncoder) probes the true
+                                              width, so a pooling that changes W is handled.
     net.loss(x)    -> scalar tensor            training objective (no labels!)
 
 ``x`` is always ``(batch, window, features)``, already causally z-scored.
@@ -35,12 +40,16 @@ class VectorQuantizer(nn.Module):
     are re-seeded from random encoder outputs (standard VQ-VAE dead-code restart).
     """
 
-    def __init__(self, num_codes: int, dim: int, commitment: float = 0.25, dead_threshold: float = 0.01):
+    def __init__(self, num_codes: int, dim: int, commitment: float = 0.25, dead_threshold: float = 0.01,
+                 usage_decay: float = 0.99):
         super().__init__()
         self.codebook = nn.Embedding(num_codes, dim)
-        self.num_codes, self.commitment, self.dead_threshold = num_codes, commitment, dead_threshold
+        self.num_codes = num_codes
+        self.commitment, self.dead_threshold, self.usage_decay = commitment, dead_threshold, usage_decay
         self.register_buffer("usage", torch.ones(num_codes) / num_codes)
         self.register_buffer("initialized", torch.zeros(()))
+        # cumulative dead-code restart count (diagnostics only; buffered so it checkpoints)
+        self.register_buffer("dead_code_resets", torch.zeros((), dtype=torch.long))
 
     @torch.no_grad()
     def _reseed(self, flat, mask):
@@ -61,13 +70,16 @@ class VectorQuantizer(nn.Module):
         usage = F.one_hot(idx, self.num_codes).float().mean(0)
         if self.training:
             with torch.no_grad():
-                self.usage.mul_(0.99).add_(0.01 * usage)
+                self.usage.mul_(self.usage_decay).add_((1.0 - self.usage_decay) * usage)
                 dead = self.usage < self.dead_threshold / self.num_codes
                 if dead.any():
                     self._reseed(flat.detach(), dead)
                     self.usage[dead] = 1.0 / self.num_codes
+                    self.dead_code_resets += int(dead.sum().item())
         perplexity = torch.exp(-(usage * torch.log(usage + 1e-10)).sum())
-        return quantized, vq_loss, perplexity
+        # straight-through was already applied above (quantized = z + (quantized-z).detach());
+        # do NOT repeat it here.
+        return quantized, idx, vq_loss, perplexity
 
 
 class VQVAENet(nn.Module):
@@ -75,40 +87,93 @@ class VQVAENet(nn.Module):
 
     window -> strided conv encoder -> per-step latents -> vector quantizer
            -> transposed-conv decoder -> reconstruction of the window.
-    Embedding = mean of the *quantized* latents (so it lives on the learned codebook).
+    Embedding = mean of the *quantized* latents.  NOTE: averaging quantized vectors
+    yields a *blend* of codebook entries, not a single codebook vector -- the earlier
+    docstring's claim that it "lives on the learned codebook" was an overstatement.
+    ``pooling`` may be ``"mean"`` (default, unchanged), ``"histogram"`` (per-window
+    code-usage histogram, ``num_codes`` dims), or ``"mean_std"`` (mean+std concat).
     ``last_stats`` exposes codebook perplexity: if it is ~1 the codebook has collapsed
-    and the embedding is useless -- check it after fitting.
+    and the embedding is useless -- check it after fitting.  During training
+    ``epoch_stats`` accumulates dataset-level perplexity / code usage / dead-code resets
+    (the previous code kept only the final batch's perplexity).
     """
 
     def __init__(self, n_features: int, window: int, embedding_dim: int = 16,
-                 num_codes: int = 64, hidden: int = 64, commitment: float = 0.25):
+                 num_codes: int = 64, hidden: int = 64, commitment: float = 0.25,
+                 pooling: str = "mean", usage_decay: float = 0.99,
+                 dead_threshold: float = 0.01):
         super().__init__()
         self.window = window
+        if pooling not in ("mean", "histogram", "mean_std"):
+            raise ValueError(f"unknown pooling {pooling!r}; expected 'mean', 'histogram', 'mean_std'")
+        self.pooling = pooling
         self.encoder = nn.Sequential(
             nn.Conv1d(n_features, hidden, 4, stride=2, padding=1), nn.GELU(),
             nn.Conv1d(hidden, hidden, 4, stride=2, padding=1), nn.GELU(),
             nn.Conv1d(hidden, embedding_dim, 3, padding=1))
         self.latent_norm = nn.LayerNorm(embedding_dim)
-        self.quantizer = VectorQuantizer(num_codes, embedding_dim, commitment)
+        self.quantizer = VectorQuantizer(num_codes, embedding_dim, commitment,
+                                         dead_threshold=dead_threshold, usage_decay=usage_decay)
         self.decoder = nn.Sequential(
             nn.ConvTranspose1d(embedding_dim, hidden, 4, stride=2, padding=1), nn.GELU(),
             nn.ConvTranspose1d(hidden, hidden, 4, stride=2, padding=1), nn.GELU(),
             nn.Conv1d(hidden, n_features, 3, padding=1))
         self.last_stats: dict[str, float] = {}
+        # dataset-level (not last-batch) codebook diagnostics, accumulated during training
+        self.epoch_stats: dict[str, float] = {}
+        self._acc_counts = None            # (num_codes,) summed one-hot counts over the epoch
+        self._acc_perplexity = 0.0
+        self._acc_batches = 0
+
+    def reset_epoch_stats(self):
+        """Call at the start of each training epoch to reset the accumulators."""
+        self.epoch_stats = {}
+        self._acc_counts = None
+        self._acc_perplexity = 0.0
+        self._acc_batches = 0
+
+    def _accumulate(self, idx, perplexity):
+        counts = torch.bincount(idx, minlength=self.quantizer.num_codes).float()
+        self._acc_counts = counts if self._acc_counts is None else self._acc_counts + counts
+        self._acc_perplexity += float(perplexity.detach())
+        self._acc_batches += 1
+        probs = self._acc_counts / self._acc_counts.sum().clamp_min(1.0)
+        used = int((self._acc_counts > 0).sum().item())
+        self.epoch_stats = {
+            "codes_used": used,
+            "codes_total": self.quantizer.num_codes,
+            "epoch_perplexity": float(torch.exp(-(probs * torch.log(probs + 1e-10)).sum())),
+            "mean_batch_perplexity": self._acc_perplexity / max(self._acc_batches, 1),
+            # LIFETIME cumulative counter (NOT per-epoch). Unambiguous name; the training
+            # loop logs the per-epoch delta separately as ``dead_code_resets_epoch``.
+            "dead_code_resets_total": int(self.quantizer.dead_code_resets.item()),
+            "batches": self._acc_batches,
+        }
 
     def _latents(self, x):
         return self.latent_norm(self.encoder(x.transpose(1, 2)).transpose(1, 2))      # (B, T', D)
 
     def encode(self, x):
-        quantized, _, _ = self.quantizer(self._latents(x))
-        return quantized.mean(dim=1)
+        z = self._latents(x)
+        quantized, idx, _, _ = self.quantizer(z)
+        if self.pooling == "mean":
+            return quantized.mean(dim=1)
+        if self.pooling == "histogram":
+            hist = F.one_hot(idx.reshape(x.shape[0], -1), self.quantizer.num_codes).float()
+            return hist.mean(dim=1)                                                  # (B, num_codes)
+        # mean_std: mean and per-dim std of the quantized vectors, concatenated.
+        # correction=0 -> population std, so a single-timestep window can't yield NaN.
+        return torch.cat([quantized.mean(dim=1), quantized.std(dim=1, correction=0)], dim=-1)
 
     def loss(self, x):
-        quantized, vq_loss, perplexity = self.quantizer(self._latents(x))
+        quantized, idx, vq_loss, perplexity = self.quantizer(self._latents(x))
         recon = self.decoder(quantized.transpose(1, 2))
         recon = F.interpolate(recon, size=self.window, mode="linear", align_corners=False).transpose(1, 2)
         recon_loss = F.mse_loss(recon, x)
-        self.last_stats = {"recon": float(recon_loss), "perplexity": float(perplexity)}
+        # Logging: detach ONLY for the scalar cast -- the returned graph is untouched.
+        self.last_stats = {"recon": float(recon_loss.detach()), "perplexity": float(perplexity.detach())}
+        if self.training:
+            self._accumulate(idx, perplexity)
         return recon_loss + vq_loss
 
 

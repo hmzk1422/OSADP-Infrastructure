@@ -557,3 +557,19 @@ The architecture's main research trade-off is correspondingly:
 > **more expressive representations and more open-set state capacity increase both statistical flexibility and computational cost.**
 
 The purpose of later optimization is not merely to make the program faster. It is to reduce the cost per experiment enough that OOD representation choices, state thresholds and downstream regime hypotheses can be tested repeatedly without making every research iteration an hour-scale computation.
+
+# Update:
+We've tested vq-vae before. It doesn't work because: 
+- Suffers too much from codebook collapse, where orderflow is unconstrained and dominated by noise but VQ-VAE's encoder outputs are mapped to discrete vectors in the codebook using Euclidean distance ($L_2$).
+- Switching from MSE loss to EMA loss function does help improve stability of system. However in stochastic data (synth2-synth3), vq-vae reverts to codebook collapse.
+- VQ-VAE lacks temporal penalty. Data is known to be temporal and VQ-VAE struggles at temporal data even if it indirectly captures temporality.
+
+Hence, switch to other models.
+- TS2Vector: TS2Vector possibly works well as it is made to handle specific predictions across time resolutions and fine granularity that orderflow patterns can conform to. This is still hypothetical as TS2Vector could still overfit to noise.
+- TCN: Since it is known temporality is a very important factor in discerning regimes, TCN is a clear and direct approach to solving this problem but also suffers the same problem (overfitting).
+- HMM: If nothing else works, revert to HMM and focus on identifying clear regimes (For example, mean reverting markets, high volatility bullish, etc).
+
+Metrics:
+Two methods of calculating most important factor.
+- Run OOD first. Train model on OOD regimes. Compare mutual information across regimes. If recurring latent states report high variance in mutual information, this could signify it failed to identify temporally important information (Either that or it is suffering from law of large number issue)
+- Time-Delayed Mutual Information (TDMI). Either that, or use CMI.

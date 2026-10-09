@@ -55,6 +55,14 @@ ood:                       # causal temporal regime discovery
     n_clusters: 6
   max_states: 6
 
+  # ---- VALIDATION METRICS (swap per-slot; ood/metrics.py) ----
+  metrics:
+    embedding_similarity: cosine            # cosine | euclidean | pearson
+    feature_similarity: cosine              # cosine | euclidean | pearson
+    temporal_pattern_similarity: resampled  # resampled | dtw | flattened_cosine
+    episode_duration_similarity: quantile   # quantile | mean | overlap
+    prototype_pearson_corr: pearson         # pearson | spearman | kendall
+
   # ---- shared settings (unchanged from yours) ----
   match_threshold: 1.5
   novel_threshold: 0.25
@@ -186,6 +194,15 @@ outcome:
     tree_min_samples_leaf: 50
     tree_min_train_rows: 200
     seed: 7
+
+forecast_compare:         # research harness inside strategy_testing (linreg vs ridge vs kalman)
+  n_steps: 3              # horizons t+1 .. t+n compared against forward simple return
+  train_fraction: 0.70    # chronological prefix used to fit linreg/ridge
+  ridge_alpha: 1.0        # L2 penalty for the ridge estimator
+  kalman_forgetting: 0.99 # RLS forgetting factor (1.0 = growing window)
+  kalman_p0: 1000.0       # initial Kalman covariance (prior confidence)
+  kalman_top_k: 8         # top-|corr| features fed to the online kalman pass
+  price_col: null         # null -> mid_price if present else price_close
 
 policy:                   # orderflow prediction policy (the rules)
   price_col: mid_price

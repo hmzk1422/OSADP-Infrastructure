@@ -154,7 +154,7 @@ def main() -> None:
                 if k in report}
     protos = detector.segmenter.get_regime_prototypes()
     if len(protos) >= 2:
-        matrices["prototype_pearson_corr"] = pd.DataFrame(protos).corr()
+        matrices["prototype_pearson_corr"] = detector.validator.prototype_correlation(protos)
     for name, m in matrices.items():
         print(f"\n=== {name} ===")
         print(m.round(2).to_string())

@@ -27,6 +27,38 @@ _COLUMNS = ["latent_id", "raw_latent_id", "similarity", "distance", "is_known",
 #: (``"custom"``) plus the offline sklearn discovery backends.
 SEGMENTER_BACKENDS = ("custom", "kmeans", "hdbscan", "sklearn")
 
+#: Backends whose prototypes are discovered offline and then frozen.  These
+#: share one assignment geometry (see ``_SklearnBackend._assign``) and do not
+#: support online novelty learning.
+FROZEN_BACKENDS = ("kmeans", "hdbscan", "sklearn")
+
+
+def _match_one_to_one(cost: np.ndarray) -> list[tuple[int, int]]:
+    """Minimum-cost one-to-one row/column matching (Hungarian when available).
+
+    ``cost`` is ``(n_old, n_new)``; returns ``(old_index, new_index)`` pairs.
+    Falls back to a greedy nearest assignment if SciPy is unavailable so the
+    dependency stays optional.
+    """
+    if cost.size == 0:
+        return []
+    try:
+        from scipy.optimize import linear_sum_assignment
+
+        rows, cols = linear_sum_assignment(cost)
+        return [(int(r), int(c)) for r, c in zip(rows, cols)]
+    except Exception:
+        pairs: list[tuple[int, int]] = []
+        used_cols: set[int] = set()
+        for r in range(cost.shape[0]):
+            order = np.argsort(cost[r])
+            for c in order:
+                if int(c) not in used_cols:
+                    used_cols.add(int(c))
+                    pairs.append((r, int(c)))
+                    break
+        return pairs
+
 
 class BaseRegimeSegmenter(ABC):
     """Interface for embedding-to-regime assignment.
@@ -126,8 +158,12 @@ class HysteresisClusterRegimeSegmenter(BaseRegimeSegmenter):
         self.candidate_episode_gap, self.min_dwell = int(candidate_episode_gap), int(min_dwell)
         self.max_candidates, self.candidate_expiry = int(max_candidates), int(candidate_expiry)
         self.switch_margin = float(switch_margin)
-        if not np.isfinite(centroid_update_rate) or not 0.0 <= centroid_update_rate <= 1.0:
-            raise ValueError("centroid_update_rate must be in [0, 1]")
+        # rate == 1 is degenerate: the center jumps to the observation, so the
+        # Welford scale accumulator receives zero for that row while
+        # scale_counts still grows, collapsing the scale to its floor.  Reject
+        # it rather than silently producing a meaningless dispersion estimate.
+        if not np.isfinite(centroid_update_rate) or not 0.0 <= centroid_update_rate < 1.0:
+            raise ValueError("centroid_update_rate must be in [0, 1) (1.0 is degenerate)")
         if not np.isfinite(min_state_scale) or min_state_scale <= 0:
             raise ValueError("min_state_scale must be finite and positive")
         self.centroid_update_rate = float(centroid_update_rate)
@@ -156,6 +192,19 @@ class HysteresisClusterRegimeSegmenter(BaseRegimeSegmenter):
         self._smooth_pending: str | None = None
         self._smooth_pending_count = 0
         self._transition_pending_rows: list[bool] = []
+        # Frozen-backend metadata (populated by _SklearnBackend.fit):
+        #   _fitted_columns  -> exact feature order validated at inference.
+        #   _radius_meta     -> per-prototype fitted radius + whether the
+        #                       min_state_scale floor bound the metric.
+        #   _support_detail  -> {sid: {"cluster": H, "in_radius": I, ...}}.
+        #   _fit_meta        -> discovery/inference bookkeeping for diagnostics.
+        self._fitted_columns: list[str] | None = None
+        self._radius_meta: dict[str, dict] = {}
+        self._support_detail: dict[str, dict] = {}
+        self._fit_meta: dict = {}
+        # Every regime ID ever issued (monotonic, never reused across refits) so
+        # a retired latent_xxx cannot be silently reassigned to a new regime.
+        self._issued_ids: set[str] = set()
 
     def _distance(self, value: np.ndarray, center: np.ndarray, scale: np.ndarray | None = None) -> float:
         if value.shape != center.shape or not np.isfinite(value).all():
@@ -178,15 +227,21 @@ class HysteresisClusterRegimeSegmenter(BaseRegimeSegmenter):
             self.current_state = None
 
     def assign_regime(self, embedding: np.ndarray) -> tuple[str | None, float]:
+        if self.backend in FROZEN_BACKENDS and self.prototypes:
+            return self._backend().assign_regime(embedding)
         value = np.asarray(embedding, dtype=np.float64)
         pairs = [(key, self._distance(value, center, self.scales.get(key))) for key, center in self.prototypes.items()]
         return min(pairs, key=lambda pair: pair[1]) if pairs else (None, np.inf)
 
     def detect_regime_transition(self, embedding: np.ndarray) -> bool:
+        if self.backend in FROZEN_BACKENDS and self.prototypes:
+            return self._backend().detect_regime_transition(embedding)
         state_id, distance = self.assign_regime(np.asarray(embedding, dtype=np.float64))
         return state_id != self.current_state and distance <= self.match_threshold
 
     def predict_proba(self, embeddings: pd.DataFrame) -> pd.DataFrame:
+        if self.backend in FROZEN_BACKENDS and self.prototypes:
+            return self._backend().predict_proba(embeddings)
         ids = list(self.prototypes)
         probabilities = pd.DataFrame(0.0, index=embeddings.index, columns=ids)
         for row, value in enumerate(embeddings.to_numpy(dtype=np.float64)):
@@ -295,6 +350,10 @@ class HysteresisClusterRegimeSegmenter(BaseRegimeSegmenter):
         return count, episodes, "learning"
 
     def update_state(self, embedding: np.ndarray, position: int) -> dict:
+        if self.backend in FROZEN_BACKENDS:
+            raise NotImplementedError(
+                "Frozen segmenters do not support online state updates; "
+                "use predict() for inference.")
         self._prune_states(position)
         value = np.asarray(embedding, dtype=np.float64)
         if value.ndim != 1 or not np.isfinite(value).all():
@@ -402,7 +461,12 @@ class HysteresisClusterRegimeSegmenter(BaseRegimeSegmenter):
                 "next_id": self._next_id, "observations_seen": self.observations_seen,
                 "persistent_label": self._persistent_label, "smooth_pending": self._smooth_pending,
                 "smooth_pending_count": self._smooth_pending_count,
-                "current_state": self.current_state}
+                "current_state": self.current_state,
+                "fitted_columns": self._fitted_columns,
+                "radius_meta": self._radius_meta,
+                "support_detail": self._support_detail,
+                "fit_meta": self._fit_meta,
+                "issued_ids": sorted(self._issued_ids)}
 
     @classmethod
     def from_state_dict(cls, state: Mapping) -> "HysteresisClusterRegimeSegmenter":
@@ -426,15 +490,27 @@ class HysteresisClusterRegimeSegmenter(BaseRegimeSegmenter):
         result._smooth_pending = state.get("smooth_pending")
         result._smooth_pending_count = int(state.get("smooth_pending_count", 0))
         result.current_state = state.get("current_state")
+        result._fitted_columns = state.get("fitted_columns")
+        result._radius_meta = dict(state.get("radius_meta", {}))
+        result._support_detail = dict(state.get("support_detail", {}))
+        result._fit_meta = dict(state.get("fit_meta", {}))
+        result._issued_ids = set(state.get("issued_ids", [])) | set(result.prototypes)
         return result
 
 
 class StickyHMMRegimeSegmenter(HysteresisClusterRegimeSegmenter):
     """Causal diagonal-Gaussian HMM filter with a sticky transition prior.
 
-    Prototypes provide Gaussian emissions; ``sticky_bias`` is the log prior
-    advantage of a self-transition over switching to another known state.
-    Prototype creation still requires independent recurring episodes.
+    Prototypes provide Gaussian emissions; ``sticky_bias`` ``b`` sets the
+    self-transition probability to ``sigmoid(b)`` and spreads the remaining
+    ``1 - sigmoid(b)`` uniformly across the other states.  Note that ``b`` is
+    therefore the *aggregate* log-odds of staying versus switching to *any*
+    other state; the log-odds of staying versus switching to one *specific*
+    alternative is ``b + log(K - 1)`` for ``K`` states.  Prototype creation
+    still requires independent recurring episodes.  This HMM filter only
+    composes with the online ``"custom"`` backend (it defines its own
+    forward-filter assignment); combining it with an offline frozen backend is
+    rejected.
     """
 
     def __init__(self, sticky_bias: float = 2.5, **kwargs):
@@ -443,6 +519,11 @@ class StickyHMMRegimeSegmenter(HysteresisClusterRegimeSegmenter):
         self.sticky_bias = float(sticky_bias)
         self._forward_probabilities: dict[str, float] = {}
         super().__init__(**kwargs)
+        if self.backend != "custom":
+            raise ValueError(
+                "StickyHMMRegimeSegmenter only supports the 'custom' online "
+                f"backend; got backend={self.backend!r}. Its forward-filter "
+                "assignment is incompatible with offline frozen backends.")
 
     def _filter_step(self, embedding: np.ndarray, previous: dict[str, float]) -> dict[str, float]:
         ids = list(self.prototypes)
@@ -548,12 +629,22 @@ class _SklearnBackend:
     Fit discovers prototypes once on a training embedding slice and mirrors
     the fitted state into the owning segmenter: raw-space centers in
     ``prototypes`` plus radius-encoded per-dimension ``scales`` chosen so the
-    owner's RMS distance equals ``d_standardized / radius`` (scale_j =
-    unit_j * radius / sqrt(D), floored at ``min_state_scale``). Predict is
-    frozen: nearest prototype by that distance, ``"null"`` when outside the
-    radius (distance > 1), then the owner's causal min-dwell debounce.
-    Support counts, debounce state, and prototypes live on the owner so
-    ``state_dict`` / pickle round-trips the fitted backend.
+    owner's RMS distance approximates ``d_standardized / radius`` (scale_j =
+    unit_j * radius / sqrt(D)).  When the ``min_state_scale`` floor binds, that
+    equality no longer holds exactly -- the effective acceptance metric is the
+    post-floor RMS (a distance ``<= 1`` test); the original quantile radius and
+    a ``floor_bound`` flag are stored per prototype in ``_radius_meta`` so the
+    geometry is inspectable rather than assumed.
+
+    Predict is frozen: nearest prototype by that distance, ``"null"`` when
+    outside the radius (distance > 1), then the owner's causal min-dwell
+    debounce.  This is a *prototype-based approximation* of the discovery
+    method, NOT its native inference: for HDBSCAN in particular, a training row
+    labeled noise (-1) can later be assigned to a known regime if it falls
+    within a frozen prototype's radius, because inference uses centroid+radius
+    geometry, not HDBSCAN's density reachability.  Support counts, debounce
+    state, and prototypes live on the owner so ``state_dict`` / pickle round-
+    trips the fitted backend.
     """
 
     METHODS = ("kmeans", "hdbscan", "sklearn")
@@ -577,6 +668,14 @@ class _SklearnBackend:
         self.radius_slack = float(params.pop("radius_slack", 1.5))
         self.standardize = bool(params.pop("standardize", True))
         self.seed = int(params.pop("seed", 7))
+        # Max standardized-center distance for a refit cluster to inherit an
+        # existing regime ID (one-to-one).  Only used when refitting over an
+        # already-populated owner; defaults to the owner's match_threshold.
+        identity_threshold = params.pop("identity_threshold", None)
+        self.identity_threshold = (float(identity_threshold) if identity_threshold is not None
+                                   else float(owner.match_threshold))
+        if not np.isfinite(self.identity_threshold) or self.identity_threshold <= 0:
+            raise ValueError("identity_threshold must be finite and positive")
         # method == "sklearn": any clusterer instance (AgglomerativeClustering, DBSCAN,
         # GaussianMixture, Birch, ...). Cloned at fit; labels come from ``labels_`` or
         # ``fit_predict``; inference is the same frozen centroid + radius rule.
@@ -621,6 +720,12 @@ class _SklearnBackend:
         rng = np.random.default_rng(self.seed)
         sub = xs if len(xs) <= self.max_fit_samples else xs[
             np.sort(rng.choice(len(xs), self.max_fit_samples, replace=False))]
+        # Validate the ACTUAL fitting subset, not just the finite population:
+        # a too-small max_fit_samples must fail here, not deep inside sklearn.
+        if len(sub) < required:
+            raise ValueError(
+                f"fit subsample has {len(sub)} rows but {required} are required; "
+                f"lower max_fit_samples ({self.max_fit_samples}) or provide more data")
         if self.method == "kmeans":
             from sklearn.cluster import KMeans
             self.model_ = KMeans(self.n_clusters, n_init=10, random_state=self.seed).fit(sub)
@@ -636,28 +741,77 @@ class _SklearnBackend:
             else:
                 labels = self.model_.fit_predict(sub)
             self.model_.labels_ = np.asarray(labels)
-        labels = self.model_.labels_
-        kept = sorted((k for k in np.unique(labels) if k >= 0), key=lambda k: -(labels == k).sum())
+        labels = np.asarray(self.model_.labels_)
+        if labels.shape[0] != sub.shape[0]:
+            raise ValueError(
+                "sklearn estimator must yield one label per fitted sample; "
+                f"got {labels.shape[0]} labels for {sub.shape[0]} samples")
+        if labels.ndim != 1:
+            raise ValueError("sklearn estimator must yield a 1-D label array")
+        # The k>=0 / noise(-1) filtering below assumes integer cluster labels.
+        if not np.issubdtype(labels.dtype, np.integer):
+            raise ValueError(
+                "sklearn estimator must yield integer cluster labels "
+                f"(-1 = noise, >= 0 = cluster); got dtype {labels.dtype}")
+        # Rank non-noise clusters by support, then HARD-cap at max_regimes so a
+        # density method (HDBSCAN) cannot silently exceed the configured budget.
+        cluster_sizes = {int(k): int((labels == k).sum()) for k in np.unique(labels) if k >= 0}
+        kept = sorted(cluster_sizes, key=lambda k: -cluster_sizes[k])
         if not kept:
             raise ValueError("segmenter found no clusters; lower min_cluster_size or check the embeddings")
+        discarded = kept[owner.max_regimes:]
+        kept = kept[:owner.max_regimes]
+        noise_count = int((labels < 0).sum())
+        if discarded:
+            print(f"[segmenter] max_regimes={owner.max_regimes} enforced: dropped "
+                  f"{len(discarded)} cluster(s) with support "
+                  f"{ {k: cluster_sizes[k] for k in discarded} }")
         centers = np.stack([sub[labels == k].mean(0) for k in kept])
-        ids = [f"latent_{i + 1:03d}" for i in range(len(kept))]
         distances = self._pairwise(sub, centers)
         radii = np.array([max(np.quantile(distances[labels == k, i], self.radius_quantile) * self.radius_slack, 1e-6)
                           for i, k in enumerate(kept)])
         dim = xs.shape[1]
         unit = std if self.standardize else np.ones(dim)
-        # Mirror fitted state onto the owner (raw space): the owner's
-        # RMS((v - center) / scale) then equals d_standardized / radius, so a
-        # distance <= 1 is exactly the frozen radius test.
-        owner.prototypes = {sid: ((mean + std * centers[i]) if self.standardize else centers[i].copy())
-                            for i, sid in enumerate(ids)}
-        owner.scales = {sid: np.maximum(unit * radii[i] / np.sqrt(dim), owner.min_state_scale)
-                        for i, sid in enumerate(ids)}
-        owner.scale_counts = {sid: int((labels == k).sum()) for sid, k in zip(ids, kept)}
+        # Raw-space prototypes + radius-encoded scales.  When the min_state_scale
+        # floor binds, the owner's RMS distance is no longer exactly
+        # d_standardized / radius, so record that per prototype in radius_meta.
+        raw_centers = [(mean + std * centers[i]) if self.standardize else centers[i].copy()
+                       for i in range(len(kept))]
+        pre_floor = np.outer(radii, unit) / np.sqrt(dim)
+        scales = [np.maximum(pre_floor[i], owner.min_state_scale) for i in range(len(kept))]
+
+        # Refit identity matching: preserve continuing regime IDs so a refit on a
+        # newer window does not silently relabel stable regimes.
+        ids = self._assign_ids(old_ids=list(owner.prototypes), raw_centers=raw_centers,
+                               std=std if self.standardize else None)
+
+        owner.prototypes = {sid: raw_centers[i] for i, sid in enumerate(ids)}
+        owner.scales = {sid: scales[i] for i, sid in enumerate(ids)}
+        owner.scale_counts = {sid: cluster_sizes[k] for sid, k in zip(ids, kept)}
         owner.scale_m2 = {sid: owner.scales[sid] ** 2 * max(owner.scale_counts[sid] - 1, 1) for sid in ids}
-        nearest = self._pairwise(xs, centers).argmin(1)
-        owner.counts = {sid: int((nearest == i).sum()) for i, sid in enumerate(ids)}
+        # Split support: discovery membership (HDBSCAN/KMeans) vs. in-radius
+        # acceptance vs. explicit noise.  counts stays the frozen inference
+        # support (in-radius) so predict()/persistence are unchanged.
+        owner._radius_meta = {sid: {"radius": float(radii[i]),
+                                    "floor_bound": bool((pre_floor[i] < owner.min_state_scale).any())}
+                              for i, sid in enumerate(ids)}
+        in_radius_counts = self._in_radius_support(x, np.stack(raw_centers), np.stack(scales))
+        owner.counts = {sid: int(in_radius_counts[i]) for i, sid in enumerate(ids)}
+        # NOTE: cluster_support is counted over the FIT SUBSAMPLE (len(sub));
+        # in_radius_support is counted over the FULL finite training set (len(x)).
+        # They are different populations -- record both sizes so they are not
+        # mistakenly compared.
+        owner._support_detail = {sid: {"cluster_support": int(cluster_sizes[k]),
+                                       "cluster_support_population": int(len(sub)),
+                                       "in_radius_support": int(in_radius_counts[i]),
+                                       "in_radius_population": int(len(x)),
+                                       "noise_count": noise_count}
+                                 for i, (sid, k) in enumerate(zip(ids, kept))}
+        owner._fit_meta = {"method": self.method, "n_fit_rows": int(len(x)),
+                            "n_fit_subsample": int(len(sub)), "n_clusters": len(ids),
+                            "max_regimes": owner.max_regimes, "dropped_clusters": len(discarded),
+                            "noise_count": noise_count, "standardize": self.standardize}
+        owner._fitted_columns = list(embeddings.columns)
         owner.last_seen = {sid: 0 for sid in ids}
         owner.candidates = []
         owner._next_id = len(ids) + 1
@@ -668,17 +822,185 @@ class _SklearnBackend:
         owner._transition_pending_rows = []
         return owner
 
-    def predict(self, embeddings: pd.DataFrame) -> pd.DataFrame:
-        """Frozen radius-rule assignment plus the owner's causal min-dwell debounce."""
+    def _in_radius_support(self, xs: np.ndarray, centers: np.ndarray, scales: np.ndarray) -> np.ndarray:
+        """Count rows accepted by each frozen prototype's radius rule over ``xs``."""
+        d = np.empty((xs.shape[0], centers.shape[0]), dtype=np.float64)
+        for k in range(centers.shape[0]):
+            diff = (xs - centers[k]) / scales[k]
+            d[:, k] = np.sqrt(np.mean(diff ** 2, axis=1))
+        nearest = d.argmin(1)
+        dn = d[np.arange(xs.shape[0]), nearest]
+        inside = dn <= 1.0
+        return np.array([int(((nearest == k) & inside).sum()) for k in range(centers.shape[0])])
+
+    def _fresh_id(self) -> str:
+        """Next never-before-issued ``latent_xxx`` ID (monotonic, no reuse).
+
+        Reserves the ID in ``_issued_ids`` immediately so repeated calls yield
+        distinct IDs even before the caller bulk-registers them.
+        """
+        n = 1
+        while f"latent_{n:03d}" in self.owner._issued_ids:
+            n += 1
+        new_id = f"latent_{n:03d}"
+        self.owner._issued_ids.add(new_id)
+        return new_id
+
+    def _assign_ids(self, old_ids: list[str], raw_centers: list[np.ndarray],
+                    std: np.ndarray | None) -> list[str]:
+        """Map new clusters to persistent IDs, matching survivors to ``old_ids``.
+
+        One-to-one minimum-cost match on standardized **RMS** center distance
+        (``sqrt(mean(z^2))``, the same geometry as ``_distance`` so a single
+        ``identity_threshold`` means the same thing in both places).  A new
+        cluster within ``identity_threshold`` of an old prototype keeps that
+        regime's ID; every unmatched new cluster receives a **fresh, never-
+        reused** ID from the monotonic ``_issued_ids`` registry (a retired
+        ``latent_xxx`` is never reassigned).  ``model_ready_states`` is
+        reconciled so a retired prototype's readiness is dropped (downstream
+        models must be reviewed), while surviving IDs retain readiness.
+        """
         owner = self.owner
-        if not owner.prototypes:
+        if not old_ids:
+            ids = [self._fresh_id() for _ in range(len(raw_centers))]
+            owner._issued_ids.update(ids)
+            return ids
+        old_matrix = np.stack([owner.prototypes[o] for o in old_ids])
+        new_matrix = np.stack(raw_centers)
+        unit = std if std is not None else np.ones(new_matrix.shape[1])
+        # RMS standardized distance: matches _distance/match_threshold semantics.
+        cost = np.sqrt((((new_matrix[:, None, :] - old_matrix[None, :, :]) / unit) ** 2).mean(-1)).T
+        pairs = _match_one_to_one(cost)
+        id_map: dict[int, str] = {}
+        matched_old: set[int] = set()
+        for oi, ni in pairs:
+            if cost[oi, ni] <= self.identity_threshold:
+                id_map[ni] = old_ids[oi]
+                matched_old.add(oi)
+        # Unmatched new clusters get fresh, never-reused IDs (each _fresh_id
+        # call reserves its ID, so they are guaranteed distinct).
+        for ni in range(len(raw_centers)):
+            if ni in id_map:
+                continue
+            id_map[ni] = self._fresh_id()
+        owner._issued_ids.update(id_map.values())
+        # Reconcile model_ready_states: keep an old ready ID only when it was
+        # matched to a continuing prototype.
+        surviving_ready = {old_ids[oi] for oi in matched_old if old_ids[oi] in owner.model_ready_states}
+        dropped_ready = owner.model_ready_states - surviving_ready
+        if dropped_ready:
+            print(f"[segmenter] refit retired model-ready states {sorted(dropped_ready)} "
+                  f"(prototype drift > identity_threshold); downstream models need review")
+        owner.model_ready_states = surviving_ready
+        return [id_map[ni] for ni in range(len(raw_centers))]
+
+    def _assign(self, value: np.ndarray) -> tuple[str | None, float, bool, float]:
+        """Shared frozen-geometry assignment.
+
+        Returns ``(regime_id, normalized_distance, in_radius, confidence)`` where
+        ``normalized_distance`` is the owner's RMS scaled distance (so ``<= 1``
+        is exactly the radius test) and ``confidence`` is a distance-derived
+        score ``exp(-d)`` -- a ranking/novelty signal, NOT a calibrated
+        membership probability.
+        """
+        owner = self.owner
+        ids = list(owner.prototypes)
+        value = np.asarray(value, dtype=np.float64)
+        dim = owner.prototypes[ids[0]].shape[0] if ids else None
+        if not ids or value.ndim != 1 or value.shape[0] != dim or not np.isfinite(value).all():
+            return None, np.inf, False, 0.0
+        centers = np.stack([owner.prototypes[sid] for sid in ids])
+        scales = np.stack([owner.scales[sid] for sid in ids])
+        d = np.empty(len(ids), dtype=np.float64)
+        for k in range(len(ids)):
+            diff = (value - centers[k]) / scales[k]
+            d[k] = np.sqrt(np.mean(diff ** 2))
+        best = int(np.argmin(d))
+        dn = float(d[best])
+        in_radius = bool(np.isfinite(dn) and dn <= 1.0)
+        regime_id = ids[best] if in_radius else None
+        confidence = float(np.exp(-dn)) if np.isfinite(dn) else 0.0
+        return regime_id, dn, in_radius, confidence
+
+    def _validate_embeddings(self, embeddings: pd.DataFrame) -> np.ndarray:
+        """Shared input validation for the frozen inference methods.
+
+        Enforces DataFrame type, the exact fitted feature names and order, and
+        the embedding dimension.  Returns the float64 value matrix.  Equal column
+        counts are not enough -- a reordered frame must not silently assign
+        against the wrong features.
+        """
+        owner = self.owner
+        ids = list(owner.prototypes)
+        if not ids:
             raise RuntimeError("fit must be called before predict")
         if not isinstance(embeddings, pd.DataFrame):
             raise TypeError("embeddings must be a pandas DataFrame")
-        values = embeddings.to_numpy(dtype=np.float64)
-        ids = list(owner.prototypes)
-        if values.shape[1] != owner.prototypes[ids[0]].shape[0]:
+        if embeddings.shape[1] != owner.prototypes[ids[0]].shape[0]:
             raise ValueError("embedding dimensions differ from fitted prototypes")
+        if owner._fitted_columns is not None and list(embeddings.columns) != list(owner._fitted_columns):
+            raise ValueError(
+                "embedding columns/order changed since fit; expected "
+                f"{owner._fitted_columns}, got {list(embeddings.columns)}")
+        return embeddings.to_numpy(dtype=np.float64)
+
+    def assign_regime(self, embedding: np.ndarray) -> tuple[str | None, float]:
+        regime_id, dn, _, _ = self._assign(embedding)
+        return regime_id, dn
+
+    def detect_regime_transition(self, embedding: np.ndarray) -> bool:
+        regime_id, _, in_radius, _ = self._assign(embedding)
+        return regime_id is not None and in_radius and regime_id != self.owner.current_state
+
+    def predict_proba(self, embeddings: pd.DataFrame) -> pd.DataFrame:
+        """Distance-derived known-state scores plus an explicit ``null`` column.
+
+        In-radius rows receive normalized similarity scores over known regimes
+        (a ranking signal, not a calibrated probability); out-of-radius or
+        non-finite rows place their mass in ``null`` so an OOD observation is
+        never given a misleadingly confident known-regime assignment.
+        """
+        owner = self.owner
+        ids = list(owner.prototypes)
+        columns = list(ids) + ["null"]
+        result = pd.DataFrame(0.0, index=embeddings.index, columns=columns)
+        values = self._validate_embeddings(embeddings)
+        for row, value in enumerate(values):
+            regime_id, dn, in_radius, _ = self._assign(value)
+            if not in_radius:
+                result.iloc[row, result.columns.get_loc("null")] = 1.0
+                continue
+            # Recompute per-prototype distances for a proper known-state spread.
+            centers = np.stack([owner.prototypes[sid] for sid in ids])
+            scales = np.stack([owner.scales[sid] for sid in ids])
+            d = np.array([np.sqrt(np.mean(((value - centers[k]) / scales[k]) ** 2)) for k in range(len(ids))])
+            scores = np.exp(-0.5 * np.nan_to_num(d) ** 2)
+            total = scores.sum()
+            if total > 0:
+                scores = scores / total
+            for k, sid in enumerate(ids):
+                result.iloc[row, result.columns.get_loc(sid)] = scores[k]
+        return result
+
+    def predict(self, embeddings: pd.DataFrame) -> pd.DataFrame:
+        """Frozen radius-rule assignment plus the owner's causal min-dwell debounce.
+
+        Semantics (kept distinct so support is unambiguous):
+          * ``raw_latent_id`` / ``status`` reflect the RAW assignment: a finite
+            row inside a prototype's radius is ``"assigned"`` to that regime,
+            a finite row outside every radius is ``"outside_radius"`` (raw
+            ``"null"``), a non-finite row is ``"not_ready"``.
+          * ``latent_id`` is the debounced label after min-dwell hysteresis, so a
+            row can carry ``status="outside_radius"`` while ``is_known=True``
+            (the previous regime is held) -- ``is_known`` reflects the debounced
+            label, NOT that the current observation is in-distribution.
+          * ``counts`` / ``state_support`` track IN-RADIUS assigned support only
+            (raw accepted, seeded from fit); debounced ``emitted`` support is
+            tracked separately in ``_support_detail`` and never mixed in.
+        """
+        owner = self.owner
+        values = self._validate_embeddings(embeddings)
+        ids = list(owner.prototypes)
         n = len(values)
         finite = np.isfinite(values).all(axis=1)
         rows = np.flatnonzero(finite)
@@ -687,8 +1009,6 @@ class _SklearnBackend:
         if rows.size:
             centers = np.stack([owner.prototypes[sid] for sid in ids])
             scales = np.stack([owner.scales[sid] for sid in ids])
-            # Per-prototype RMS equals d_standardized / radius (scales are
-            # pre-floored at fit), so ``<= 1`` is exactly the radius test.
             d = np.empty((rows.size, len(ids)), dtype=np.float64)
             for k in range(len(ids)):
                 diff = (values[rows] - centers[k]) / scales[k]
@@ -702,12 +1022,20 @@ class _SklearnBackend:
         raw = np.where(nearest >= 0, known[np.maximum(nearest, 0)], "null")
         status = np.where(~finite, "not_ready", np.where(nearest < 0, "outside_radius", "assigned"))
         latent = owner.enforce_persistence(raw)
-        support = np.zeros(n, dtype=np.int64)
+        # IN-RADIUS assigned support (raw == sid); debounced emitted tracked apart.
+        assigned_support = np.zeros(n, dtype=np.int64)
+        emitted_support = np.zeros(n, dtype=np.int64)
         for sid in ids:
-            mask = latent == sid
-            if mask.any():
-                support[mask] = owner.counts.get(sid, 0) + np.cumsum(mask)[mask]
-                owner.counts[sid] = owner.counts.get(sid, 0) + int(mask.sum())
+            assigned_mask = raw == sid
+            if assigned_mask.any():
+                assigned_support[assigned_mask] = owner.counts.get(sid, 0) + np.cumsum(assigned_mask)[assigned_mask]
+                owner.counts[sid] = owner.counts.get(sid, 0) + int(assigned_mask.sum())
+            emitted_mask = latent == sid
+            if emitted_mask.any():
+                prev_emitted = owner._support_detail.get(sid, {}).get("emitted_support", 0)
+                emitted_support[emitted_mask] = prev_emitted + np.cumsum(emitted_mask)[emitted_mask]
+                owner._support_detail.setdefault(sid, {})["emitted_support"] = (
+                    prev_emitted + int(emitted_mask.sum()))
         owner.observations_seen += n
         if n:
             owner.current_state = None if raw[-1] == "null" else str(raw[-1])
@@ -716,7 +1044,7 @@ class _SklearnBackend:
             "similarity": np.where(np.isfinite(norm_dist), np.exp(-np.nan_to_num(norm_dist)), 0.0),
             "distance": norm_dist, "is_known": latent != "null",
             "candidate_count": 0, "candidate_episodes": 0, "known_state_count": len(ids),
-            "state_support": support, "transition_pending": owner._transition_pending_rows,
+            "state_support": assigned_support, "transition_pending": owner._transition_pending_rows,
             "status": status}, index=embeddings.index)
         return out[_COLUMNS]
 
@@ -739,7 +1067,11 @@ class HDBSCANRegimeSegmenter(HysteresisClusterRegimeSegmenter):
     """Hysteresis segmenter with offline HDBSCAN discovery (frozen prototypes).
 
     ``backend_params`` additionally accepts ``min_cluster_size`` and
-    ``min_samples``; noise rows (``-1``) map to the ``"null"`` regime.
+    ``min_samples``.  During fit, HDBSCAN noise rows (-1) are excluded from
+    prototypes and counted in ``_support_detail['noise_count']``.  Inference is
+    the frozen centroid+radius rule (see ``_SklearnBackend``): it is an
+    approximation of HDBSCAN, so a noise-labeled training point can still be
+    assigned to a regime at predict time if it lies within a prototype radius.
     """
 
     def __init__(self, *args, **kwargs):
