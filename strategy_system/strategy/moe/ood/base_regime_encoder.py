@@ -370,6 +370,7 @@ class TorchRegimeEncoder(_ScaledWindowEncoder):
         self.history_: list[dict] = []
         self.net_ = None
         self._n_features = 0
+        self._embedding_width = embedding_dim
 
     # -- construction / persistence ------------------------------------------
     def _build(self, n_features: int):
@@ -377,6 +378,20 @@ class TorchRegimeEncoder(_ScaledWindowEncoder):
             return self.model(n_features, self.window, self.embedding_dim, **self.model_params)
         from .encoder_networks import build_network
         return build_network(self.model, n_features, self.window, self.embedding_dim, **dict(self.model_params))
+
+    def _probe_width(self, matrix) -> int:
+        """Run one dummy window through ``encode`` to learn the true embedding width.
+
+        Pooling variants like VQ-VAE ``histogram`` (num_codes) or ``mean_std``
+        (2 * embedding_dim) change the output dimensionality, so we cannot assume it
+        equals ``embedding_dim``.  Default ``mean`` pooling keeps it at ``embedding_dim``.
+        """
+        import torch
+        device = self._device()
+        self.net_.eval()
+        with torch.no_grad():
+            dummy = torch.zeros(1, self.window, self._n_features, device=device)
+            return int(self.net_.encode(dummy).shape[-1])
 
     def _device(self):
         import torch
@@ -395,6 +410,8 @@ class TorchRegimeEncoder(_ScaledWindowEncoder):
         weights = state.pop("_net_weights", None)
         self.__dict__.update(state)
         self.net_ = None
+        if "_embedding_width" not in self.__dict__:      # back-compat for older pickles
+            self._embedding_width = self.embedding_dim
         if weights is not None:
             import torch
             self.net_ = self._build(self._n_features)
@@ -413,15 +430,21 @@ class TorchRegimeEncoder(_ScaledWindowEncoder):
         train_rows = rows[:split] if self.val_fraction > 0 else rows
         val_rows = rows[rows >= (rows[split - 1] + self.window)] if self.val_fraction > 0 and split > 0 else rows[:0]
         self.input_columns_ = tuple(values.columns)
-        self.embedding_columns_ = tuple(f"embedding_{i}" for i in range(self.embedding_dim))
         self._n_features = matrix.shape[1]
         device = self._device()
         self.net_ = self._build(self._n_features).to(device)
+        self._embedding_width = self._probe_width(matrix)   # allows pooling that changes width (histogram/mean_std)
+        self.embedding_columns_ = tuple(f"embedding_{i}" for i in range(self._embedding_width))
         optimizer = torch.optim.Adam(self.net_.parameters(), lr=self.learning_rate)
         generator = np.random.default_rng(self.seed)
         self.history_ = []
         for epoch in tqdm(range(self.epochs), desc=f"Training {self.model}"):
             self.net_.train()
+            # reset dataset-level codebook diagnostics so epoch_stats reflect THIS epoch
+            if hasattr(self.net_, "reset_epoch_stats"):
+                self.net_.reset_epoch_stats()
+            _q = getattr(self.net_, "quantizer", None)
+            resets_before = int(_q.dead_code_resets.item()) if _q is not None else 0
             order = generator.permutation(train_rows)
             losses = []
             for start in range(0, len(order), self.batch_size):
@@ -433,7 +456,7 @@ class TorchRegimeEncoder(_ScaledWindowEncoder):
                 loss = self.net_.loss(batch)
                 loss.backward()
                 optimizer.step()
-                losses.append(float(loss))
+                losses.append(float(loss.detach()))
             entry = {"epoch": epoch, "train_loss": float(np.mean(losses)) if losses else np.nan}
             entry.update(getattr(self.net_, "last_stats", {}) or {})
             if len(val_rows) >= 2:
@@ -443,6 +466,11 @@ class TorchRegimeEncoder(_ScaledWindowEncoder):
                         gather_trailing_windows(matrix, val_rows[s:s + self.batch_size], self.window)).to(device)))
                         for s in range(0, len(val_rows), self.batch_size)]
                 entry["val_loss"] = float(np.mean(val))
+            # attach dataset-level (this-epoch) codebook diagnostics + per-epoch reset delta
+            if hasattr(self.net_, "epoch_stats"):
+                entry.update(self.net_.epoch_stats)
+            if _q is not None:
+                entry["dead_code_resets_epoch"] = int(_q.dead_code_resets.item()) - resets_before
             self.history_.append(entry)
         self.net_.eval()
         self.is_fitted_ = True
@@ -453,7 +481,8 @@ class TorchRegimeEncoder(_ScaledWindowEncoder):
             raise RuntimeError("fit_encoder must be called before transform")
         import torch
         matrix, valid, _ = self._scaled(df)
-        out = np.full((len(df), self.embedding_dim), np.nan)
+        width = getattr(self, "_embedding_width", self.embedding_dim)
+        out = np.full((len(df), width), np.nan)
         device = self._device()
         self.net_.eval()
         with torch.no_grad():
@@ -528,7 +557,10 @@ def make_encoder(model: str = "temporal_window", *, window: int = 32, embedding_
             epochs=params.pop("epochs", 10), batch_size=params.pop("batch_size", 256),
             learning_rate=params.pop("learning_rate", 1e-3),
             model_params={"num_codes": params.pop("num_codes", 64), "hidden": params.pop("hidden", 64),
-                          "commitment": params.pop("commitment", 0.25)},
+                          "commitment": params.pop("commitment", 0.25),
+                          "pooling": params.pop("pooling", "mean"),
+                          "usage_decay": params.pop("usage_decay", 0.99),
+                          "dead_threshold": params.pop("dead_threshold", 0.01)},
             **common, **params)
     elif name == "ts2vec":
         return TorchRegimeEncoder(

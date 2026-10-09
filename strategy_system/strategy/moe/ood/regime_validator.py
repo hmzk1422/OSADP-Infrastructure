@@ -7,16 +7,72 @@ from collections.abc import Sequence
 import numpy as np
 import pandas as pd
 
+from . import metrics as _metrics
+
 
 class RegimeValidator:
     """Measure representation, temporal, duration, persistence, and expectancy separately."""
 
     def __init__(self, regime_column: str = "latent_id", null_id: str = "null",
-                 episode_gap_tolerance: int = 1):
+                 episode_gap_tolerance: int = 1, metrics: dict | None = None):
         if episode_gap_tolerance < 0:
             raise ValueError("episode_gap_tolerance must be >= 0")
         self.regime_column, self.null_id = regime_column, null_id
         self.episode_gap_tolerance = int(episode_gap_tolerance)
+        # Per-slot similarity metric names (ood.metrics), validated on resolve.
+        self.metrics = _metrics.resolve_metrics(metrics)
+
+    def _vector_metric(self):
+        """Resolve the pairwise vector metric for the given slot via if/elif."""
+        name = self.metrics["embedding_similarity"]
+        if name == "cosine":
+            return self._cosine_similarity
+        elif name == "euclidean":
+            return _metrics.euclidean_similarity
+        elif name == "pearson":
+            return _metrics.pearson_similarity
+        raise ValueError(f"unsupported embedding_similarity metric: {name}")
+
+    def _feature_metric(self):
+        name = self.metrics["feature_similarity"]
+        if name == "cosine":
+            return self._cosine_similarity
+        elif name == "euclidean":
+            return _metrics.euclidean_similarity
+        elif name == "pearson":
+            return _metrics.pearson_similarity
+        raise ValueError(f"unsupported feature_similarity metric: {name}")
+
+    def _temporal_metric(self):
+        name = self.metrics["temporal_pattern_similarity"]
+        if name == "resampled":
+            return self.calculate_temporal_similarity
+        elif name == "dtw":
+            return _metrics.dtw_similarity
+        elif name == "flattened_cosine":
+            return _metrics.flattened_cosine_similarity
+        raise ValueError(f"unsupported temporal_pattern_similarity metric: {name}")
+
+    def _duration_metric(self):
+        name = self.metrics["episode_duration_similarity"]
+        if name == "quantile":
+            return self._distribution_similarity
+        elif name == "mean":
+            return _metrics.mean_similarity
+        elif name == "overlap":
+            return _metrics.overlap_similarity
+        raise ValueError(f"unsupported episode_duration_similarity metric: {name}")
+
+    def prototype_correlation(self, prototypes: dict) -> pd.DataFrame:
+        """Pairwise correlation of regime prototypes; metric chosen by ood.metrics."""
+        name = self.metrics["prototype_pearson_corr"]
+        if name == "pearson":
+            return _metrics.prototype_pearson(prototypes)
+        elif name == "spearman":
+            return _metrics.prototype_spearman(prototypes)
+        elif name == "kendall":
+            return _metrics.prototype_kendall(prototypes)
+        raise ValueError(f"unsupported prototype_pearson_corr metric: {name}")
 
     @staticmethod
     def _as_matrix(values) -> np.ndarray:
@@ -175,18 +231,21 @@ class RegimeValidator:
             return 1.0
         return float(1.0 - sum(a != b for a, b in zip(values, values[1:])) / (len(values) - 1))
 
-    def calculate_regime_similarity(self, embeddings, labels: Sequence[str] | pd.Series) -> pd.DataFrame:
+    def calculate_regime_similarity(self, embeddings, labels: Sequence[str] | pd.Series,
+                                    metric=None) -> pd.DataFrame:
         label_series = pd.Series(labels)
         matrix_values = self._as_matrix(embeddings)
         if len(label_series) != len(matrix_values):
             raise ValueError("labels and embeddings must have equal row counts")
+        pair_metric = metric or self._vector_metric()
         episodes = self._episodes(label_series)
+        label_array = label_series.astype(str).to_numpy()
         episode_means = {}
         for state_id, spans in episodes.items():
             means = []
             for start, end in spans:
                 sample = matrix_values[start:end]
-                sample = sample[(label_series.astype(str).to_numpy()[start:end] == state_id)
+                sample = sample[(label_array[start:end] == state_id)
                                 & np.isfinite(sample).all(axis=1)]
                 if len(sample):
                     means.append(sample.mean(axis=0))
@@ -200,7 +259,7 @@ class RegimeValidator:
                 pairs = [(a, b) for li, a in enumerate(episode_means[left])
                          for ri, b in enumerate(episode_means[right])
                          if left != right or li < ri]
-                scores = [self._cosine_similarity(a, b) for a, b in pairs]
+                scores = [pair_metric(a, b) for a, b in pairs]
                 finite = [score for score in scores if np.isfinite(score)]
                 score = float(np.mean(finite)) if finite else np.nan
                 matrix.loc[left, right] = matrix.loc[right, left] = score
@@ -217,7 +276,7 @@ class RegimeValidator:
         scale = np.where(np.isfinite(scale) & (scale > 1e-12), scale, 1.0)
         standardized = (values - center) / scale
         standardized = np.clip(standardized, -10.0, 10.0)
-        return self.calculate_regime_similarity(standardized, labels)
+        return self.calculate_regime_similarity(standardized, labels, metric=self._feature_metric())
 
     def build_temporal_similarity_matrix(self, embeddings: pd.DataFrame, labels: Sequence[str] | pd.Series) -> pd.DataFrame:
         """Pairwise similarity of within-episode temporal embedding paths."""
@@ -225,6 +284,8 @@ class RegimeValidator:
         episodes = self._episodes(ids)
         matrix = pd.DataFrame(np.nan, index=list(episodes), columns=list(episodes), dtype=float)
         arrays = embeddings.to_numpy(dtype=np.float64)
+        ids_array = ids.to_numpy()
+        pair_metric = self._temporal_metric()
         for i, left in enumerate(matrix.index):
             spans_l = episodes[left]
             for j in range(i, len(matrix.columns)):
@@ -240,9 +301,9 @@ class RegimeValidator:
                         # it never compares an episode with itself.
                         left_values = arrays[la:lb]
                         right_values = arrays[ra:rb]
-                        left_values = left_values[(ids.to_numpy()[la:lb] == left)]
-                        right_values = right_values[(ids.to_numpy()[ra:rb] == right)]
-                        pattern_scores.append(self.calculate_temporal_similarity(left_values, right_values))
+                        left_values = left_values[(ids_array[la:lb] == left)]
+                        right_values = right_values[(ids_array[ra:rb] == right)]
+                        pattern_scores.append(pair_metric(left_values, right_values))
                 finite = [score for score in pattern_scores if np.isfinite(score)]
                 pattern = float(np.mean(finite)) if finite else np.nan
                 matrix.loc[left, right] = matrix.loc[right, left] = pattern
@@ -254,10 +315,11 @@ class RegimeValidator:
         profiles = self._duration_profile(regimes)
         ids = list(profiles)
         matrix = pd.DataFrame(np.nan, index=ids, columns=ids, dtype=float)
+        pair_metric = self._duration_metric()
         for i, left in enumerate(ids):
             for j in range(i, len(ids)):
                 right = ids[j]
-                score = self._distribution_similarity(profiles[left], profiles[right])
+                score = pair_metric(profiles[left], profiles[right])
                 matrix.loc[left, right] = matrix.loc[right, left] = score
         return matrix
 

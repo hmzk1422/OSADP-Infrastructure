@@ -72,8 +72,19 @@ def build_primitive_observations(df: pd.DataFrame, primitive_columns: Sequence[s
         if "liquidat" in str(column).lower() and pd.api.types.is_numeric_dtype(df[column]):
             out[f"raw_{column}"] = pd.to_numeric(df[column], errors="coerce")
     if not out:
-        return prepare_regime_input(df)
-    return pd.DataFrame(out, index=df.index).replace([np.inf, -np.inf], np.nan)
+        primitives = prepare_regime_input(df)
+    else:
+        primitives = pd.DataFrame(out, index=df.index).replace([np.inf, -np.inf], np.nan)
+    # Causal LOCF across the interleaved event stream. The matched L2 table
+    # mixes LOB / TRADE / BOOKDEPTH rows, so each primitive is only populated on
+    # its own event type and ~71% of rows carry at least one NaN. The temporal
+    # encoder marks a row ready only when an ALL-finite trailing window exists,
+    # so un-filled gaps made ~97% of embeddings NaN (embedding_ready=False ->
+    # trade_allowed=0 everywhere). Carrying the last known value forward is
+    # causal (never reads a future row) and mirrors the ffill the loader and
+    # features.py already apply. Leading rows before a primitive is first seen
+    # stay NaN and remain honestly not-ready.
+    return primitives.ffill()
 
 
 class OODSystem:
@@ -114,6 +125,7 @@ class OODSystem:
         encoder_type: str = "temporal_window",
         encoder_params: dict | None = None,
         segmenter_params: dict | None = None,
+        metrics: dict | None = None,
         sticky_bias: float = 2.5,
         candidate_expiry_observations: int | None = None,
         max_novel_clusters: int | None = None,
@@ -170,7 +182,7 @@ class OODSystem:
         encoder_window = int(self.encoder.window_size or sequence_window)
         if candidate_episode_gap < encoder_window:
             raise ValueError("candidate_episode_gap must be >= encoder window to count non-overlapping recurrence episodes")
-        self.validator = validator or RegimeValidator()
+        self.validator = validator or RegimeValidator(metrics=metrics)
         self.mature_state_observations = int(mature_state_observations)
         self.require_model_for_trade = bool(require_model_for_trade)
         self.timestamp_col = timestamp_col
