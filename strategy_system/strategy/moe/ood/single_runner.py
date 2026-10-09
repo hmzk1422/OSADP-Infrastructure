@@ -10,6 +10,8 @@ the repository root:
     python -m strategy_system.strategy.moe.run_ood_only --train-frac 0.6 --out ood_out
 
 Pipeline: load_data -> run_ood (OODSystem.detect) -> validate_regimes -> report.
+
+Preferred running method: python -m strategy_system.strategy.moe.ood.single_runner strategy_system/strategy/moe/settings.yaml --train-frac 0.7 --out ood_out 
 """
 
 from __future__ import annotations

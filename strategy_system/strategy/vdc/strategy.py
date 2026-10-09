@@ -41,7 +41,7 @@ from components.pipelines.event_merger.matched.parquet import (
 )
 from components.pipelines.ingestion.CryptoL1.price import get_ohlcv
 
-VDC_EXAMPLE_MODE = "monte_carlo"
+VDC_EXAMPLE_MODE = ""
 
 
 def simple_vdc_regime_detection(snapshot):
@@ -171,12 +171,6 @@ def build_state(df, vdc_example_mode=VDC_EXAMPLE_MODE):
             n_assets=100,
             max_abs_correlation=0.10,
         )
-    else:
-        raise ValueError(
-            "vdc_example_mode must be 'monte_carlo', 'asset_portfolio', "
-            "or 'uncorrelated_synthetic'"
-        )
-
     # L2 tick frames carry book + trade prices, not OHLCV candles: build the
     # VDC price series here (mid-price, falling back to last trade price).
     df = df.copy()
@@ -189,11 +183,11 @@ def build_state(df, vdc_example_mode=VDC_EXAMPLE_MODE):
         df=df,
         price_column="mid_price",  # L2 ticks have no "close"; mid-price is the VDC default
         h_interval=1,           # Synthetic fund reset interval, in seconds
-        h_lev=3.0,              # 3x target leverage
+        h_lev=100.0,              # 3x target leverage
         friction_bps=0.0,       # 0.04% one-way transaction cost
-        execution_mode="minimum_margin",   # Direct short pair mode
+        execution_mode="pair",   # Direct short pair mode
         min_change_pct=0,       # 0 noise filter
-        sessionize=True,        # Reset fund state daily
+        sessionize=False,        # Reset fund state daily
         timestamp_column="timestamp" if "timestamp" in df.columns else None,
         report_output=True,     # Print the VDC summary
         plot_output=True,       # Show the individual VDC plot
@@ -254,5 +248,21 @@ def build_state(df, vdc_example_mode=VDC_EXAMPLE_MODE):
     """
 
 if __name__ == "__main__":
-    data = load_L2()
-    build_state(data)
+    data1 = load_L1(symbol="BTC/USDT", exchange_id="binance")
+    data2 = load_L1(symbol="BTC/USDT", exchange_id="bybit")
+
+    mid_price = (
+        data1[["close"]].rename(columns={"close": "binance_close"})
+        .join(
+            data2[["close"]].rename(columns={"close": "bybit_close"}),
+            how="inner",
+            lsuffix="_binance",
+            rsuffix="_bybit",
+        )
+        .reset_index()
+    )
+
+    mid_price["mid_price"] = (
+        mid_price["binance_close"] - mid_price["bybit_close"]
+    )
+    build_state(mid_price)

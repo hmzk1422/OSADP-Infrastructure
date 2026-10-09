@@ -10,16 +10,16 @@ import numpy as np
 import pandas as pd
 
 from .base_regime_encoder import (
-    BaseRegimeEncoder, TCNRegimeEncoder, TS2VecRegimeEncoder,
-    TransformerRegimeEncoder, TemporalWindowEncoder, prepare_regime_input,
+    BaseRegimeEncoder, TemporalWindowEncoder, TorchRegimeEncoder, SklearnRegimeEncoder,
+    prepare_regime_input, build_temporal_windows, complete_window_mask,
+    gather_trailing_windows, causal_zscore_matrix, make_encoder,
 )
 from .base_regime_segmenter import (
-    BaseRegimeSegmenter,
-    HysteresisClusterRegimeSegmenter,
-    StickyHMMRegimeSegmenter,
+    BaseRegimeSegmenter, HysteresisClusterRegimeSegmenter, StickyHMMRegimeSegmenter,
+    KMeansRegimeSegmenter, HDBSCANRegimeSegmenter, make_segmenter,
 )
-from .regime_validator import RegimeValidator
 
+from .regime_validator import RegimeValidator
 
 def build_primitive_observations(df: pd.DataFrame, primitive_columns: Sequence[str] | None = None) -> pd.DataFrame:
     """Build raw primitives for OOD and the existing GP source adapter.
@@ -113,6 +113,7 @@ class OODSystem:
         segmenter_type: str = "hysteresis",
         encoder_type: str = "temporal_window",
         encoder_params: dict | None = None,
+        segmenter_params: dict | None = None,
         sticky_bias: float = 2.5,
         candidate_expiry_observations: int | None = None,
         max_novel_clusters: int | None = None,
@@ -120,6 +121,7 @@ class OODSystem:
         min_state_scale: float | None = None,
         centroid_update_rate: float | None = None,
         learn_novel: bool | None = None,
+        fit_rows: int | float | None = None,
         **unsupported,
     ):
         if unsupported:
@@ -128,24 +130,19 @@ class OODSystem:
         if encoder is not None:
             self.encoder = encoder
         else:
-            encoder_classes = {"temporal_window": TemporalWindowEncoder, "tcn": TCNRegimeEncoder,
-                               "ts2vec": TS2VecRegimeEncoder, "transformer": TransformerRegimeEncoder}
-            if encoder_type not in encoder_classes:
-                raise ValueError(f"unknown encoder_type {encoder_type!r}; expected {sorted(encoder_classes)}")
-            common = dict(feature_columns=primitive_columns, timestamp_col=timestamp_col)
-            if encoder_type == "temporal_window":
-                common.update(window=sequence_window, bins=embedding_bins,
-                              normalization_window=normalization_window,
+            # Legacy spellings ("tcn_backend", ...) still work.
+            name = str(encoder_type).replace("_backend", "")
+            params = dict(encoder_params or {})
+            if name == "temporal_window":
+                params.update(bins=embedding_bins, normalization_window=normalization_window,
                               normalization_min_periods=normalization_min_periods, clip_z=clip_z,
                               slow_feature_window=5000 if slow_feature_window is None else slow_feature_window,
                               slow_min_periods=50 if slow_min_periods is None else slow_min_periods,
                               slow_level_weight=1.0 if slow_level_weight is None else slow_level_weight)
-            else:
-                if any(value is not None for value in (slow_feature_window, slow_min_periods, slow_level_weight)):
-                    raise ValueError("slow-level channels are currently supported by encoder_type='temporal_window' only")
-                common.update(window=sequence_window)
-            common.update(encoder_params or {})
-            self.encoder = encoder_classes[encoder_type](**common)
+            elif any(value is not None for value in (slow_feature_window, slow_min_periods, slow_level_weight)):
+                raise ValueError("slow-level channels are currently supported by encoder_type='temporal_window' only")
+            self.encoder = make_encoder(name, window=sequence_window, feature_columns=primitive_columns,
+                                        timestamp_col=timestamp_col, **params)
         if segmenter is None:
             kwargs = dict(max_regimes=max_states, match_threshold=match_threshold,
                           candidate_threshold=novel_threshold,
@@ -159,14 +156,17 @@ class OODSystem:
                           min_state_scale=0.1 if min_state_scale is None else min_state_scale,
                           state_expiry_observations=100000 if state_expiry_observations is None else state_expiry_observations,
                           learn_novel=True if learn_novel is None else learn_novel,
-                          model_ready_states=model_ready_states)
+                          model_ready_states=model_ready_states,
+                          backend_params=dict(segmenter_params or {}))
             if segmenter_type == "sticky_hmm":
-                segmenter = StickyHMMRegimeSegmenter(sticky_bias=sticky_bias, **kwargs)
-            elif segmenter_type == "hysteresis":
-                segmenter = HysteresisClusterRegimeSegmenter(**kwargs)
-            else:
-                raise ValueError("segmenter_type must be 'hysteresis' or 'sticky_hmm'")
+                kwargs["sticky_bias"] = sticky_bias
+            segmenter = make_segmenter(segmenter_type, **kwargs)
         self.segmenter = segmenter
+        # Leak guard for ``detect``: fit encoder/segmenter on only the first ``fit_rows``
+        # rows (float in (0,1) = fraction, int = row count); None = whole frame (old behaviour).
+        if fit_rows is not None and not (0 < fit_rows < 1 or (float(fit_rows).is_integer() and fit_rows >= 2)):
+            raise ValueError("fit_rows must be a fraction in (0, 1) or an integer row count >= 2")
+        self.fit_rows = fit_rows
         encoder_window = int(self.encoder.window_size or sequence_window)
         if candidate_episode_gap < encoder_window:
             raise ValueError("candidate_episode_gap must be >= encoder window to count non-overlapping recurrence episodes")
@@ -191,8 +191,39 @@ class OODSystem:
         if timestamp_name is not None and timestamp_name in df:
             primitives[timestamp_name] = df[timestamp_name].to_numpy()
         self.encoder.fit_encoder(primitives)
+        if getattr(self.segmenter, "backend", "custom") != "custom":
+            # Library segmenters discover prototypes offline during fit; the
+            # custom segmenter keeps learning lazily inside predict.
+            self.segmenter.fit(self.encoder.transform(primitives))
         self._fitted = True
         return self
+
+    def fit_train_apply(self, train_df: pd.DataFrame, new_df: pd.DataFrame,
+                        context_rows: int = 600) -> pd.DataFrame:
+        """Leak-free fit/apply: fit encoder AND segmenter on the train slice.
+
+        ``OODSystem.fit`` fits only the encoder, so sklearn-style segmenters
+        fitted offline would otherwise never be fitted. Fit both on
+        ``train_df`` only, then assign ``new_df`` with the last
+        ``context_rows`` of ``train_df`` warming the causal normalization
+        (context rows are not assigned).
+        """
+        self.fit(train_df)
+        if getattr(self.segmenter, "backend", "custom") == "custom":
+            # Warm the online learner on the train slice; library backends
+            # were already fitted offline inside fit().
+            self.segmenter.fit(self.encoder.transform(self._primitives(train_df)))
+        context = train_df.iloc[-int(context_rows):] if int(context_rows) > 0 else train_df.iloc[0:0]
+        return self.transform(pd.concat([context, new_df]), process_from=len(context)).iloc[len(context):]
+
+    def _primitives(self, df: pd.DataFrame) -> pd.DataFrame:
+        timestamp_name = self.timestamp_col or getattr(self.encoder, "timestamp_col", None) or (
+            "timestamp" if "timestamp" in df else None)
+        source = df.drop(columns=[timestamp_name]) if timestamp_name is not None and timestamp_name in df else df
+        primitives = build_primitive_observations(source, self.encoder.feature_columns)
+        if timestamp_name is not None and timestamp_name in df:
+            primitives[timestamp_name] = df[timestamp_name].to_numpy()
+        return primitives
 
     def transform(self, df: pd.DataFrame, process_from: int = 0) -> pd.DataFrame:
         """Encode and segment a causal chunk, optionally skipping context rows."""
@@ -245,7 +276,9 @@ class OODSystem:
     def detect(self, df: pd.DataFrame, process_from: int = 0) -> pd.DataFrame:
         """Backward-compatible strategy entry point."""
         if not self._fitted:
-            self.fit(df)
+            n_fit = len(df) if self.fit_rows is None else (
+                int(len(df) * self.fit_rows) if self.fit_rows < 1 else min(int(self.fit_rows), len(df)))
+            self.fit(df.iloc[:n_fit])
         return self.transform(df, process_from=process_from)
 
     def set_model_ready_states(self, state_ids: Sequence[str]) -> None:
