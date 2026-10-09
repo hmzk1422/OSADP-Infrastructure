@@ -13,7 +13,10 @@ from .base_regime_encoder import (
 from .base_regime_segmenter import (
     BaseRegimeSegmenter,
     HysteresisClusterRegimeSegmenter,
+    HDBSCANRegimeSegmenter,
+    KMeansRegimeSegmenter,
     StickyHMMRegimeSegmenter,
+    make_segmenter,
 )
 from .ood import OODRegimeDetector, OODSystem, build_primitive_observations
 from .regime_validator import RegimeValidator
@@ -23,6 +26,7 @@ __all__ = [
     "TS2VecRegimeEncoder", "TransformerRegimeEncoder", "prepare_regime_input",
     "build_temporal_windows", "encode_windows", "BaseRegimeSegmenter",
     "HysteresisClusterRegimeSegmenter", "StickyHMMRegimeSegmenter",
+    "KMeansRegimeSegmenter", "HDBSCANRegimeSegmenter", "make_segmenter",
     "RegimeValidator", "OODSystem", "OODRegimeDetector",
     "build_primitive_observations",
 ]

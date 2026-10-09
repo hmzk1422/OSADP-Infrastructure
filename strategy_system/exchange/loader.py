@@ -40,6 +40,14 @@ _BOOK_COL_PREFIXES = (
 # so loader mid and strategy order prices can never drift apart.
 BTCTICK = 0.01
 
+# A top-of-book row whose spread exceeds this fraction of mid is a quote
+# ERROR (feed bug), not a level. Example from merged_2025-07-03/04: a LOB
+# row with best_bid=5000.0 against ask=109753.4 drags mid to 57376.70 and
+# makes vdc_leveraged_fund see a -47.7% single-interval return. Real
+# BTCUSDT spreads sit <=0.12% of mid (99th pct), so 0.5% has ~4x margin:
+# it masks 0 rows in 07-09_09 and 10 of 82192 in 06-30_00.
+MAX_SPREAD = 0.005
+
 
 def quantize_price(price, tick: float = BTCTICK):
     """Snap price(s) to the instrument tick: (price/tick).round()*tick.
@@ -138,6 +146,17 @@ def _repair_one_file(df: pd.DataFrame) -> pd.DataFrame:
     df.loc[~is_lob, book_cols] = pd.NA
     for c in book_cols:
         df[c] = pd.to_numeric(df[c], errors="coerce")
+    # Errant-quote (needle) mask: a LOB row with an absurd spread, a crossed
+    # book or a non-positive price is a feed ERROR (bid=5000 floors, ask
+    # +1..10% spikes; 1-3 rows long, then a sane quote arrives). Mask it so
+    # the causal ffill below HOLDS the last sane quote through the spike
+    # instead of computing mid=(bid+ask)/2 from garbage. No rows dropped.
+    _b, _a = df["best_bid_price"], df["best_ask_price"]
+    _mid = (_b + _a) / 2.0
+    _errant = _b.notna() & _a.notna() & (
+        (_b <= 0) | (_a <= _b) | ((_a - _b) > MAX_SPREAD * _mid)
+    )
+    df.loc[_errant, book_cols] = pd.NA
     # ffill = last live quote (causal). bfill covers only the edge case
     # where a file starts with TRADE rows before its first same-hour LOB.
     df[book_cols] = df[book_cols].ffill().bfill()

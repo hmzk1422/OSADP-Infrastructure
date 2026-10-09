@@ -29,35 +29,48 @@ features:
   d2_ewm_span: 3
   oversold: 30.0
   overbought: 70.0
-
+  
 ood:                       # causal temporal regime discovery
-  timestamp_col: null      # auto-detect timestamp, then DatetimeIndex; otherwise preserve input row order
-  primitive_columns: null  # null -> derive available raw price / book / trade primitives
-  encoder_type: temporal_window # temporal_window, tcn, ts2vec, transformer
-  encoder_params: {}      # encoder-specific train settings; injected objects also supported
-  sequence_window: 32      # temporal window length (input rows)
-  embedding_bins: 8        # ordered bins preserve coarse pattern shape
-  normalization_window: 500 # causal rolling normalization; uses preceding rows
+  timestamp_col: null
+  primitive_columns: null
+
+  # ---- ENCODER (swap by changing encoder_type) ----
+  encoder_type: vq-vae     # temporal_window | vq-vae | ts2vec | tcn | transformer | pca
+  encoder_params:          # that model's own settings
+    epochs: 10
+    embedding_dim: 16
+    num_codes: 64          # vq-vae only
+  sequence_window: 32
+  embedding_bins: 8        # only used by temporal_window
+  normalization_window: 500
   normalization_min_periods: 50
   clip_z: 8.0
-  slow_feature_window: 5000 # retain persistent volatility/liquidity levels
-  slow_min_periods: 50
-  slow_level_weight: 1.0
-  segmenter_type: hysteresis # hysteresis or sticky_hmm; segmenter is independently swappable
-  max_states: 10
-  match_threshold: 1.5     # state-local normalized embedding distance
-  novel_threshold: 0.25    # tighter candidate grouping; validate/tune on Synth2
-  min_novel_observations: 200 # accumulated support before prototype promotion
-  min_novel_episodes: 3    # distinct separated episodes required before promotion
-  candidate_episode_gap: 32 # row gap that separates recurrence episodes
-  candidate_expiry_observations: 5000 # discard candidates that stop recurring
-  max_novel_clusters: 128  # cap candidate memory
-  min_dwell: 5             # debounce regime and null assignments causally
-  sticky_bias: 2.5         # log-odds self-transition preference for sticky_hmm
-  mature_state_observations: 200 # known assignments after promotion before maturity
-  model_ready_states: []   # latent IDs with a fitted deployable model; empty means no trades allowed
+  slow_feature_window: null   # MUST be null unless encoder_type is temporal_window
+  slow_min_periods: null      # MUST be null unless encoder_type is temporal_window
+  slow_level_weight: null     # MUST be null unless encoder_type is temporal_window
+
+  # ---- SEGMENTER (swap by changing segmenter_type) ----
+  segmenter_type: kmeans   # hysteresis | sticky_hmm | kmeans | hdbscan | sklearn
+  segmenter_params:
+    n_clusters: 6
+  max_states: 6
+
+  # ---- shared settings (unchanged from yours) ----
+  match_threshold: 1.5
+  novel_threshold: 0.25
+  min_novel_observations: 200
+  min_novel_episodes: 3
+  candidate_episode_gap: 32     # must stay >= sequence_window
+  candidate_expiry_observations: 5000
+  max_novel_clusters: 128
+  min_dwell: 5
+  sticky_bias: 2.5
+  mature_state_observations: 200
+  model_ready_states: []
   require_model_for_trade: true
   learn_novel: true
+
+  fit_rows: 0.7            # NEW: fit encoder+segmenter on first 70% only (match --train-frac)
 
 gp:                        # bounded state-conditioned genetic programming
   enabled: false           # explicit offline retraining switch; never run per live observation

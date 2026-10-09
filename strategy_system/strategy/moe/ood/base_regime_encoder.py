@@ -1,9 +1,16 @@
-"""Swappable causal encoders for recurring market-regime discovery.
+"""
+base_regime_encoder.py
+===================================================================================
+
+Swappable causal encoders for recurring market-regime discovery.
 
 The encoder contract deliberately knows nothing about regime IDs or outcomes.
 Inputs are raw/primitive observations, and outputs are one embedding per input
 row, anchored to that row's timestamp.  Encoders must only use observations
 available at or before the anchor row.
+
+Candidates: temporal_window (dependency-free baseline), vq-vae, ts2vec, tcn,
+transformer (PyTorch), pca (scikit-learn).  Pick one with ``make_encoder``.
 """
 
 from __future__ import annotations
@@ -267,174 +274,288 @@ def encode_windows(encoder: BaseRegimeEncoder, df: pd.DataFrame) -> pd.DataFrame
     return encoder.transform(df)
 
 
-class _TorchTemporalEncoder(BaseRegimeEncoder):
-    """Optional trainable sequence encoder; torch is imported only when fitted."""
+# ---------------------------------------------------------------------------
+# Shared causal plumbing for learned encoders (no (rows, window, features) cube)
+# ---------------------------------------------------------------------------
 
-    architecture = "tcn"
+def causal_zscore_matrix(values: pd.DataFrame, window: int = 500, min_periods: int = 50,
+                         clip_z: float = 8.0) -> np.ndarray:
+    """Rolling z-score using only *strictly past* rows (shifted by one).
 
-    def __init__(self, window: int = 32, embedding_dim: int = 16, epochs: int = 10,
-                 batch_size: int = 256, learning_rate: float = 1e-3, seed: int = 7,
-                 feature_columns: Sequence[str] | None = None, timestamp_col: str | None = None):
+    Same rule as ``TemporalWindowEncoder``: constant history maps to 0 / +-clip.
+    Rows before ``min_periods`` of history are NaN.
+    """
+    history = values.shift(1)
+    mean = history.rolling(window, min_periods=min_periods).mean()
+    scale = history.rolling(window, min_periods=min_periods).std(ddof=0)
+    delta = values - mean
+    z = delta.div(scale.where(scale > 1e-12)).clip(-clip_z, clip_z)
+    flat = scale.le(1e-12) & mean.notna()
+    z = z.mask(flat & delta.abs().le(1e-12), 0.0)
+    z = z.mask(flat & delta.gt(1e-12), clip_z).mask(flat & delta.lt(-1e-12), -clip_z)
+    return z.to_numpy(dtype=np.float64)
+
+
+def complete_window_mask(matrix: np.ndarray, window: int) -> np.ndarray:
+    """True at row r iff rows r-window+1..r are all finite (O(rows), no cube)."""
+    bad = np.concatenate([[0], np.cumsum(~np.isfinite(matrix).all(axis=1))])
+    mask = np.zeros(len(matrix), dtype=bool)
+    if len(matrix) >= window:
+        mask[window - 1:] = (bad[window:] - bad[:-window]) == 0
+    return mask
+
+
+def gather_trailing_windows(matrix: np.ndarray, rows: np.ndarray, window: int) -> np.ndarray:
+    """Gather ``(len(rows), window, features)`` float32 windows for the given end rows."""
+    index = np.asarray(rows)[:, None] + np.arange(-window + 1, 1)[None, :]
+    return matrix[index].astype(np.float32)
+
+
+class _ScaledWindowEncoder(BaseRegimeEncoder):
+    """Common base: causal scaling -> trailing windows -> subclass-specific model."""
+
+    def __init__(self, window: int, embedding_dim: int, max_train_windows: int, seed: int,
+                 normalization_window: int, normalization_min_periods: int, clip_z: float,
+                 feature_columns, timestamp_col):
         super().__init__(feature_columns, timestamp_col)
-        if window < 2 or embedding_dim < 2 or epochs < 1 or batch_size < 2:
-            raise ValueError("invalid temporal encoder dimensions or training settings")
-        self.window, self.embedding_dim, self.epochs = int(window), int(embedding_dim), int(epochs)
-        self.batch_size, self.learning_rate, self.seed = int(batch_size), float(learning_rate), int(seed)
-        self.normalization_window = max(500, self.window)
-        self.normalization_min_periods = min(50, self.normalization_window)
-        self._torch_model = None
-        self._torch_features = 0
+        if window < 2 or embedding_dim < 1 or max_train_windows < 2:
+            raise ValueError("invalid window / embedding_dim / max_train_windows")
+        self.window, self.embedding_dim = int(window), int(embedding_dim)
+        self.max_train_windows, self.seed = int(max_train_windows), int(seed)
+        self.normalization_window = int(max(normalization_window, window))
+        self.normalization_min_periods = int(min(normalization_min_periods, self.normalization_window))
+        self.clip_z = float(clip_z)
+
+    def _scaled(self, df: pd.DataFrame) -> tuple[np.ndarray, np.ndarray, pd.DataFrame]:
+        values = self.prepare_input(df)
+        matrix = causal_zscore_matrix(values, self.normalization_window,
+                                      self.normalization_min_periods, self.clip_z)
+        return matrix, np.flatnonzero(complete_window_mask(matrix, self.window)), values
+
+    def _training_rows(self, valid: np.ndarray) -> np.ndarray:
+        if len(valid) < 2:
+            raise ValueError("not enough complete temporal windows to fit encoder")
+        if len(valid) > self.max_train_windows:  # seeded, evenly random subsample
+            rng = np.random.default_rng(self.seed)
+            valid = np.sort(rng.choice(valid, self.max_train_windows, replace=False))
+        return valid
+
+
+class TorchRegimeEncoder(_ScaledWindowEncoder):
+    """Wrap ANY torch network that exposes ``encode(x)`` and ``loss(x)``.
+
+    ``model`` is a name understood by ``encoder_networks.build_network`` ("vq-vae",
+    "ts2vec", "tcn", "transformer") or your own callable
+    ``factory(n_features, window, embedding_dim) -> nn.Module`` (must be importable
+    at module level if you want to pickle the encoder).
+
+    Quant hygiene baked in: unsupervised only; causal scaling; train/validation split
+    is chronological with a ``window``-row embargo; seeded; weights saved as arrays.
+    """
+
+    def __init__(self, model="vq-vae", window: int = 32, embedding_dim: int = 16,
+                 epochs: int = 10, batch_size: int = 256, learning_rate: float = 1e-3,
+                 val_fraction: float = 0.1, max_train_windows: int = 500_000, seed: int = 7,
+                 device: str = "cpu", model_params: dict | None = None,
+                 normalization_window: int = 500, normalization_min_periods: int = 50,
+                 clip_z: float = 8.0, feature_columns: Sequence[str] | None = None,
+                 timestamp_col: str | None = None):
+        super().__init__(window, embedding_dim, max_train_windows, seed, normalization_window,
+                         normalization_min_periods, clip_z, feature_columns, timestamp_col)
+        if epochs < 1 or batch_size < 2 or not 0.0 <= val_fraction < 0.5:
+            raise ValueError("invalid epochs / batch_size / val_fraction")
+        self.model, self.model_params = model, dict(model_params or {})
+        self.epochs, self.batch_size = int(epochs), int(batch_size)
+        self.learning_rate, self.val_fraction, self.device = float(learning_rate), float(val_fraction), device
+        self.history_: list[dict] = []
+        self.net_ = None
+        self._n_features = 0
+
+    # -- construction / persistence ------------------------------------------
+    def _build(self, n_features: int):
+        if callable(self.model):
+            return self.model(n_features, self.window, self.embedding_dim, **self.model_params)
+        from .encoder_networks import build_network
+        return build_network(self.model, n_features, self.window, self.embedding_dim, **dict(self.model_params))
+
+    def _device(self):
+        import torch
+        if self.device == "auto":
+            return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        return torch.device(self.device)
 
     def __getstate__(self):
         state = self.__dict__.copy()
-        model = state.pop("_torch_model", None)
-        state["_torch_model_state"] = (
-            {key: value.detach().cpu().numpy() for key, value in model.state_dict().items()}
-            if model is not None else None
-        )
+        net = state.pop("net_", None)
+        state["_net_weights"] = ({k: v.detach().cpu().numpy() for k, v in net.state_dict().items()}
+                                 if net is not None else None)
         return state
 
     def __setstate__(self, state):
-        model_state = state.pop("_torch_model_state", None)
+        weights = state.pop("_net_weights", None)
         self.__dict__.update(state)
-        self._torch_model = None
-        if model_state is not None:
+        self.net_ = None
+        if weights is not None:
             import torch
-            self._torch_model = self._build_model(self._torch_features)
-            self._torch_model.load_state_dict({key: torch.as_tensor(value) for key, value in model_state.items()})
-            self._torch_model.eval()
+            self.net_ = self._build(self._n_features)
+            self.net_.load_state_dict({k: torch.as_tensor(v) for k, v in weights.items()})
+            self.net_.to(self._device()).eval()
 
-    def _scaled_windows(self, df: pd.DataFrame) -> tuple[np.ndarray, pd.DataFrame]:
-        values = self.prepare_input(df)
-        history = values.shift(1)
-        mean = history.rolling(self.normalization_window, min_periods=self.normalization_min_periods).mean()
-        scale = history.rolling(self.normalization_window, min_periods=self.normalization_min_periods).std(ddof=0)
-        z = ((values - mean) / scale.where(scale > 1e-12)).clip(-8, 8)
-        flat = scale.le(1e-12) & mean.notna()
-        z = z.mask(flat & (values - mean).abs().le(1e-12), 0.0)
-        return build_temporal_windows(z, self.window), values
-
-    def _build_model(self, feature_count: int):
-        import torch
-        from torch import nn
-
-        arch, emb = self.architecture, self.embedding_dim
-        width = max(32, int(np.ceil((self.embedding_dim * 2) / 4) * 4))
-
-        class Network(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.input = nn.Linear(feature_count, width)
-                if arch in {"tcn", "ts2vec"}:
-                    self.sequence = nn.Sequential(
-                        nn.Conv1d(width, width, 3, dilation=1), nn.GELU(),
-                        nn.Conv1d(width, width, 3, dilation=2), nn.GELU(),
-                        nn.Conv1d(width, width, 3, dilation=4), nn.GELU(),
-                    )
-                else:
-                    layer = nn.TransformerEncoderLayer(width, 4, width * 2, batch_first=True, norm_first=True)
-                    self.sequence = nn.TransformerEncoder(layer, num_layers=2)
-                    self.position = nn.Parameter(torch.zeros(1, self_window, width))
-                    nn.init.normal_(self.position, std=0.02)
-                self.project = nn.Sequential(nn.LayerNorm(width), nn.Linear(width, emb))
-                self.decode = nn.Linear(emb, self_window * feature_count)
-
-            def forward(self, x):
-                h = self.input(x)
-                if arch in {"tcn", "ts2vec"}:
-                    import torch.nn.functional as F
-                    h = h.transpose(1, 2)
-                    for layer in self.sequence:
-                        if isinstance(layer, nn.Conv1d):
-                            left = 2 * layer.dilation[0]
-                            h = layer(F.pad(h, (left, 0)))
-                        else:
-                            h = layer(h)
-                    h = h.transpose(1, 2)
-                else:
-                    h = self.sequence(h + self.position)
-                latent = self.project(h.mean(dim=1))
-                return latent, self.decode(latent).view(-1, self_window, feature_count)
-
-        self_window = self.window
-        return Network()
-
-    def _loss(self, latent, reconstructed, target, second_view=None):
-        import torch
-        import torch.nn.functional as F
-        if self.architecture != "ts2vec":
-            return F.mse_loss(reconstructed, target)
-        second, _ = self._torch_model(second_view)
-        left, right = F.normalize(latent, dim=1), F.normalize(second, dim=1)
-        logits = left @ right.T / 0.1
-        labels = torch.arange(len(left), device=left.device)
-        return (F.cross_entropy(logits, labels) + F.cross_entropy(logits.T, labels)) / 2
-
-    def fit_encoder(self, df: pd.DataFrame, y=None):
+    # -- fit / transform ---------------------------------------------------
+    def fit_encoder(self, df: pd.DataFrame, y=None) -> "TorchRegimeEncoder":
         if y is not None:
             raise ValueError("regime encoders do not train from forward outcomes")
         import torch
-        from torch.utils.data import DataLoader, TensorDataset
-
         torch.manual_seed(self.seed)
-        windows, values = self._scaled_windows(df)
-        valid = np.isfinite(windows).all(axis=(1, 2))
-        samples = windows[valid].astype(np.float32)
-        if len(samples) < 2:
-            raise ValueError("not enough complete temporal windows to fit encoder")
+        matrix, valid, values = self._scaled(df)
+        rows = self._training_rows(valid)
+        split = int(len(rows) * (1.0 - self.val_fraction))
+        train_rows = rows[:split] if self.val_fraction > 0 else rows
+        val_rows = rows[rows >= (rows[split - 1] + self.window)] if self.val_fraction > 0 and split > 0 else rows[:0]
         self.input_columns_ = tuple(values.columns)
         self.embedding_columns_ = tuple(f"embedding_{i}" for i in range(self.embedding_dim))
-        self._torch_features = samples.shape[2]
-        self._torch_model = self._build_model(self._torch_features)
-        optimizer = torch.optim.Adam(self._torch_model.parameters(), lr=self.learning_rate)
-        batches = DataLoader(TensorDataset(torch.from_numpy(samples)), batch_size=self.batch_size, shuffle=True)
-        self._torch_model.train()
-        for epoch in tqdm(range(self.epochs), desc="Training Epochs"):
-            for (batch,) in batches:
+        self._n_features = matrix.shape[1]
+        device = self._device()
+        self.net_ = self._build(self._n_features).to(device)
+        optimizer = torch.optim.Adam(self.net_.parameters(), lr=self.learning_rate)
+        generator = np.random.default_rng(self.seed)
+        self.history_ = []
+        for epoch in tqdm(range(self.epochs), desc=f"Training {self.model}"):
+            self.net_.train()
+            order = generator.permutation(train_rows)
+            losses = []
+            for start in range(0, len(order), self.batch_size):
+                batch_rows = order[start:start + self.batch_size]
+                if len(batch_rows) < 2:
+                    continue
+                batch = torch.from_numpy(gather_trailing_windows(matrix, batch_rows, self.window)).to(device)
                 optimizer.zero_grad()
-                view = None
-                if self.architecture == "ts2vec":
-                    scale = 0.8 + 0.4 * torch.rand((len(batch), 1, 1))
-                    view = batch * scale + torch.randn_like(batch) * 0.03
-                    # Mask a short contiguous span as a second temporal view.
-                    width = max(1, batch.shape[1] // 8)
-                    for sample in range(len(view)):
-                        start = int(torch.randint(0, max(batch.shape[1] - width + 1, 1), (1,)).item())
-                        view[sample, start:start + width] = 0.0
-                latent, reconstructed = self._torch_model(batch)
-                loss = self._loss(latent, reconstructed, batch, view)
+                loss = self.net_.loss(batch)
                 loss.backward()
                 optimizer.step()
-        self._torch_model.eval()
+                losses.append(float(loss))
+            entry = {"epoch": epoch, "train_loss": float(np.mean(losses)) if losses else np.nan}
+            entry.update(getattr(self.net_, "last_stats", {}) or {})
+            if len(val_rows) >= 2:
+                self.net_.eval()
+                with torch.no_grad():
+                    val = [float(self.net_.loss(torch.from_numpy(
+                        gather_trailing_windows(matrix, val_rows[s:s + self.batch_size], self.window)).to(device)))
+                        for s in range(0, len(val_rows), self.batch_size)]
+                entry["val_loss"] = float(np.mean(val))
+            self.history_.append(entry)
+        self.net_.eval()
         self.is_fitted_ = True
         return self
 
     def transform(self, df: pd.DataFrame) -> pd.DataFrame:
-        if not self.is_fitted_ or self._torch_model is None:
+        if not self.is_fitted_ or self.net_ is None:
             raise RuntimeError("fit_encoder must be called before transform")
         import torch
-        windows, _ = self._scaled_windows(df)
-        output = np.full((len(df), self.embedding_dim), np.nan, dtype=np.float64)
-        valid_rows = np.flatnonzero(np.isfinite(windows).all(axis=(1, 2)))
-        self._torch_model.eval()
+        matrix, valid, _ = self._scaled(df)
+        out = np.full((len(df), self.embedding_dim), np.nan)
+        device = self._device()
+        self.net_.eval()
         with torch.no_grad():
-            for start in tqdm(range(0, len(valid_rows), self.batch_size), desc="Encoding Windows"):
-                rows = valid_rows[start:start + self.batch_size]
-                latent, _ = self._torch_model(torch.as_tensor(windows[rows], dtype=torch.float32))
-                output[rows] = latent.cpu().numpy()
-        return pd.DataFrame(output, index=df.index, columns=self.embedding_columns_)
+            for start in tqdm(range(0, len(valid), self.batch_size), desc=f"Encoding ({self.model})"):
+                rows = valid[start:start + self.batch_size]
+                batch = torch.from_numpy(gather_trailing_windows(matrix, rows, self.window)).to(device)
+                out[rows] = self.net_.encode(batch).cpu().numpy()
+        return pd.DataFrame(out, index=df.index, columns=self.embedding_columns_)
 
 
-class TCNRegimeEncoder(_TorchTemporalEncoder):
-    """Temporal convolutional reconstruction encoder."""
-    architecture = "tcn"
+class SklearnRegimeEncoder(_ScaledWindowEncoder):
+    """Wrap ANY scikit-learn transformer (PCA, FastICA, KernelPCA, ...) as an encoder.
+
+    The estimator sees each trailing window flattened to ``window * features``
+    columns.  It is cloned and fitted on (a seeded subsample of) training windows;
+    ``transform`` is a pure function of the window, so it is causal by construction.
+    """
+
+    def __init__(self, estimator, window: int = 32, max_train_windows: int = 100_000, seed: int = 7,
+                 normalization_window: int = 500, normalization_min_periods: int = 50,
+                 clip_z: float = 8.0, feature_columns: Sequence[str] | None = None,
+                 timestamp_col: str | None = None):
+        super().__init__(window, 1, max_train_windows, seed, normalization_window,
+                         normalization_min_periods, clip_z, feature_columns, timestamp_col)
+        if not (hasattr(estimator, "fit") and hasattr(estimator, "transform")):
+            raise TypeError("estimator must implement fit and transform")
+        self.estimator = estimator
+        self.estimator_ = None
+
+    def fit_encoder(self, df: pd.DataFrame, y=None) -> "SklearnRegimeEncoder":
+        if y is not None:
+            raise ValueError("regime encoders do not train from forward outcomes")
+        from sklearn.base import clone
+        matrix, valid, values = self._scaled(df)
+        rows = self._training_rows(valid)
+        flat = gather_trailing_windows(matrix, rows, self.window).reshape(len(rows), -1)
+        self.estimator_ = clone(self.estimator).fit(flat)
+        self.input_columns_ = tuple(values.columns)
+        dim = int(np.asarray(self.estimator_.transform(flat[:2])).shape[1])
+        self.embedding_dim = dim
+        self.embedding_columns_ = tuple(f"embedding_{i}" for i in range(dim))
+        self.is_fitted_ = True
+        return self
+
+    def transform(self, df: pd.DataFrame) -> pd.DataFrame:
+        if not self.is_fitted_:
+            raise RuntimeError("fit_encoder must be called before transform")
+        matrix, valid, _ = self._scaled(df)
+        out = np.full((len(df), self.embedding_dim), np.nan)
+        for start in range(0, len(valid), 50_000):
+            rows = valid[start:start + 50_000]
+            flat = gather_trailing_windows(matrix, rows, self.window).reshape(len(rows), -1)
+            out[rows] = self.estimator_.transform(flat)
+        return pd.DataFrame(out, index=df.index, columns=self.embedding_columns_)
 
 
-class TS2VecRegimeEncoder(_TorchTemporalEncoder):
-    """Temporal contrastive sequence encoder inspired by TS2Vec objectives."""
-    architecture = "ts2vec"
+# ---------------------------------------------------------------------------
+# THE switch: pick the encoder by name.  Everything downstream is unchanged.
+# ---------------------------------------------------------------------------
+
+def make_encoder(model: str = "temporal_window", *, window: int = 32, embedding_dim: int = 16,
+                 feature_columns: Sequence[str] | None = None, timestamp_col: str | None = None,
+                 **params) -> BaseRegimeEncoder:
+    """Build an encoder.  ``params`` are the chosen model's own hyperparameters."""
+    common = dict(feature_columns=feature_columns, timestamp_col=timestamp_col)
+    name = str(model).lower().replace("_", "-")
+    if name in ("temporal-window", "baseline"):
+        return TemporalWindowEncoder(window=window, bins=params.pop("bins", 8), **common, **params)
+    elif name in ("vq-vae", "vqvae"):
+        return TorchRegimeEncoder(
+            model="vq-vae", window=window, embedding_dim=embedding_dim,
+            epochs=params.pop("epochs", 10), batch_size=params.pop("batch_size", 256),
+            learning_rate=params.pop("learning_rate", 1e-3),
+            model_params={"num_codes": params.pop("num_codes", 64), "hidden": params.pop("hidden", 64),
+                          "commitment": params.pop("commitment", 0.25)},
+            **common, **params)
+    elif name == "ts2vec":
+        return TorchRegimeEncoder(
+            model="ts2vec", window=window, embedding_dim=embedding_dim,
+            epochs=params.pop("epochs", 10), batch_size=params.pop("batch_size", 256),
+            learning_rate=params.pop("learning_rate", 1e-3),
+            model_params={"hidden": params.pop("hidden", 64), "depth": params.pop("depth", 3),
+                          "mask_prob": params.pop("mask_prob", 0.5)},
+            **common, **params)
+    elif name in ("tcn", "transformer"):
+        return TorchRegimeEncoder(
+            model=name, window=window, embedding_dim=embedding_dim,
+            epochs=params.pop("epochs", 10), batch_size=params.pop("batch_size", 256),
+            learning_rate=params.pop("learning_rate", 1e-3),
+            model_params={"hidden": params.pop("hidden", 64)}, **common, **params)
+    elif name == "pca":
+        from sklearn.decomposition import PCA
+        return SklearnRegimeEncoder(PCA(n_components=embedding_dim, random_state=params.get("seed", 7)),
+                                    window=window, **common, **params)
+    elif name == "sklearn":  # bring your own: make_encoder("sklearn", estimator=FastICA(8))
+        return SklearnRegimeEncoder(params.pop("estimator"), window=window, **common, **params)
+    raise ValueError(f"unknown encoder {model!r}; expected temporal_window, vq-vae, ts2vec, "
+                     "tcn, transformer, pca, sklearn")
 
 
-class TransformerRegimeEncoder(_TorchTemporalEncoder):
-    """Transformer sequence reconstruction encoder."""
-    architecture = "transformer"
+# Backwards-compatible class names (now thin presets over TorchRegimeEncoder).
+def TCNRegimeEncoder(**kw): return make_encoder("tcn", **kw)
+def TS2VecRegimeEncoder(**kw): return make_encoder("ts2vec", **kw)
+def TransformerRegimeEncoder(**kw): return make_encoder("transformer", **kw)
+def VQVAERegimeEncoder(**kw): return make_encoder("vq-vae", **kw)
