@@ -26,13 +26,22 @@ from .outcomes import (
     run_outcomes,
 )
 from .triple_barrier import (
+    BarrierData,
+    TripleBarrierResult,
+    build_model_barriers,
     build_triple_barrier_dynamic,
     build_triple_barrier_fixed,
     build_triple_barrier_predicted,
     build_triple_barrier_sequence,
+    evaluate_classifier,
+    evaluate_regressor,
+    resolve_feature_cols,
+    run_triple_barrier,
 )
 
 __all__ = [
+    "BarrierData",
+    "TripleBarrierResult",
     "MetalabelResult",
     "OutcomeResult",
     "StateLinregModel",
@@ -42,6 +51,7 @@ __all__ = [
     "build_forward_excursion_targets",
     "build_forward_return_targets",
     "build_gp_source",
+    "build_model_barriers",
     "build_model_frame",
     "build_predicted_barriers",
     "build_supervision_targets",
@@ -50,8 +60,12 @@ __all__ = [
     "build_triple_barrier_predicted",
     "build_triple_barrier_sequence",
     "chronological_train_mask",
+    "evaluate_classifier",
+    "evaluate_regressor",
     "fit_metalabel_tree",
     "fit_state_linregs",
     "predict_excursions",
+    "resolve_feature_cols",
     "run_outcomes",
+    "run_triple_barrier",
 ]

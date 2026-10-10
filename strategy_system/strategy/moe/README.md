@@ -197,3 +197,12 @@ All three are maintained to be as decoupled to each other as possible.
 1. OOD -> Resamples market data to many kinds of latent data (AutoEncoder passes temporality similarity and similarity score between recurring regimes). Market data is chunked in this order. Either include precomputed, meaningful features or not (look at its effectiveness).
 2. GP (Optional) -> **Main point is to use RankIC and Linreg (or tree if its non-linear) w features to correlate with t+1, t+2, ... t+n time.** Either use precomputed, meaningful features or use GP to automate feature development. Those precomputed, meaningful features should pass purged chronological walkforwards on latent states.
 3. Triple Barrier -> Optimizer. Tree model evaluates MFE/MAE based on computed linreg prediction on future prices. Tree model can take the precomputed features or GP features to re-evalutae as metalabeller.
+
+## OOD Choosing Reasoning
+As of what we know: Market exhibits temporality. Similarity score != profits.
+- TS2Vec or TCN as model: Both are time-series applicable and temporal. TS2Vec is a series of CNNs and should work. Extracts fine granularity of data and time resolutions. Unproven but reducing dimensionality could increase persistency because example, high vol/low vol, def persistent. Lower dimensions, less sensitive to a change in one of the dimensions.
+- HDBCluster: TS2Vec's embedding stores shape and distribution of general data. HDBCluster takes data and geometrically maps them based on density. TS2Vec returns data that's most likely non-stationary and noisy (orderflow). HDBCluster fixes that. TS2Vec geometrizing temporality solves HDBCluster's atemporal problem.
+- Only problem: Even then, density != trading outcome. Breakouts are structurally similar but one could represent false breakouts the other a real breakout. Fix is, including macro contextual features into TS2Vec, features such as rolling volatility, trading volume, etc.
+- Test it through the TDMI and if TDMI correlates greatly with trading outcome, OOD problem is solved.
+
+Just use GPLearn library after on primitive features with max depth and rigorous chronological walkforward testing.

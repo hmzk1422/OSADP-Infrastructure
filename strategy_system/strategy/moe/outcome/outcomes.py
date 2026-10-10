@@ -747,6 +747,9 @@ def run_outcomes(
     not already on the model frame.
     """
     outcome_cfg = dict(cfg.get("outcome") or {})
+    _inner = outcome_cfg.get("outcome")
+    if isinstance(_inner, dict) and ("triple_barrier" in _inner or "forward_returns" in _inner or "model" in _inner):
+        outcome_cfg = {**outcome_cfg, **_inner}
     model_cfg = dict(outcome_cfg.get("model") or {})
     barrier_cfg = dict(outcome_cfg.get("triple_barrier") or {})
 
@@ -820,33 +823,66 @@ def run_outcomes(
             seed=int(model_cfg.get("seed", 7)),
         )
 
-    # --- 5. Barriers for the configured mode (S3D: triple_barrier.py untouched). ---
-    mode = barrier_cfg.pop("mode", "fixed")
-    fixed_cfg = dict(barrier_cfg.pop("fixed", {}))
-    dynamic_cfg = dict(barrier_cfg.pop("dynamic", {}))
-    predicted_cfg = dict(barrier_cfg.pop("predicted", {}))
-    mode_cfg = {"fixed": fixed_cfg, "dynamic": dynamic_cfg, "predicted": predicted_cfg}.get(mode)
-    if mode_cfg is None:
-        raise ValueError("outcome.triple_barrier.mode must be 'fixed', 'dynamic', or 'predicted'")
-    selected_cfg = {**barrier_cfg, **mode_cfg}
-    timestamp_col = selected_cfg.get("timestamp_col")
-    raw_columns = {
-        selected_cfg.get(name)
-        for name in (
-            "price_col", "signal_col", "high_col", "low_col", "bid_col", "ask_col",
-            "volatility_col", "predicted_mfe_col", "predicted_mae_col",
+    # --- 5. Barriers: new-style evaluator config OR legacy mode dispatch. ---
+    # New style: outcome.triple_barrier carries classifier:/regressor: sections
+    # (your settings.yaml) -> model-frame bridge with linreg->metalabel gate.
+    # Legacy: mode fixed/dynamic/predicted -> price-action builders (untouched).
+    from .triple_barrier import (
+        build_model_barriers,
+        evaluate_classifier,
+        evaluate_regressor,
+    )
+    if "classifier" in barrier_cfg or "regressor" in barrier_cfg:
+        which = barrier_cfg.pop("evaluator", "classifier")
+        evaluator = {"classifier": evaluate_classifier,
+                     "regressor": evaluate_regressor}[which] if isinstance(which, str) else which
+        gate_frame = model_frame
+        if metalabel is not None and metalabel.tree is not None:
+            take = metalabel.labels["take_flag"].reindex(gate_frame.index)
+            gate_frame = gate_frame.loc[take.fillna(True).to_numpy(dtype=bool)]
+        result = build_model_barriers(
+            gate_frame, raw, cfg, evaluator,
+            timestamp_col=barrier_cfg.get("timestamp_col"),
         )
-        if selected_cfg.get(name) is not None
-    }
-    if timestamp_col is not None:
-        raw_columns.add(timestamp_col)
-    frame = model_frame
-    if raw is not None and raw_columns:
-        frame = attach_raw_columns(raw, model_frame, raw_columns, timestamp_col)
-    if mode == "predicted":
-        events = build_predicted_barriers(frame, excursions, metalabel, selected_cfg)
+        events = result.trades.rename(columns={
+            "r": "return", "rr": "return_rr",
+        })
+        events["t0"] = result.trades.index
+        if "t1" not in events.columns:
+            events["t1"] = events["t0"]
+        if "barrier" not in events.columns:
+            events["barrier"] = np.where(
+                events.get("outcome", 0) == 1, "profit",
+                np.where(events.get("outcome", 0) == -1, "stop", "vertical"))
+        if "side" not in events.columns:
+            events["side"] = int(model_cfg.get("side", 1))
     else:
-        events = build_triple_barrier_sequence(frame, mode=mode, **selected_cfg)
+        mode = barrier_cfg.pop("mode", "fixed")
+        fixed_cfg = dict(barrier_cfg.pop("fixed", {}))
+        dynamic_cfg = dict(barrier_cfg.pop("dynamic", {}))
+        predicted_cfg = dict(barrier_cfg.pop("predicted", {}))
+        mode_cfg = {"fixed": fixed_cfg, "dynamic": dynamic_cfg, "predicted": predicted_cfg}.get(mode)
+        if mode_cfg is None:
+            raise ValueError("outcome.triple_barrier.mode must be 'fixed', 'dynamic', or 'predicted'")
+        selected_cfg = {**barrier_cfg, **mode_cfg}
+        timestamp_col = selected_cfg.get("timestamp_col")
+        raw_columns = {
+            selected_cfg.get(name)
+            for name in (
+                "price_col", "signal_col", "high_col", "low_col", "bid_col", "ask_col",
+                "volatility_col", "predicted_mfe_col", "predicted_mae_col",
+            )
+            if selected_cfg.get(name) is not None
+        }
+        if timestamp_col is not None:
+            raw_columns.add(timestamp_col)
+        frame = model_frame
+        if raw is not None and raw_columns:
+            frame = attach_raw_columns(raw, model_frame, raw_columns, timestamp_col)
+        if mode == "predicted":
+            events = build_predicted_barriers(frame, excursions, metalabel, selected_cfg)
+        else:
+            events = build_triple_barrier_sequence(frame, mode=mode, **selected_cfg)
 
     return OutcomeResult(
         predictions=predictions,

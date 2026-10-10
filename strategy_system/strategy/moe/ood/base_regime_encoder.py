@@ -24,6 +24,8 @@ import pickle
 import numpy as np
 import pandas as pd
 
+from ._jit import NUMBA_AVAILABLE, temporal_window_kernel
+
 
 def prepare_regime_input(
     df: pd.DataFrame,
@@ -255,17 +257,28 @@ class TemporalWindowEncoder(BaseRegimeEncoder):
             centered = np.linspace(-1.0, 1.0, self.window)
             centered -= centered.mean()
             centered_norm = max(float(centered @ centered), 1e-12)
-            for row in range(self.window - 1, len(values)):
-                sequence = matrix[row - self.window + 1: row + 1]
-                if not np.isfinite(sequence).all():
-                    continue
-                means = [sequence[idx].mean(axis=0) for idx in bin_indices]
-                dispersion = sequence.std(axis=0, ddof=0)
-                slope = centered @ sequence / centered_norm
-                slow_row = slow_z.iloc[row].to_numpy(dtype=np.float64)
-                if not np.isfinite(slow_row).all():
-                    continue
-                out[row] = np.concatenate([*means, dispersion, slope, slow_row])
+            slow_matrix = slow_z.to_numpy(dtype=np.float64)
+            # A row is encoded iff its whole trailing window AND its slow row
+            # are finite -- the same two ``continue`` conditions as before,
+            # evaluated for every row at once in O(rows).
+            valid = complete_window_mask(matrix, self.window) & np.isfinite(slow_matrix).all(axis=1)
+            rows = np.flatnonzero(valid)
+            if NUMBA_AVAILABLE:
+                # NumPy's summation order depends on memory layout (see the
+                # kernel docstring); read it off the original array first.
+                single = matrix.shape[1] == 1
+                temporal_window_kernel(
+                    np.ascontiguousarray(matrix), np.ascontiguousarray(slow_matrix), rows,
+                    np.array([idx[0] for idx in bin_indices], dtype=np.int64),
+                    np.array([idx[-1] + 1 for idx in bin_indices], dtype=np.int64),
+                    centered, centered_norm, self.window,
+                    single, bool(matrix.flags.f_contiguous or single), out)
+            else:  # original reference loop (no numba installed)
+                for row in rows:
+                    sequence = matrix[row - self.window + 1: row + 1]
+                    means = [sequence[idx].mean(axis=0) for idx in bin_indices]
+                    out[row] = np.concatenate([*means, sequence.std(axis=0, ddof=0),
+                                               centered @ sequence / centered_norm, slow_matrix[row]])
         return pd.DataFrame(out, index=df.index, columns=self.embedding_columns_)
 
 

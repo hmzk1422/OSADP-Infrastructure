@@ -6,9 +6,16 @@ They do not depend on GP-generated features, OOD embeddings, or a model.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Callable, NamedTuple
 from tqdm.auto import tqdm
 import numpy as np
 import pandas as pd
+from sklearn.base import clone
+from sklearn.linear_model import LinearRegression, LogisticRegression
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
 
 #: BTCUSDT instrument tick -- same formula as loader.quantize_price and
 #: uets VenueSpec::round_price: (price / tick).round() * tick.
@@ -547,3 +554,403 @@ def build_triple_barrier_sequence(
     except KeyError:
         raise ValueError("mode must be 'fixed', 'dynamic', or 'predicted'") from None
     return builder(df, **kwargs)
+
+
+# --------------------------------------------------------------------------
+# Model-based evaluators: classifier + regressor on the model frame.
+# Your new API (rebuilt): feature_cols auto-derived when None, NaN-safe.
+# --------------------------------------------------------------------------
+_EXCLUDE_PREFIXES = ("future_", "predicted_", "raw__", "__outcome_")
+_EXCLUDE_COLUMNS = frozenset({
+    "latent_id", "similarity", "trade_allowed", "state_mature", "model_ready",
+    "timestamp",
+})
+
+
+def resolve_feature_cols(df: pd.DataFrame, price_col: str = "price_close") -> list[str]:
+    """Auto-pick tradeable feature columns (your rule: everything useful).
+
+    Keeps numeric columns, drops price_col, regime flags, future_/predicted_/
+    targets and raw__/bookkeeping. Callers may still pass feature_cols
+    explicitly — those are used verbatim (truth).
+    """
+    cols: list[str] = []
+    for column in df.columns:
+        if column == price_col or column in _EXCLUDE_COLUMNS:
+            continue
+        if column.startswith(_EXCLUDE_PREFIXES):
+            continue
+        if column in ("trade_id",):
+            continue
+        if "timestamp" in str(column).lower() or "_id" in str(column).lower():
+            continue
+        if pd.api.types.is_numeric_dtype(df[column].dtype):
+            cols.append(column)
+    return cols
+
+
+def _causal_feature_matrix(
+    df: pd.DataFrame,
+    feature_cols: list[str],
+    train_idx: np.ndarray,
+) -> tuple[np.ndarray, list[str]]:
+    """Build the model matrix with zero lookahead.
+
+    - Uses ONLY the passed feature_cols (truth, no re-derivation).
+    - Drops columns with NO finite value on train rows (e.g. gp_feat* for a
+      state absent from train). Decision uses train rows ONLY.
+    - Zero-fills partial NaN (state-masked gp_feat* outside its state reads
+      as 0.0 — same rule as outcomes.py metalabel). Fill value is the
+      constant 0.0, no mean/std computed on any data, so no leakage.
+    Returns (X, kept_cols).
+    """
+    raw = df[feature_cols].apply(pd.to_numeric, errors="coerce").to_numpy(dtype=np.float64)
+    if raw.shape[1] == 0:
+        raise ValueError("no feature columns to build the model matrix")
+    train_finite = np.isfinite(raw[train_idx]).any(axis=0) if len(train_idx) else np.zeros(raw.shape[1], bool)
+    keep = np.flatnonzero(train_finite)
+    if len(keep) == 0:
+        raise ValueError("not enough complete training rows")
+    return (np.where(np.isfinite(raw[:, keep]), raw[:, keep], 0.0),
+            [feature_cols[i] for i in keep.tolist()])
+
+
+@dataclass
+class BarrierData:
+    df: pd.DataFrame
+    X: np.ndarray
+    kept_cols: list
+    price: np.ndarray
+    high: np.ndarray
+    low: np.ndarray
+    side: np.ndarray
+    horizon: int
+    path_ok: np.ndarray
+    train: np.ndarray
+    test: np.ndarray
+
+
+class TripleBarrierResult(NamedTuple):
+    stats: dict
+    trades: pd.DataFrame
+    model: object
+
+
+def simulate_barriers(d: BarrierData, tp_width: np.ndarray, sl_width: np.ndarray) -> pd.DataFrame:
+    """Run TP/SL/timeout for every row. Widths are fractions of entry price.
+
+    Barriers sit at close[i]; path starts at i+1. Stop wins ties.
+    outcome: +1 TP first, -1 SL first (or tie), 0 timeout.
+    r: result in R (1R = stop distance). valid: full path + sane widths.
+    """
+    n, H = len(d.price), d.horizon
+    p, s = d.price, d.side.astype(float)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        tp_level = p * (1.0 + s * tp_width)
+        sl_level = p * (1.0 - s * sl_width)
+    outcome = np.zeros(n, dtype=int)
+    done = np.zeros(n, dtype=bool)
+    for k in range(1, H + 1):
+        m = n - k
+        if m <= 0:
+            break
+        hi, lo, side = d.high[k:], d.low[k:], s[:m]
+        hit_sl = np.where(side > 0, lo <= sl_level[:m], hi >= sl_level[:m])
+        hit_tp = np.where(side > 0, hi >= tp_level[:m], lo <= tp_level[:m])
+        live = ~done[:m]
+        sl_now = live & hit_sl
+        tp_now = live & ~hit_sl & hit_tp
+        outcome[:m][sl_now] = -1
+        outcome[:m][tp_now] = 1
+        done[:m] |= sl_now | tp_now
+    timeout_price = np.full(n, np.nan)
+    timeout_price[: n - H] = p[H:]
+    timeout_ret = s * (timeout_price / p - 1.0)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        rr = tp_width / sl_width
+        r = np.where(outcome == 1, rr, np.where(outcome == -1, -1.0, timeout_ret / sl_width))
+    valid = (
+        d.path_ok
+        & np.isfinite(p) & (p > 0)
+        & np.isfinite(tp_width) & (tp_width > 0)
+        & np.isfinite(sl_width) & (sl_width > 0)
+        & np.isfinite(tp_level) & (tp_level > 0)
+        & np.isfinite(sl_level) & (sl_level > 0)
+        & np.isfinite(r)
+        & (d.side != 0)
+    )
+    return pd.DataFrame(
+        {"tp_width": tp_width, "sl_width": sl_width, "rr": rr,
+         "outcome": outcome, "r": r, "valid": valid}, index=d.df.index)
+
+
+def forward_excursions(d: BarrierData) -> tuple[np.ndarray, np.ndarray]:
+    """Side-adjusted MFE/MAE (positive fractions) over next H bars; NaN if path bad."""
+    n, H = len(d.price), d.horizon
+    p, s = d.price, d.side
+    max_hi = np.full(n, -np.inf)
+    min_lo = np.full(n, np.inf)
+    for k in range(1, H + 1):
+        m = n - k
+        if m <= 0:
+            break
+        max_hi[:m] = np.maximum(max_hi[:m], d.high[k:])
+        min_lo[:m] = np.minimum(min_lo[:m], d.low[k:])
+    up = max_hi / p - 1.0
+    down = 1.0 - min_lo / p
+    mfe = np.where(s > 0, up, down)
+    mae = np.where(s > 0, down, up)
+    mfe[~d.path_ok] = np.nan
+    mae[~d.path_ok] = np.nan
+    return np.maximum(mfe, 0.0), np.maximum(mae, 0.0)
+
+
+def _volatility(d: BarrierData, vol_col: str | None, vol_window: int) -> np.ndarray:
+    """Per-bar volatility. Causal: row i only uses returns up to i."""
+    if vol_col is not None:
+        return pd.to_numeric(d.df[vol_col], errors="coerce").to_numpy(dtype=float)
+    returns = pd.Series(d.price, index=d.df.index).pct_change(fill_method=None)
+    return returns.rolling(vol_window, min_periods=max(2, vol_window // 3)).std(ddof=0).to_numpy()
+
+
+def _check_scales(rr: float, barrier_size: float) -> None:
+    for name, value in (("rr", rr), ("barrier_size", barrier_size)):
+        if not np.isfinite(value) or value <= 0:
+            raise ValueError(f"{name} must be finite and > 0")
+
+
+def _summarize(d: BarrierData, sim: pd.DataFrame, trades: pd.DataFrame) -> dict:
+    n = len(trades)
+    stats = {
+        "n_eligible": int(d.test.sum()),
+        "n_scored": int((d.test & sim["valid"].to_numpy()).sum()),
+        "n_trades": n,
+    }
+    stats["n_invalid_barriers"] = stats["n_eligible"] - stats["n_scored"]
+    if n == 0:
+        stats.update(win_rate=np.nan, avg_rr=np.nan, expectancy_r=np.nan,
+                     tp_rate=np.nan, sl_rate=np.nan, timeout_rate=np.nan)
+        return stats
+    stats.update(
+        win_rate=float((trades["outcome"] == 1).mean()),
+        avg_rr=float(trades["rr"].mean()),
+        expectancy_r=float(trades["r"].mean()),
+        tp_rate=float((trades["outcome"] == 1).mean()),
+        sl_rate=float((trades["outcome"] == -1).mean()),
+        timeout_rate=float((trades["outcome"] == 0).mean()),
+    )
+    return stats
+
+
+def evaluate_classifier(
+    d: BarrierData, model=None, *, rr: float = 1.0, barrier_size: float = 1.0,
+    vol_col: str | None = None, vol_window: int = 60,
+    threshold: float | None = None,
+) -> TripleBarrierResult:
+    """sl = barrier_size * vol * sqrt(H); tp = sl * rr. Label = TP hit first.
+
+    Model trains ONLY on purged train rows, predicts test rows. Trade when
+    P(win) >= threshold (default = break-even 1/(1+rr)).
+    """
+    _check_scales(rr, barrier_size)
+    model = model if model is not None else make_pipeline(
+        StandardScaler(), LogisticRegression(max_iter=1000))
+    threshold = 1.0 / (1.0 + rr) if threshold is None else threshold
+    unit = _volatility(d, vol_col, vol_window) * np.sqrt(d.horizon) * barrier_size
+    sim = simulate_barriers(d, unit * rr, unit)
+    valid = sim["valid"].to_numpy()
+    label = (sim["outcome"] == 1).astype(int).to_numpy()
+    fit_rows = d.train & valid
+    if len(np.unique(label[fit_rows])) < 2:
+        raise ValueError("training labels contain only one class; barriers never/always hit")
+    model.fit(d.X[fit_rows], label[fit_rows])
+    test_rows = d.test & valid
+    prob = np.full(len(d.X), np.nan)
+    if test_rows.any():
+        prob[test_rows] = model.predict_proba(d.X[test_rows])[:, list(model.classes_).index(1)]
+    take = test_rows & (prob >= threshold)
+    trades = sim.loc[take].drop(columns="valid").assign(prob=prob[take])
+    stats = _summarize(d, sim, trades)
+    stats.update(threshold=float(threshold),
+                 base_win_rate=float(label[test_rows].mean()) if test_rows.any() else np.nan)
+    return TripleBarrierResult(stats, trades, model)
+
+
+def evaluate_regressor(
+    d: BarrierData, model=None, *, rr: float = 1.0, barrier_size: float = 1.0,
+) -> TripleBarrierResult:
+    """sl = barrier_size * pred_mae; tp = barrier_size * rr * pred_mfe.
+
+    One clone per target, fitted on purged train rows only. Rows with
+    non-positive predicted widths are unscored (counted n_invalid_barriers).
+    """
+    _check_scales(rr, barrier_size)
+    model = model if model is not None else make_pipeline(StandardScaler(), LinearRegression())
+    mfe, mae = forward_excursions(d)
+    fit_rows = d.train & np.isfinite(mfe) & np.isfinite(mae)
+    if fit_rows.sum() < d.X.shape[1] + 2:
+        raise ValueError("not enough complete training rows")
+    tp_model = clone(model).fit(d.X[fit_rows], mfe[fit_rows])
+    sl_model = clone(model).fit(d.X[fit_rows], mae[fit_rows])
+    tp_width = np.full(len(d.X), np.nan)
+    sl_width = np.full(len(d.X), np.nan)
+    rows = d.test
+    if rows.any():
+        tp_width[rows] = tp_model.predict(d.X[rows]) * barrier_size * rr
+        sl_width[rows] = sl_model.predict(d.X[rows]) * barrier_size
+    sim = simulate_barriers(d, tp_width, sl_width)
+    take = d.test & sim["valid"].to_numpy()
+    trades = sim.loc[take].drop(columns="valid")
+    stats = _summarize(d, sim, trades)
+    return TripleBarrierResult(stats, trades, {"tp_model": tp_model, "sl_model": sl_model})
+
+
+evaluate_classifier.settings_key = "classifier"
+evaluate_regressor.settings_key = "regressor"
+
+
+_DEFAULTS = {"horizon": 30, "price_col": "price_close", "train_fraction": 0.7,
+             "side": 1, "high_col": None, "low_col": None}
+
+
+def load_settings(settings=None) -> dict:
+    """Return the outcome.triple_barrier (or top-level triple_barrier) section."""
+    if isinstance(settings, dict):
+        cfg = settings
+    else:
+        path = Path(settings) if settings is not None else Path("settings.yaml")
+        if not path.exists():
+            if settings is None:
+                return {}
+            raise FileNotFoundError(path)
+        import yaml
+        cfg = yaml.safe_load(path.read_text()) or {}
+    section = cfg.get("triple_barrier")
+    if section is None:
+        outcome = cfg.get("outcome") or {}
+        inner = outcome.get("outcome")
+        if isinstance(inner, dict) and ("triple_barrier" in inner or "forward_returns" in inner):
+            outcome = {**outcome, **inner}
+        section = outcome.get("triple_barrier")
+    return dict(section or {})
+
+
+def run_triple_barrier(
+    df: pd.DataFrame,
+    feature_cols: list[str] | None = None,
+    evaluator: Callable[..., TripleBarrierResult] = evaluate_classifier,
+    model=None,
+    *,
+    settings=None,
+    side=None,
+    horizon: int | None = None,
+    price_col: str | None = None,
+    high_col: str | None = None,
+    low_col: str | None = None,
+    train_fraction: float | None = None,
+    **evaluator_kwargs,
+) -> TripleBarrierResult:
+    """Run a triple-barrier evaluation. feature_cols=None auto-picks (everything useful).
+
+    df: time-ordered frame, oldest first. Barriers at close[i], path from i+1,
+    stop wins ties. Train rows purged (split - horizon); no train label sees test.
+    feature_cols: explicit list = truth; None = resolve_feature_cols(df).
+    Only the resolved cols reach the model; price/flags/future_/raw__ never do.
+    """
+    cfg = load_settings(settings)
+
+    def pick(name, value):
+        return value if value is not None else cfg.get(name, _DEFAULTS[name])
+
+    side = pick("side", side)
+    horizon = pick("horizon", horizon)
+    price_col = pick("price_col", price_col)
+    high_col = pick("high_col", high_col)
+    low_col = pick("low_col", low_col)
+    train_fraction = pick("train_fraction", train_fraction)
+    section = dict(cfg.get(getattr(evaluator, "settings_key", ""), None) or {})
+    params = {**section, **evaluator_kwargs}
+    if feature_cols is None:
+        feature_cols = resolve_feature_cols(df, price_col=price_col)
+    required = [*feature_cols, price_col, high_col, low_col,
+                side if isinstance(side, str) else None]
+    missing = [c for c in required if c is not None and c not in df.columns]
+    if missing:
+        raise KeyError(f"Missing columns: {missing}")
+    if not 0.0 < train_fraction < 1.0:
+        raise ValueError("train_fraction must be in (0, 1)")
+    if not isinstance(horizon, int) or horizon <= 0:
+        raise ValueError("horizon must be a positive integer")
+    if isinstance(df.index, pd.DatetimeIndex) and not df.index.is_monotonic_increasing:
+        raise ValueError("df must be sorted oldest-first (DatetimeIndex is not increasing)")
+    n = len(df)
+    price = pd.to_numeric(df[price_col], errors="coerce").to_numpy(dtype=float)
+    high = pd.to_numeric(df[high_col], errors="coerce").to_numpy(dtype=float) if high_col else price
+    low = pd.to_numeric(df[low_col], errors="coerce").to_numpy(dtype=float) if low_col else price
+    side_arr = (pd.to_numeric(df[side], errors="coerce").fillna(0).to_numpy()
+                if isinstance(side, str) else np.full(n, side))
+    if not np.isin(side_arr, (-1, 0, 1)).all():
+        raise ValueError("side must contain only -1, 0 (no event), or +1")
+    event = side_arr != 0
+    idx = np.arange(n)
+    bad = ~(np.isfinite(high) & np.isfinite(low) & (high > 0) & (low > 0))
+    bad_cum = np.concatenate([[0], np.cumsum(bad)])
+    path_ok = (idx + horizon < n) & ((bad_cum[np.minimum(idx + horizon + 1, n)] - bad_cum[idx + 1]) == 0)
+    split = int(n * train_fraction)
+    train_idx = np.flatnonzero((idx < split - horizon) & event)
+    X, kept = _causal_feature_matrix(df, list(feature_cols), train_idx)
+    d = BarrierData(
+        df=df, X=X, kept_cols=kept, price=price, high=high, low=low,
+        side=side_arr, horizon=horizon, path_ok=path_ok,
+        train=(idx < split - horizon) & event,
+        test=(idx >= split) & event & path_ok,
+    )
+    return evaluator(d, model, **params)
+
+
+def build_model_barriers(
+    model_frame: pd.DataFrame,
+    raw: pd.DataFrame | None,
+    cfg: dict,
+    evaluator=evaluate_classifier,
+    model=None,
+    *,
+    feature_cols: list[str] | None = None,
+    timestamp_col: str | None = None,
+    **overrides,
+) -> TripleBarrierResult:
+    """Bridge the S1 model frame to run_triple_barrier (causal).
+
+    Attaches raw side/high/low via backward merge_asof (same as outcomes.py),
+    auto-picks feature_cols when None, forwards cfg + overrides. feature_cols
+    passed explicitly are truth; everything in them is used as a feature.
+    """
+    from .alignment import attach_raw_columns
+    outcome = cfg.get("outcome") or {}
+    # Tolerate a doubled nesting (outcome.outcome.*) seen in some working trees.
+    inner = outcome.get("outcome")
+    if isinstance(inner, dict) and ("triple_barrier" in inner or "forward_returns" in inner):
+        outcome = {**outcome, **inner}
+    tb_cfg = dict(outcome.get("triple_barrier", cfg.get("triple_barrier", {})))
+    tb_cfg.update(overrides)
+    side = tb_cfg.get("side", "htf_rsi_d2_signal")
+    price_col = tb_cfg.get("price_col", "price_close")
+    high_col, low_col = tb_cfg.get("high_col"), tb_cfg.get("low_col")
+    need = {c for c in (price_col, high_col, low_col) if c is not None}
+    if isinstance(side, str):
+        need.add(side)
+    if timestamp_col is not None:
+        need.add(timestamp_col)
+    frame = model_frame
+    if raw is not None:
+        missing_raw = [c for c in need if c not in frame.columns]
+        if missing_raw:
+            frame = attach_raw_columns(raw, model_frame, set(missing_raw), timestamp_col)
+    if feature_cols is None:
+        feature_cols = resolve_feature_cols(frame, price_col=price_col)
+    return run_triple_barrier(
+        frame, feature_cols, evaluator, model, settings={"triple_barrier": tb_cfg},
+        side=side, price_col=price_col, high_col=high_col, low_col=low_col,
+        horizon=tb_cfg.get("horizon"), train_fraction=tb_cfg.get("train_fraction"),
+        **{k: v for k, v in tb_cfg.get(getattr(evaluator, "settings_key", ""), {}).items()},
+    )

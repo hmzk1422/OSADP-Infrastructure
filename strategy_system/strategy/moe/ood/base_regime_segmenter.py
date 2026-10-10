@@ -18,6 +18,8 @@ from tqdm.auto import tqdm
 import numpy as np
 import pandas as pd
 
+from . import _jit
+
 
 _COLUMNS = ["latent_id", "raw_latent_id", "similarity", "distance", "is_known",
             "candidate_count", "candidate_episodes", "known_state_count", "state_support",
@@ -124,7 +126,13 @@ class BaseRegimeSegmenter(ABC):
         """Set model-ready regime IDs."""
 
 class HysteresisClusterRegimeSegmenter(BaseRegimeSegmenter):
-    """Online prototype clustering with persistence and multi-episode promotion."""
+    """Online prototype clustering with persistence and multi-episode promotion.
+
+    Scale semantics: with ``centroid_update_rate == 0`` (default) the per-state
+    scale is the RMS deviation of assigned rows around the fixed prototype.  With a
+    nonzero rate the accumulator is not a standard Welford variance of a moving
+    centre, so scales are a heuristic dispersion, not a calibrated estimate.
+    """
 
     def __init__(
         self, max_regimes: int = 10, match_threshold: float = 1.5,
@@ -270,6 +278,42 @@ class HysteresisClusterRegimeSegmenter(BaseRegimeSegmenter):
         self.model_ready_states = set(map(str, state_ids))
 
     def enforce_persistence(self, labels: Sequence[str]) -> np.ndarray:
+        """Causally debounce every label, including null, for ``min_dwell`` rows.
+
+        Numba path: labels are factorized to integer codes, the debounce runs as
+        one compiled loop, and codes map back to the original strings.  State
+        (``_persistent_label`` etc.) is carried across calls exactly as before.
+        Falls back to the reference loop when numba is unavailable or the
+        carried state is not a plain string label.
+        """
+        if (not _jit.NUMBA_AVAILABLE or not isinstance(self._persistent_label, str)
+                or not self._persistent_label
+                or not (self._smooth_pending is None or isinstance(self._smooth_pending, str))):
+            return self._enforce_persistence_python(labels)
+        raw = np.asarray(labels, dtype=object)
+        if raw.size == 0:
+            return self._enforce_persistence_python(labels)
+        if pd.api.types.infer_dtype(raw, skipna=False) != "string":
+            raw = np.array([str(label) for label in raw], dtype=object)
+        codes, uniques = pd.factorize(raw)
+        names = list(uniques)
+        for extra in (self._persistent_label, self._smooth_pending):
+            if extra is not None and extra not in names:
+                names.append(extra)
+        lookup = {name: code for code, name in enumerate(names)}
+        state = np.array([lookup[self._persistent_label],
+                          -1 if self._smooth_pending is None else lookup[self._smooth_pending],
+                          self._smooth_pending_count], dtype=np.int64)
+        out = np.empty(len(codes), dtype=np.int64)
+        pending_rows = np.empty(len(codes), dtype=np.bool_)
+        _jit.persistence_kernel(codes.astype(np.int64), state, self.min_dwell, out, pending_rows)
+        self._persistent_label = names[int(state[0])]
+        self._smooth_pending = None if state[1] < 0 else names[int(state[1])]
+        self._smooth_pending_count = int(state[2])
+        self._transition_pending_rows = pending_rows.tolist()
+        return np.asarray(names, dtype=object)[out]
+
+    def _enforce_persistence_python(self, labels: Sequence[str]) -> np.ndarray:
         """Causally debounce every label, including null, for ``min_dwell`` rows."""
         output = []
         pending_rows = []
@@ -297,6 +341,7 @@ class HysteresisClusterRegimeSegmenter(BaseRegimeSegmenter):
             return None
         state_id = f"latent_{self._next_id:03d}"
         self._next_id += 1
+        self._issued_ids.add(state_id)   # retired IDs must never be re-issued by any backend
         self.prototypes[state_id] = candidate["center"].copy()
         variance = candidate["m2"] / max(candidate["count"] - 1, 1)
         self.scales[state_id] = np.maximum(np.sqrt(np.maximum(variance, 0)), self.min_state_scale)
@@ -417,8 +462,136 @@ class HysteresisClusterRegimeSegmenter(BaseRegimeSegmenter):
             return self.predict_custom(embeddings)
         return self._backend().predict(embeddings)
 
+    #: Methods the compiled kernel re-implements.  If a subclass overrides any
+    #: of them (e.g. ``StickyHMMRegimeSegmenter.assign_regime``) the kernel
+    #: would silently skip that behaviour, so those classes use the Python path.
+    _JIT_INLINED = ("update_state", "assign_regime", "_distance", "_prune_states",
+                    "_candidate_update", "_promote")
+
     def predict_custom(self, embeddings: pd.DataFrame) -> pd.DataFrame:
-        """Current online state-machine body (kept verbatim)."""
+        """Online state machine; runs as a compiled numba kernel when possible.
+
+        Results and end-of-run state are identical to the reference Python loop
+        (``_predict_custom_python``), which is used automatically when numba is
+        missing, a subclass overrides the inlined methods, or the carried state
+        is not representable in the kernel's array layout.
+        """
+        if not isinstance(embeddings, pd.DataFrame):
+            raise TypeError("embeddings must be a pandas DataFrame")
+        result = self._predict_custom_jit(embeddings)
+        return result if result is not None else self._predict_custom_python(embeddings)
+
+    #: Target size of the float64 working block copied per kernel call.  Keeps the
+    #: extra RAM of the JIT path O(chunk) instead of O(rows * features).
+    _JIT_CHUNK_BYTES = 64 * 2**20
+
+    def _predict_custom_jit(self, embeddings: pd.DataFrame, chunk_rows: int | None = None):
+        base = HysteresisClusterRegimeSegmenter
+        if (not _jit.NUMBA_AVAILABLE or self.backend != "custom" or len(embeddings) == 0
+                or any(getattr(type(self), name) is not getattr(base, name) for name in self._JIT_INLINED)
+                or not isinstance(self._persistent_label, str) or not self._persistent_label):
+            return None
+        if self.prototypes and embeddings.shape[1] != len(next(iter(self.prototypes.values()))):
+            raise ValueError("embedding dimensions differ from fitted prototypes")
+        # Validate dtypes up front so a bad column raises (via the Python path)
+        # before any state is mutated, as the original did.  The float64 matrix
+        # itself is converted per chunk below -- never as one full-size copy.
+        if not all(pd.api.types.is_numeric_dtype(dtype) and not pd.api.types.is_bool_dtype(dtype)
+                   for dtype in embeddings.dtypes):
+            return None
+        n, size = embeddings.shape
+        if chunk_rows is None:
+            chunk_rows = int(max(1024, min(250_000, self._JIT_CHUNK_BYTES // max(size * 8, 1))))
+        ids = list(self.prototypes)
+        # Everything carried in must already be (size,)-shaped and complete.
+        if (any(set(table) != set(ids) for table in (self.scales, self.scale_m2, self.scale_counts,
+                                                      self.counts, self.last_seen))
+                or any(np.shape(self.prototypes[k]) != (size,) or np.shape(self.scales[k]) != (size,)
+                       or np.shape(self.scale_m2[k]) != (size,) for k in ids)
+                or any(np.shape(c["center"]) != (size,) or np.shape(c["m2"]) != (size,) for c in self.candidates)):
+            return None
+
+        capacity = max(self.max_regimes, len(ids)) + 1
+        cand_capacity = max(self.max_candidates, len(self.candidates)) + 1
+        P = np.zeros((capacity, size)); S = np.zeros((capacity, size)); M2 = np.zeros((capacity, size))
+        SC = np.zeros(capacity, np.int64); CNT = np.zeros(capacity, np.int64)
+        LAST = np.zeros(capacity, np.int64); UID = np.zeros(capacity, np.int64)
+        for k, key in enumerate(ids):
+            P[k], S[k], M2[k] = self.prototypes[key], self.scales[key], self.scale_m2[key]
+            SC[k], CNT[k], LAST[k], UID[k] = self.scale_counts[key], self.counts[key], self.last_seen[key], k
+        CC = np.zeros((cand_capacity, size)); CM2 = np.zeros((cand_capacity, size))
+        CCNT = np.zeros(cand_capacity, np.int64); CEP = np.zeros(cand_capacity, np.int64)
+        CLAST = np.zeros(cand_capacity, np.int64)
+        for k, c in enumerate(self.candidates):
+            CC[k], CM2[k] = c["center"], c["m2"]
+            CCNT[k], CEP[k], CLAST[k] = c["count"], c["episodes"], c["last_seen"]
+        uid_names = list(ids)
+        current = ids.index(self.current_state) if self.current_state in self.prototypes else -1
+        ints = np.array([len(ids), len(self.candidates), len(ids), current, 0, 0], dtype=np.int64)
+        cf = np.array([self.match_threshold, self.candidate_threshold, self.switch_margin,
+                       self.centroid_update_rate, self.min_state_scale], dtype=np.float64)
+        ci = np.array([self.max_regimes, self.min_candidate_observations, self.min_candidate_episodes,
+                       self.candidate_episode_gap, self.max_candidates, self.candidate_expiry,
+                       self.state_expiry_observations, int(self.learn_novel)], dtype=np.int64)
+        uid_out = np.empty(n, np.int64); sim_arg = np.empty(n); dist_out = np.empty(n)
+        cand_count = np.empty(n, np.int64); cand_eps = np.empty(n, np.int64)
+        support = np.empty(n, np.int64); status = np.empty(n, np.int8); known_count = np.empty(n, np.int64)
+        pruned_log = np.empty(capacity + n + 1, np.int64)
+        pos0 = self.observations_seen
+        next_id = self._next_id
+
+        with tqdm(total=n, desc="Segmenting Regimes") as bar:
+            for start in range(0, n, chunk_rows):
+                stop = min(start + chunk_rows, n)
+                promoted_before = int(ints[5])
+                block = np.ascontiguousarray(embeddings.iloc[start:stop].to_numpy(dtype=np.float64))
+                _jit.segment_chunk(block, 0, stop - start, pos0 + start, P, S, M2, SC, CNT, LAST, UID,
+                                   CC, CM2, CCNT, CEP, CLAST, ints, cf, ci,
+                                   uid_out[start:stop], sim_arg[start:stop], dist_out[start:stop],
+                                   cand_count[start:stop], cand_eps[start:stop], support[start:stop],
+                                   status[start:stop], known_count[start:stop], pruned_log)
+                del block
+                for _ in range(int(ints[5]) - promoted_before):   # ids are issued in promotion order
+                    uid_names.append(f"latent_{next_id:03d}")
+                    self._issued_ids.add(uid_names[-1])
+                    next_id += 1
+                bar.update(stop - start)
+
+        # ---- write the carried state back in the original dict/list shapes ----
+        nk, nc = int(ints[0]), int(ints[1])
+        keys = [uid_names[int(UID[k])] for k in range(nk)]
+        self.prototypes = {key: P[k].copy() for k, key in enumerate(keys)}
+        self.scales = {key: S[k].copy() for k, key in enumerate(keys)}
+        self.scale_m2 = {key: M2[k].copy() for k, key in enumerate(keys)}
+        self.scale_counts = {key: int(SC[k]) for k, key in enumerate(keys)}
+        self.counts = {key: int(CNT[k]) for k, key in enumerate(keys)}
+        self.last_seen = {key: int(LAST[k]) for k, key in enumerate(keys)}
+        self.candidates = [{"center": CC[k].copy(), "m2": CM2[k].copy(), "count": int(CCNT[k]),
+                            "episodes": int(CEP[k]), "last_seen": int(CLAST[k])} for k in range(nc)]
+        for k in range(int(ints[4])):
+            self.model_ready_states.discard(uid_names[int(pruned_log[k])])
+        self._next_id = next_id
+        self.observations_seen = pos0 + n
+        self.current_state = uid_names[int(ints[3])] if ints[3] >= 0 else None
+
+        names = np.array(uid_names + ["null"], dtype=object)
+        raw_ids = names[uid_out].tolist()                    # uid -1 -> "null"
+        status_names = np.array(_jit.STATUS_NAMES, dtype=object)[status].tolist()
+        result = pd.DataFrame({
+            "latent_id": raw_ids, "raw_latent_id": raw_ids,
+            "similarity": np.exp(sim_arg),                   # np.exp (not in-kernel) keeps bits identical
+            "distance": dist_out, "is_known": [value != "null" for value in raw_ids],
+            "candidate_count": cand_count, "candidate_episodes": cand_eps,
+            "known_state_count": known_count, "state_support": support,
+            "transition_pending": np.zeros(n, dtype=bool), "status": status_names,
+        }, index=embeddings.index, columns=_COLUMNS)
+        result["latent_id"] = self.enforce_persistence(result["raw_latent_id"])
+        result["transition_pending"] = self._transition_pending_rows
+        result["is_known"] = result["latent_id"].ne("null")
+        return result
+
+    def _predict_custom_python(self, embeddings: pd.DataFrame) -> pd.DataFrame:
+        """Reference (pure Python) state-machine body, kept verbatim for fallback/testing."""
         if not isinstance(embeddings, pd.DataFrame):
             raise TypeError("embeddings must be a pandas DataFrame")
         if self.prototypes and embeddings.shape[1] != len(next(iter(self.prototypes.values()))):
