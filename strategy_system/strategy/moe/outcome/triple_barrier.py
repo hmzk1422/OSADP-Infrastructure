@@ -2,6 +2,17 @@
 
 These builders consume a causal side/entry column and raw price observations.
 They do not depend on GP-generated features, OOD embeddings, or a model.
+
+Two evaluation layers live here:
+
+* ``tb_classifier()`` / ``tb_regressor()`` -- the current entry points.
+  Give them a DataFrame (they resolve ``timeout`` once via
+  ``models.timeout_function`` and build their own purged ``BarrierData``)
+  or a prebuilt ``BarrierData``. All width math delegates to ``models.py``
+  so it stays swappable per run or per edit.
+* ``evaluate_classifier()`` / ``evaluate_regressor()`` -- compatibility
+  wrappers that keep the legacy settings keys (rr/vol_col/vol_window) and
+  legacy defaults while delegating to the ``tb_*`` core.
 """
 
 from __future__ import annotations
@@ -16,6 +27,9 @@ from sklearn.base import clone
 from sklearn.linear_model import LinearRegression, LogisticRegression
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
+
+from . import models as _barrier_models
+
 
 #: BTCUSDT instrument tick -- same formula as loader.quantize_price and
 #: uets VenueSpec::round_price: (price / tick).round() * tick.
@@ -628,6 +642,8 @@ class BarrierData:
     path_ok: np.ndarray
     train: np.ndarray
     test: np.ndarray
+    #: column of df that produced ``price`` (rr_unit needs it for U_t)
+    price_col: str = "price_close"
 
 
 class TripleBarrierResult(NamedTuple):
@@ -705,18 +721,17 @@ def forward_excursions(d: BarrierData) -> tuple[np.ndarray, np.ndarray]:
     return np.maximum(mfe, 0.0), np.maximum(mae, 0.0)
 
 
-def _volatility(d: BarrierData, vol_col: str | None, vol_window: int) -> np.ndarray:
-    """Per-bar volatility. Causal: row i only uses returns up to i."""
-    if vol_col is not None:
-        return pd.to_numeric(d.df[vol_col], errors="coerce").to_numpy(dtype=float)
-    returns = pd.Series(d.price, index=d.df.index).pct_change(fill_method=None)
-    return returns.rolling(vol_window, min_periods=max(2, vol_window // 3)).std(ddof=0).to_numpy()
+def _check_positive(name: str, value) -> None:
+    if not np.isfinite(value) or value <= 0:
+        raise ValueError(f"{name} must be finite and > 0")
 
 
-def _check_scales(rr: float, barrier_size: float) -> None:
-    for name, value in (("rr", rr), ("barrier_size", barrier_size)):
-        if not np.isfinite(value) or value <= 0:
-            raise ValueError(f"{name} must be finite and > 0")
+def _first_not_none(*values, default=None):
+    """First argument that is not None (explicit kwargs > settings > default)."""
+    for value in values:
+        if value is not None:
+            return value
+    return default
 
 
 def _summarize(d: BarrierData, sim: pd.DataFrame, trades: pd.DataFrame) -> dict:
@@ -742,27 +757,190 @@ def _summarize(d: BarrierData, sim: pd.DataFrame, trades: pd.DataFrame) -> dict:
     return stats
 
 
-def evaluate_classifier(
-    d: BarrierData, model=None, *, rr: float = 1.0, barrier_size: float = 1.0,
-    vol_col: str | None = None, vol_window: int = 60,
-    threshold: float | None = None,
-) -> TripleBarrierResult:
-    """sl = barrier_size * vol * sqrt(H); tp = sl * rr. Label = TP hit first.
+def _prepare_barrier(
+    data,  # pd.DataFrame | BarrierData
+    *,
+    settings,
+    which: str,
+    timeout: int | None,
+    timeout_fn,
+    tp_size=None,
+    rr=None,
+    barrier_size=None,
+    threshold=None,
+    rr_window=None,
+    vol_window=None,
+    rr_col=None,
+    vol_col=None,
+    sqrt_horizon=None,
+    feature_cols=None,
+    side=None,
+    price_col=None,
+    high_col=None,
+    low_col=None,
+    train_fraction=None,
+    default_tp_size: float = 1.0,
+    default_rr_window: int = 14,
+) -> tuple[BarrierData, dict]:
+    """Shared config resolution for tb_classifier / tb_regressor.
 
-    Model trains ONLY on purged train rows, predicts test rows. Trade when
-    P(win) >= threshold (default = break-even 1/(1+rr)).
+    Precedence: explicit kwarg > evaluator settings section > triple_barrier
+    section > default. ``timeout`` resolves ONCE through ``timeout_fn`` and
+    drives the purge, ``path_ok`` and the simulation from a single number;
+    for a prebuilt BarrierData it must match ``d.horizon``. Returns
+    ``(d, resolved)`` with resolved keys tp_size, barrier_size, threshold,
+    rr_window, rr_col, sqrt_horizon (the factor handed to rr_unit).
     """
-    _check_scales(rr, barrier_size)
-    model = model if model is not None else make_pipeline(
-        StandardScaler(), LogisticRegression(max_iter=1000))
-    threshold = 1.0 / (1.0 + rr) if threshold is None else threshold
-    unit = _volatility(d, vol_col, vol_window) * np.sqrt(d.horizon) * barrier_size
-    sim = simulate_barriers(d, unit * rr, unit)
+    tb_cfg = load_settings(settings) if settings is not None else {}
+    section = dict(tb_cfg.get(which, None) or {})
+    tp_size = _first_not_none(
+        tp_size, rr, section.get("tp_size"), section.get("rr"), default=default_tp_size)
+    barrier_size = _first_not_none(barrier_size, section.get("barrier_size"), default=1.0)
+    threshold = _first_not_none(threshold, section.get("threshold"), default=None)
+    rr_window = _first_not_none(
+        rr_window, vol_window, section.get("rr_window"), section.get("vol_window"),
+        default=default_rr_window)
+    rr_col = _first_not_none(
+        rr_col, vol_col, section.get("rr_col"), section.get("vol_col"), default=None)
+    sqrt_factor = _first_not_none(sqrt_horizon, section.get("sqrt_horizon"), default=None)
+    _check_positive("tp_size", tp_size)
+    _check_positive("barrier_size", barrier_size)
+
+    raw_timeout = _first_not_none(
+        timeout, section.get("timeout"), tb_cfg.get("timeout"), tb_cfg.get("horizon"),
+        default=None)
+    if isinstance(data, BarrierData):
+        d = data
+        build_args = (feature_cols, side, price_col, high_col, low_col, train_fraction)
+        if any(v is not None for v in build_args):
+            raise ValueError(
+                "build arguments (feature_cols/side/price_col/high_col/low_col/"
+                "train_fraction) apply only when data is a DataFrame, not a "
+                "prebuilt BarrierData")
+        resolved_timeout = d.horizon if raw_timeout is None else timeout_fn(raw_timeout)
+        if resolved_timeout != d.horizon:
+            raise ValueError(
+                f"timeout {raw_timeout!r} resolves to {resolved_timeout} bars but the "
+                f"BarrierData was built with horizon={d.horizon}; the purge, path mask "
+                "and simulation would disagree -- rebuild it with that timeout")
+    else:
+        horizon = timeout_fn(raw_timeout if raw_timeout is not None else _DEFAULTS["horizon"])
+        price_col = _first_not_none(
+            price_col, tb_cfg.get("price_col"), default=_DEFAULTS["price_col"])
+        side = _first_not_none(side, tb_cfg.get("side"), default=_DEFAULTS["side"])
+        high_col = _first_not_none(
+            high_col, tb_cfg.get("high_col"), default=_DEFAULTS["high_col"])
+        low_col = _first_not_none(
+            low_col, tb_cfg.get("low_col"), default=_DEFAULTS["low_col"])
+        train_fraction = _first_not_none(
+            train_fraction, tb_cfg.get("train_fraction"), default=_DEFAULTS["train_fraction"])
+        if feature_cols is None:
+            feature_cols = resolve_feature_cols(data, price_col=price_col)
+        d = _build_barrier_data(
+            data, feature_cols, side=side, horizon=horizon, price_col=price_col,
+            high_col=high_col, low_col=low_col, train_fraction=train_fraction)
+    if sqrt_factor is None:
+        sqrt_factor = np.sqrt(d.horizon)  # per-bar unit widened to the holding path
+    return d, {
+        "tp_size": tp_size,
+        "barrier_size": barrier_size,
+        "threshold": threshold,
+        "rr_window": rr_window,
+        "rr_col": rr_col,
+        "sqrt_horizon": sqrt_factor,
+    }
+
+
+def tb_classifier(
+    data,  # pd.DataFrame | BarrierData
+    model=None,
+    *,
+    settings=None,
+    tp_size: float | None = None,
+    rr: float | None = None,  # legacy settings key for tp_size
+    barrier_size: float | None = None,
+    timeout: int | None = None,
+    threshold: float | None = None,
+    rr_window: int | None = None,
+    vol_window: int | None = None,  # legacy settings key for rr_window
+    rr_col: str | None = None,
+    vol_col: str | None = None,  # legacy settings key for rr_col
+    sqrt_horizon: float | None = None,  # None -> np.sqrt(resolved timeout)
+    rr_unit_fn=None,
+    loss_fn=None,
+    tp_fn=None,
+    timeout_fn=None,
+    model_fn=None,
+    feature_cols: list[str] | None = None,
+    side=None,
+    price_col: str | None = None,
+    high_col: str | None = None,
+    low_col: str | None = None,
+    train_fraction: float | None = None,
+) -> TripleBarrierResult:
+    """Classifier triple-barrier run: label = TP hit first; trade on P(win).
+
+    Barrier math (all delegated to ``models.py``):
+
+        U_t   = rr_unit(df, price_col, window=rr_window, vol_col=rr_col,
+                        sqrt_horizon=sqrt(timeout))   # baseline risk unit
+        sl_t  = loss_function(U_t, barrier_size)      # stop width
+        tp_t  = tp_function(sl_w, tp_size)            # 1 -> 1R, 2 -> 2R
+
+    Labels come from ``simulate_barriers`` on those widths; the model
+    trains ONLY on purged train rows and trades test rows with
+    ``P(win) >= threshold`` (default break-even ``1 / (1 + tp_size)``).
+
+    ``timeout`` (bars) resolves once through ``models.timeout_function``
+    and then drives everything consistently: the purged split distance,
+    ``path_ok`` (rows near the end cannot enter), the simulation horizon,
+    and therefore the labels.
+
+    ``data`` may be a ``pd.DataFrame`` (this function builds its own
+    ``BarrierData``; the ``feature_cols/side/price_col/...`` build
+    arguments and ``settings`` then apply) or a prebuilt ``BarrierData``
+    (build arguments must be omitted and ``timeout`` must match
+    ``d.horizon``).
+
+    Every helper default is resolved at call time: pass ``rr_unit_fn`` /
+    ``loss_fn`` / ``tp_fn`` / ``timeout_fn`` / ``model_fn`` (or monkeypatch
+    ``models.rr_unit``) to change the math per run. Settings keys accepted
+    (also by ``run_triple_barrier``): tp_size|rr, barrier_size, timeout,
+    threshold, rr_window|vol_window, rr_col|vol_col, sqrt_horizon.
+    """
+    d, cfg_res = _prepare_barrier(
+        data, settings=settings,
+        which=getattr(tb_classifier, "settings_key", "classifier"),
+        timeout=timeout,
+        timeout_fn=timeout_fn if timeout_fn is not None
+        else _barrier_models.timeout_function,
+        tp_size=tp_size, rr=rr, barrier_size=barrier_size, threshold=threshold,
+        rr_window=rr_window, vol_window=vol_window, rr_col=rr_col, vol_col=vol_col,
+        sqrt_horizon=sqrt_horizon, feature_cols=feature_cols, side=side,
+        price_col=price_col, high_col=high_col, low_col=low_col,
+        train_fraction=train_fraction,
+    )
+    tp_size = cfg_res["tp_size"]
+    barrier_size = cfg_res["barrier_size"]
+    threshold = cfg_res["threshold"]
+    threshold = 1.0 / (1.0 + tp_size) if threshold is None else threshold
+    rr_unit_fn = rr_unit_fn if rr_unit_fn is not None else _barrier_models.rr_unit
+    loss_fn = loss_fn if loss_fn is not None else _barrier_models.loss_function
+    tp_fn = tp_fn if tp_fn is not None else _barrier_models.tp_function
+    model_fn = model_fn if model_fn is not None else _barrier_models.classifier_model
+
+    unit = rr_unit_fn(
+        d.df, price_col=d.price_col, window=cfg_res["rr_window"],
+        vol_col=cfg_res["rr_col"], sqrt_horizon=cfg_res["sqrt_horizon"])
+    sl_width = loss_fn(unit, barrier_size)
+    tp_width = tp_fn(sl_width, tp_size)
+    sim = simulate_barriers(d, tp_width, sl_width)
     valid = sim["valid"].to_numpy()
     label = (sim["outcome"] == 1).astype(int).to_numpy()
     fit_rows = d.train & valid
     if len(np.unique(label[fit_rows])) < 2:
         raise ValueError("training labels contain only one class; barriers never/always hit")
+    model = model if model is not None else model_fn()
     model.fit(d.X[fit_rows], label[fit_rows])
     test_rows = d.test & valid
     prob = np.full(len(d.X), np.nan)
@@ -776,28 +954,119 @@ def evaluate_classifier(
     return TripleBarrierResult(stats, trades, model)
 
 
-def evaluate_regressor(
+def evaluate_classifier(
     d: BarrierData, model=None, *, rr: float = 1.0, barrier_size: float = 1.0,
+    vol_col: str | None = None, vol_window: int = 60,
+    threshold: float | None = None,
+    tp_size: float | None = None,
+    rr_col: str | None = None, rr_window: int | None = None,
+    timeout: int | None = None, timeout_fn=None, sqrt_horizon=None,
 ) -> TripleBarrierResult:
-    """sl = barrier_size * pred_mae; tp = barrier_size * rr * pred_mfe.
+    """Compatibility wrapper over :func:`tb_classifier` (legacy keys).
 
-    One clone per target, fitted on purged train rows only. Rows with
-    non-positive predicted widths are unscored (counted n_invalid_barriers).
+    Keeps the historical defaults and settings keys -- ``rr`` (maps to
+    tp_size; break-even threshold 1/(1+rr)) and ``vol_window`` (maps to
+    rr_window, default 60) -- so existing settings.yaml sections reproduce
+    the old math exactly: sl = vol * sqrt(H) * barrier_size, tp = sl * rr.
+    New-style keys (tp_size/rr_window/rr_col/timeout) win when present.
     """
-    _check_scales(rr, barrier_size)
-    model = model if model is not None else make_pipeline(StandardScaler(), LinearRegression())
+    return tb_classifier(
+        d, model,
+        tp_size=rr if tp_size is None else tp_size,
+        barrier_size=barrier_size,
+        rr_window=vol_window if rr_window is None else rr_window,
+        rr_col=vol_col if rr_col is None else rr_col,
+        threshold=threshold, timeout=timeout, timeout_fn=timeout_fn,
+        sqrt_horizon=sqrt_horizon,
+    )
+
+
+def tb_regressor(
+    data,  # pd.DataFrame | BarrierData
+    model=None,
+    *,
+    settings=None,
+    tp_size: float | None = None,
+    rr: float | None = None,  # legacy settings key for tp_size
+    barrier_size: float | None = None,
+    timeout: int | None = None,
+    threshold: float | None = None,  # accepted, ignored (no gating here)
+    rr_window: int | None = None,
+    vol_window: int | None = None,  # legacy settings key for rr_window
+    rr_col: str | None = None,
+    vol_col: str | None = None,  # legacy settings key for rr_col
+    sqrt_horizon: float | None = None,  # None -> np.sqrt(resolved timeout)
+    rr_unit_fn=None,
+    loss_fn=None,
+    tp_fn=None,
+    timeout_fn=None,
+    model_fn=None,
+    feature_cols: list[str] | None = None,
+    side=None,
+    price_col: str | None = None,
+    high_col: str | None = None,
+    low_col: str | None = None,
+    train_fraction: float | None = None,
+) -> TripleBarrierResult:
+    """Regressor triple-barrier run: predict MFE/MAE in RR-unit multiples.
+
+    Targets and widths (the model learns MFE_R/MAE_R = excursion / U_t):
+
+        U_t      = rr_unit(df, ...)                    # baseline risk unit
+        sl_width = loss_function(MAE_R * U_t, barrier_size)
+        tp_width = tp_function(loss_function(MFE_R * U_t, barrier_size),
+                               tp_size)                # default tp_size = 1
+
+    i.e. TP = MFE_R x U_t x barrier_size, SL = MAE_R x U_t x barrier_size;
+    realized R is measured against the trade's actual stop (1R = sl).
+    One clone of ``model`` per target, fitted on purged train rows only;
+    rows with non-finite/non-positive predicted widths are unscored
+    (counted n_invalid_barriers).
+
+    Same timeout / DataFrame-vs-BarrierData / runtime-resolution contract
+    as :func:`tb_classifier` (see there). The regressor has no gating:
+    every valid test row is a trade. Settings keys: barrier_size, timeout,
+    tp_size|rr, rr_window|vol_window, rr_col|vol_col, sqrt_horizon.
+    """
+    d, cfg_res = _prepare_barrier(
+        data, settings=settings,
+        which=getattr(tb_regressor, "settings_key", "regressor"),
+        timeout=timeout,
+        timeout_fn=timeout_fn if timeout_fn is not None
+        else _barrier_models.timeout_function,
+        tp_size=tp_size, rr=rr, barrier_size=barrier_size, threshold=threshold,
+        rr_window=rr_window, vol_window=vol_window, rr_col=rr_col, vol_col=vol_col,
+        sqrt_horizon=sqrt_horizon, feature_cols=feature_cols, side=side,
+        price_col=price_col, high_col=high_col, low_col=low_col,
+        train_fraction=train_fraction,
+    )
+    tp_size = cfg_res["tp_size"]
+    barrier_size = cfg_res["barrier_size"]
+    rr_unit_fn = rr_unit_fn if rr_unit_fn is not None else _barrier_models.rr_unit
+    loss_fn = loss_fn if loss_fn is not None else _barrier_models.loss_function
+    tp_fn = tp_fn if tp_fn is not None else _barrier_models.tp_function
+    model_fn = model_fn if model_fn is not None else _barrier_models.regressor_model
+
+    unit = rr_unit_fn(
+        d.df, price_col=d.price_col, window=cfg_res["rr_window"],
+        vol_col=cfg_res["rr_col"], sqrt_horizon=cfg_res["sqrt_horizon"])
     mfe, mae = forward_excursions(d)
-    fit_rows = d.train & np.isfinite(mfe) & np.isfinite(mae)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        mfe_r = mfe / unit  # excursions in R (multiples of the unit)
+        mae_r = mae / unit
+    fit_rows = d.train & np.isfinite(mfe_r) & np.isfinite(mae_r)
     if fit_rows.sum() < d.X.shape[1] + 2:
         raise ValueError("not enough complete training rows")
-    tp_model = clone(model).fit(d.X[fit_rows], mfe[fit_rows])
-    sl_model = clone(model).fit(d.X[fit_rows], mae[fit_rows])
+    model = model if model is not None else model_fn()
+    tp_model = clone(model).fit(d.X[fit_rows], mfe_r[fit_rows])
+    sl_model = clone(model).fit(d.X[fit_rows], mae_r[fit_rows])
     tp_width = np.full(len(d.X), np.nan)
     sl_width = np.full(len(d.X), np.nan)
     rows = d.test
     if rows.any():
-        tp_width[rows] = tp_model.predict(d.X[rows]) * barrier_size * rr
-        sl_width[rows] = sl_model.predict(d.X[rows]) * barrier_size
+        tp_width[rows] = tp_fn(
+            loss_fn(tp_model.predict(d.X[rows]) * unit[rows], barrier_size), tp_size)
+        sl_width[rows] = loss_fn(sl_model.predict(d.X[rows]) * unit[rows], barrier_size)
     sim = simulate_barriers(d, tp_width, sl_width)
     take = d.test & sim["valid"].to_numpy()
     trades = sim.loc[take].drop(columns="valid")
@@ -805,6 +1074,38 @@ def evaluate_regressor(
     return TripleBarrierResult(stats, trades, {"tp_model": tp_model, "sl_model": sl_model})
 
 
+def evaluate_regressor(
+    d: BarrierData, model=None, *, rr: float = 1.0, barrier_size: float = 1.0,
+    tp_size: float | None = None,
+    rr_col: str | None = None, rr_window: int | None = None,
+    vol_col: str | None = None, vol_window: int | None = None,
+    timeout: int | None = None, timeout_fn=None, sqrt_horizon=None,
+) -> TripleBarrierResult:
+    """Compatibility wrapper over :func:`tb_regressor` (legacy keys).
+
+    Historical behaviour trained MFE/MAE as *raw price fractions* (unit
+    U_t = 1) and scaled the predicted MFE by ``rr``:
+    sl = pred_mae * barrier_size, tp = pred_mfe * barrier_size * rr --
+    keep it whenever only legacy keys arrive (the U_t = 1 shim is applied
+    automatically). Passing a vol key (rr_window/rr_col/vol_window/vol_col)
+    opts into the new RR-unit normalisation instead.
+    """
+    kwargs = dict(
+        tp_size=rr if tp_size is None else tp_size,
+        barrier_size=barrier_size,
+        rr_window=rr_window, rr_col=rr_col,
+        timeout=timeout, timeout_fn=timeout_fn, sqrt_horizon=sqrt_horizon,
+    )
+    if rr_window is None and rr_col is None and vol_window is None and vol_col is None:
+        kwargs["rr_unit_fn"] = _barrier_models.raw_fraction_unit
+    else:
+        kwargs["rr_window"] = rr_window if rr_window is not None else vol_window
+        kwargs["rr_col"] = rr_col if rr_col is not None else vol_col
+    return tb_regressor(d, model, **kwargs)
+
+
+tb_classifier.settings_key = "classifier"
+tb_regressor.settings_key = "regressor"
 evaluate_classifier.settings_key = "classifier"
 evaluate_regressor.settings_key = "regressor"
 
@@ -835,43 +1136,24 @@ def load_settings(settings=None) -> dict:
     return dict(section or {})
 
 
-def run_triple_barrier(
+def _build_barrier_data(
     df: pd.DataFrame,
-    feature_cols: list[str] | None = None,
-    evaluator: Callable[..., TripleBarrierResult] = evaluate_classifier,
-    model=None,
+    feature_cols: list[str],
     *,
-    settings=None,
-    side=None,
-    horizon: int | None = None,
-    price_col: str | None = None,
-    high_col: str | None = None,
-    low_col: str | None = None,
-    train_fraction: float | None = None,
-    **evaluator_kwargs,
-) -> TripleBarrierResult:
-    """Run a triple-barrier evaluation. feature_cols=None auto-picks (everything useful).
+    side,
+    horizon: int,
+    price_col: str,
+    high_col: str | None,
+    low_col: str | None,
+    train_fraction: float,
+) -> BarrierData:
+    """Validate the frame and build the purged BarrierData (shared).
 
-    df: time-ordered frame, oldest first. Barriers at close[i], path from i+1,
-    stop wins ties. Train rows purged (split - horizon); no train label sees test.
-    feature_cols: explicit list = truth; None = resolve_feature_cols(df).
-    Only the resolved cols reach the model; price/flags/future_/raw__ never do.
+    Verbatim construction extracted from run_triple_barrier: missing-column
+    and split checks, the path mask (row i may enter only while i+horizon < n
+    and the path is clean), the chronological purge (train rows end
+    ``horizon`` bars before the split) and the causal feature matrix.
     """
-    cfg = load_settings(settings)
-
-    def pick(name, value):
-        return value if value is not None else cfg.get(name, _DEFAULTS[name])
-
-    side = pick("side", side)
-    horizon = pick("horizon", horizon)
-    price_col = pick("price_col", price_col)
-    high_col = pick("high_col", high_col)
-    low_col = pick("low_col", low_col)
-    train_fraction = pick("train_fraction", train_fraction)
-    section = dict(cfg.get(getattr(evaluator, "settings_key", ""), None) or {})
-    params = {**section, **evaluator_kwargs}
-    if feature_cols is None:
-        feature_cols = resolve_feature_cols(df, price_col=price_col)
     required = [*feature_cols, price_col, high_col, low_col,
                 side if isinstance(side, str) else None]
     missing = [c for c in required if c is not None and c not in df.columns]
@@ -897,13 +1179,70 @@ def run_triple_barrier(
     bad_cum = np.concatenate([[0], np.cumsum(bad)])
     path_ok = (idx + horizon < n) & ((bad_cum[np.minimum(idx + horizon + 1, n)] - bad_cum[idx + 1]) == 0)
     split = int(n * train_fraction)
-    train_idx = np.flatnonzero((idx < split - horizon) & event)
-    X, kept = _causal_feature_matrix(df, list(feature_cols), train_idx)
-    d = BarrierData(
+    train = (idx < split - horizon) & event
+    X, kept = _causal_feature_matrix(df, list(feature_cols), np.flatnonzero(train))
+    return BarrierData(
         df=df, X=X, kept_cols=kept, price=price, high=high, low=low,
         side=side_arr, horizon=horizon, path_ok=path_ok,
-        train=(idx < split - horizon) & event,
+        train=train,
         test=(idx >= split) & event & path_ok,
+        price_col=price_col,
+    )
+
+
+def run_triple_barrier(
+    df: pd.DataFrame,
+    feature_cols: list[str] | None = None,
+    evaluator: Callable[..., TripleBarrierResult] = evaluate_classifier,
+    model=None,
+    *,
+    settings=None,
+    side=None,
+    horizon: int | None = None,
+    price_col: str | None = None,
+    high_col: str | None = None,
+    low_col: str | None = None,
+    train_fraction: float | None = None,
+    **evaluator_kwargs,
+) -> TripleBarrierResult:
+    """Run a triple-barrier evaluation. feature_cols=None auto-picks (everything useful).
+
+    df: time-ordered frame, oldest first. Barriers at close[i], path from i+1,
+    stop wins ties. Train rows purged (split - horizon); no train label sees test.
+    feature_cols: explicit list = truth; None = resolve_feature_cols(df).
+    Only the resolved cols reach the model; price/flags/future_/raw__ never do.
+
+    If the evaluator section (or evaluator_kwargs) carries a ``timeout``
+    (bars), it wins over the shared ``horizon``: the single resolved value
+    is applied to the purge, the path mask and the simulation alike (it is
+    resolved through the evaluator's ``timeout_fn`` when supplied, else
+    models.timeout_function).
+    """
+    cfg = load_settings(settings)
+
+    def pick(name, value):
+        return value if value is not None else cfg.get(name, _DEFAULTS[name])
+
+    side = pick("side", side)
+    horizon = pick("horizon", horizon)
+    price_col = pick("price_col", price_col)
+    high_col = pick("high_col", high_col)
+    low_col = pick("low_col", low_col)
+    train_fraction = pick("train_fraction", train_fraction)
+    section = dict(cfg.get(getattr(evaluator, "settings_key", ""), None) or {})
+    params = {**section, **evaluator_kwargs}
+    # One timeout, one horizon: resolve it BEFORE the BarrierData exists so
+    # purge and path_ok can never drift from the simulation.
+    if params.get("timeout") is not None:
+        timeout_fn = params.get("timeout_fn")
+        if timeout_fn is None:
+            timeout_fn = _barrier_models.timeout_function  # resolved at call time
+        horizon = timeout_fn(params["timeout"])
+    if feature_cols is None:
+        feature_cols = resolve_feature_cols(df, price_col=price_col)
+    d = _build_barrier_data(
+        df, feature_cols, side=side, horizon=horizon, price_col=price_col,
+        high_col=high_col, low_col=low_col, train_fraction=train_fraction,
     )
     return evaluator(d, model, **params)
 
