@@ -40,6 +40,7 @@ ood:                       # causal temporal regime discovery
     epochs: 10
     embedding_dim: 16
     num_codes: 64          # vq-vae only
+    device: cuda
   sequence_window: 32
   embedding_bins: 8        # only used by temporal_window
   normalization_window: 500
@@ -152,34 +153,54 @@ outcome:
       - 4min
       - 5min
 
-  triple_barrier:
-    mode: fixed           # fixed, dynamic, or predicted; all modes are available
-    signal_col: htf_rsi_d2_signal
-    price_col: price_close
-    horizon_bars: 30      # row horizon; alternatively set horizon to a duration or horizon_col per event
-    horizon: null         # e.g. 10s; uses first observation at/after entry time + duration
-    horizon_col: null     # optional per-event positive bar count or duration column
-    timestamp_col: null   # optional timestamp column; DatetimeIndex is used when null
-    bid_col: null         # set bid_col + ask_col to use ask-entry/bid-exit for longs, inverse for shorts
-    ask_col: null
-    fee_bps_per_side: 0.0 # one-way fee charged on entry and exit; spread is represented by bid/ask
-    high_col: null        # set both high_col and low_col to use OHLC touch checks
-    low_col: null
-    drop_incomplete: true # omit events too close to end of data
-    fixed:
-      pt: 0.005           # 0.5% profit target
-      sl: 0.003           # 0.3% stop loss
-    dynamic:
-      volatility_col: null # null -> rolling std of simple bar returns
-      volatility_lookback: 60
-      volatility_min_periods: 20
-      pt_sigma: 2.0
-      sl_sigma: 1.0
-    predicted:
-      predicted_mfe_col: predicted_mfe # causal out-of-sample predicted favorable excursion
-      predicted_mae_col: predicted_mae # causal out-of-sample signed adverse excursion
-      pt_scale: 1.0
-      sl_scale: 1.0
+  outcome:
+    forward_returns:        # regression targets; labels stay out of live features
+      price_col: price_close
+      timestamp_col: null
+      max_lag: null          # default permits at most one extra horizon of observation-time overshoot
+      excursions:
+        enabled: true        # build side-specific MFE/MAE labels for GP and barrier research
+        high_col: null       # optional raw bar high; null uses observed price_close path
+        low_col: null        # optional raw bar low; null uses observed price_close path
+      horizons:             # first observation at/after each clock-time horizon
+        - 1s
+        - 5s
+        - 10s
+        - 20s
+        - 40s
+        - 60s
+        - 2min
+        - 3min
+        - 4min
+        - 5min
+
+    triple_barrier:
+      # ---- shared by both evaluators --------------------------------------
+      side: htf_rsi_d2_signal  # +1 / -1 / 0 column (0 = no event), or a plain 1 / -1 for always-long / always-short
+      price_col: price_close
+      high_col: null           # set BOTH high_col and low_col to use OHLC touch checks;
+      low_col: null            #   null = touches are judged on price_close only
+      horizon: 30              # timeout in bars
+      train_fraction: 0.70     # chronological split; train labels are purged `horizon` bars before it
+
+      # ---- evaluate_classifier --------------------------------------------
+      # Model predicts P(TP hit first). Barriers come from volatility:
+      #   unit = rolling_vol * sqrt(horizon) * barrier_size
+      #   sl = unit        tp = unit * rr
+      classifier:
+        rr: 1.0              # multiplies TP only. 1 = TP equals SL, 2 = TP is twice the stop
+        barrier_size: 1.0    # multiplies BOTH TP and SL. 1 = 1x the volatility measure
+        vol_col: null        # null -> rolling std of simple bar returns
+        vol_window: 60
+        threshold: null      # null -> break-even probability 1 / (1 + rr)
+
+      # ---- evaluate_regressor ---------------------------------------------
+      # Model predicts forward MFE and MAE (side-adjusted). They set the barriers:
+      #   sl = predicted_mae * barrier_size
+      #   tp = predicted_mfe * barrier_size * rr
+      regressor:
+        rr: 1.0              # multiplies the model's predicted MFE:MAE asymmetry. 2 = double it
+        barrier_size: 1.0    # widens BOTH predicted MFE and MAE
 
   model:                   # per-state linreg -> metalabel (outcomes.run_outcomes);
                            # linreg targets reuse forward_returns.horizons

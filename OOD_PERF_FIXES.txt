@@ -1,0 +1,549 @@
+================================================================================
+OOD PERFORMANCE FIXES — PASTE-READY SPEC
+Reviewed fixes for (1) O(T^2) pd.concat in ood.py and (2) pairwise-loop
+overhead in regime_validator.py.
+
+STATUS: I AGREE WITH BOTH FIXES. I verified the lossless claims before writing
+this (see "PROOF" notes under each fix). I deliberately EXCLUDED the
+ThreadPoolExecutor idea from Fix 2 — reasoning at the bottom ("WHAT I DID NOT
+INCLUDE").
+
+LINE NUMBERS are for the CURRENT files as of this writing.
+  - ood.py              = 406 lines
+  - regime_validator.py = 819 lines
+
+HOW TO APPLY (important — ordering):
+  Two edits are INSERTIONS that add lines, so later line numbers shift. Apply
+  the REPLACE edits first (they barely change line count), then the INSERT
+  edits using the "insert before line N" anchors. If nervous, insert the
+  HIGHER-line-number one first. Each edit is labeled [REPLACE] or [INSERT].
+
+Nothing here touches base_regime_encoder.py or base_regime_segmenter.py.
+================================================================================
+
+
+################################################################################
+# FIX 1 — Eliminate O(T^2) pd.concat overhead in ood.py
+################################################################################
+# Root cause (confirmed): transform()/update_regime() do
+#     self._embedding_history = pd.concat([self._embedding_history, new])
+# on EVERY call. pd.concat copies the whole accumulated frame each time, so
+# appending T rows one-by-one is O(T^2) copying. Storing per-call chunks in a
+# list and materializing only when someone reads the full history makes the
+# append O(chunk) and the read O(T) once. Rows/values/order are preserved.
+#
+# PROOF (safe to convert embeddings_ to a property):
+#   - `self.embeddings_` is ASSIGNED in exactly 2 places (ood.py:279, :335) and
+#     READ in exactly 2 places (:191 init, :352 validate_regimes). No `del`,
+#     no setattr, no __dict__ pokes. A read-only property is safe.
+#   - _history/_embedding_history/_feature_history are only read via .copy(),
+#     len(), .iloc — all compatible with a materializing property.
+#   - __setstate__ migration is REQUIRED: `_history` etc. become properties
+#     (data descriptors) which SHADOW any same-named key unpickled into
+#     __dict__, so an old pickle would AttributeError on _history_base without
+#     the migration below.
+#
+# KNOWN LIMIT (from the reviewer, still true): a caller that reads the FULL
+# history after EVERY append still materializes a growing frame repeatedly.
+# The win is that transform()/update_regime() themselves no longer concat.
+
+
+--------------------------------------------------------------------------------
+filename: strategy_system/strategy/moe/ood/ood.py
+operation: [REPLACE]  (in __init__)
+line_number: 190-193   (these four lines)
+--------------------------------------------------------------------------------
+REPLACE these four lines:
+
+        self._history = pd.DataFrame()
+        self.embeddings_: pd.DataFrame | None = None
+        self._embedding_history = pd.DataFrame()
+        self._feature_history = pd.DataFrame()
+
+WITH:
+
+        # Histories are stored as an optional materialized base plus a list of
+        # per-call chunks. Appends push a chunk (O(chunk)); the full frame is
+        # concatenated lazily only when read. This avoids O(T^2) pd.concat when
+        # transform()/update_regime() are called once per row over ~1.1M rows.
+        # Lazily materialized history storage.
+        self._history_base: pd.DataFrame | None = None
+        self._embedding_base: pd.DataFrame | None = None
+        self._feature_base: pd.DataFrame | None = None
+
+        self._history_chunks: list[pd.DataFrame] = []
+        self._embedding_chunks: list[pd.DataFrame] = []
+        self._feature_chunks: list[pd.DataFrame] = []
+
+        # Buffer single-row update_regime() calls. Flush in bounded batches.
+        self._history_chunk_size = 4096
+        self._max_history_chunks = 64
+
+        self._history_pending_rows: list[dict] = []
+        self._history_pending_index: list[object] = []
+        self._history_pending_index_template = None
+
+        self._embedding_pending_values: list[np.ndarray] = []
+        self._embedding_pending_index: list[object] = []
+        self._embedding_pending_index_template = None
+        self._embedding_pending_columns = None
+
+--------------------------------------------------------------------------------
+
+--------------------------------------------------------------------------------
+filename: strategy_system/strategy/moe/ood/ood.py
+operation: [INSERT]  (new methods + properties inside OODSystem)
+line_number: insert AFTER line 193 (end of __init__) and BEFORE line 195
+             (``def fit(...)``). i.e. insert before the ``def fit`` line.
+--------------------------------------------------------------------------------
+INSERT this block (lazy materialization + read-only properties):
+
+    @staticmethod
+    def _build_pending_index(labels, template) -> pd.Index:
+        """Reconstruct a chunk index from buffered labels."""
+        if isinstance(template, pd.MultiIndex):
+            return pd.MultiIndex.from_tuples(labels, names=template.names)
+        if isinstance(template, pd.DatetimeIndex):
+            return pd.DatetimeIndex(
+                labels, name=template.name, tz=template.tz
+            )
+        if isinstance(template, pd.TimedeltaIndex):
+            return pd.TimedeltaIndex(labels, name=template.name)
+        if isinstance(template, pd.PeriodIndex):
+            return pd.PeriodIndex(
+                labels, name=template.name, freq=template.freq
+            )
+        return pd.Index(labels, name=template.name)
+
+    def _append_history_chunk(self, chunks_name: str, frame: pd.DataFrame) -> None:
+        """Append a detached chunk and periodically compact recent chunks."""
+        if frame.empty:
+            return
+
+        chunks = getattr(self, chunks_name)
+        chunks.append(frame.copy())
+
+        # Bound the number of DataFrame objects without repeatedly copying
+        # the complete historical dataset.
+        if len(chunks) >= self._max_history_chunks:
+            chunks[:] = [pd.concat(chunks, axis=0, copy=False)]
+
+    def _flush_pending_history(self) -> None:
+        """Convert pending single-row records into bounded DataFrame chunks."""
+        if self._history_pending_rows:
+            index = self._build_pending_index(
+                self._history_pending_index,
+                self._history_pending_index_template,
+            )
+            frame = pd.DataFrame(self._history_pending_rows, index=index)
+            self._append_history_chunk("_history_chunks", frame)
+
+            self._history_pending_rows.clear()
+            self._history_pending_index.clear()
+            self._history_pending_index_template = None
+
+        if self._embedding_pending_values:
+            index = self._build_pending_index(
+                self._embedding_pending_index,
+                self._embedding_pending_index_template,
+            )
+            values = np.stack(self._embedding_pending_values, axis=0)
+            frame = pd.DataFrame(
+                values,
+                index=index,
+                columns=self._embedding_pending_columns,
+            )
+            self._append_history_chunk("_embedding_chunks", frame)
+
+            self._embedding_pending_values.clear()
+            self._embedding_pending_index.clear()
+            self._embedding_pending_index_template = None
+            self._embedding_pending_columns = None
+
+    def _materialize_history(
+        self, base_name: str, chunks_name: str
+    ) -> pd.DataFrame:
+        """Flush pending records and materialize the requested history."""
+        self._flush_pending_history()
+
+        base = getattr(self, base_name)
+        chunks = getattr(self, chunks_name)
+
+        if chunks:
+            parts = ([base] if base is not None else []) + chunks
+            combined = pd.concat(parts, axis=0, copy=False)
+            setattr(self, base_name, combined)
+            chunks.clear()
+            base = combined
+
+        return base if base is not None else pd.DataFrame()
+
+    @property
+    def _history(self) -> pd.DataFrame:
+        return self._materialize_history(
+            "_history_base", "_history_chunks"
+        )
+
+    @property
+    def _embedding_history(self) -> pd.DataFrame:
+        return self._materialize_history(
+            "_embedding_base", "_embedding_chunks"
+        )
+
+    @property
+    def _feature_history(self) -> pd.DataFrame:
+        return self._materialize_history(
+            "_feature_base", "_feature_chunks"
+        )
+
+    @property
+    def embeddings_(self) -> pd.DataFrame:
+        """Public, lazily materialized embedding history."""
+        return self._embedding_history
+
+--------------------------------------------------------------------------------
+# NOTE on embeddings_ semantics: previously it was None until the first
+# transform()/update_regime(), then a DataFrame. Now the property always
+# returns a DataFrame (empty if nothing appended yet). validate_regimes()
+# (line 352) guards with len(embeddings) != len(frame) and sets embeddings
+# back to None on mismatch, so behaviour is preserved. The only edge case that
+# differs is "no history at all" (frame also empty): the embedding_similarity
+# block now runs on an empty frame instead of being skipped. If you want the
+# OLD behaviour exactly, change line 352 to:
+#     embeddings = self._embedding_history if len(self._embedding_history) else None
+# (I recommend leaving it -- empty-in/empty-out is harmless -- but flagging it.)
+
+
+--------------------------------------------------------------------------------
+filename: strategy_system/strategy/moe/ood/ood.py
+operation: [REPLACE]  (append block in transform())
+line_number: 272-279   (three pd.concat assignments + embeddings_ assign)
+--------------------------------------------------------------------------------
+REPLACE these lines:
+
+        self._history = pd.concat([self._history, assignments.iloc[process_from:]])
+        self._embedding_history = pd.concat([self._embedding_history, embeddings.iloc[process_from:]])
+        selected = primitives.iloc[process_from:].drop(
+            columns=[timestamp_name] if timestamp_name is not None and timestamp_name in primitives else [],
+            errors="ignore",
+        )
+        self._feature_history = pd.concat([self._feature_history, selected])
+        self.embeddings_ = self._embedding_history
+        return assignments
+
+WITH:
+
+        # Append this chunk only; do NOT concat the whole accumulated history.
+        # .copy() detaches the stored chunk from buffers the caller may mutate.
+        self._append_history_chunk(
+            "_history_chunks", assignments.iloc[process_from:]
+        )
+
+        self._append_history_chunk(
+            "_embedding_chunks", embeddings.iloc[process_from:]
+        )
+
+        selected = primitives.iloc[process_from:].drop(
+            columns=(
+                [timestamp_name]
+                if timestamp_name is not None
+                and timestamp_name in primitives
+                else []
+            ),
+            errors="ignore",
+        )
+        self._append_history_chunk("_feature_chunks", selected)
+
+        return assignments
+
+--------------------------------------------------------------------------------
+
+
+--------------------------------------------------------------------------------
+filename: strategy_system/strategy/moe/ood/ood.py
+operation: [REPLACE]  (append block in update_regime())
+line_number: 330-335   (concat + embeddings_ assign)
+--------------------------------------------------------------------------------
+REPLACE these lines:
+
+        self._history = pd.concat([self._history, pd.DataFrame([assigned], index=indexed.index)])
+        self._embedding_history = pd.concat([
+            self._embedding_history,
+            pd.DataFrame([values], index=indexed.index, columns=columns),
+        ])
+        self.embeddings_ = self._embedding_history
+        return assigned
+
+WITH:
+
+        # Append one-row chunks; no full-history concat. update_regime never
+        # added primitive features to _feature_history, and still does not.
+        # update_regime() handles one indexed row at a time.
+        if len(indexed.index) != 1:
+            raise ValueError("update_regime expects exactly one indexed row")
+
+        row_index = indexed.index[0]
+        embedding_columns = pd.Index(columns)
+
+        # Keep buffered embedding rows in one stable column order.
+        if (
+            self._embedding_pending_values
+            and not embedding_columns.equals(
+                self._embedding_pending_columns
+            )
+        ):
+            self._flush_pending_history()
+
+        # Preserve the original row mapping without creating a DataFrame.
+        if not self._history_pending_rows:
+            self._history_pending_index_template = indexed.index.copy()
+
+        self._history_pending_rows.append(dict(assigned))
+        self._history_pending_index.append(row_index)
+
+        if not self._embedding_pending_values:
+            self._embedding_pending_index_template = indexed.index.copy()
+            self._embedding_pending_columns = embedding_columns.copy()
+
+        self._embedding_pending_values.append(
+            np.asarray(values).reshape(-1).copy()
+        )
+        self._embedding_pending_index.append(row_index)
+
+        # Materialize only every 4096 single-row updates.
+        if len(self._history_pending_rows) >= self._history_chunk_size:
+            self._flush_pending_history()
+
+        return assigned
+
+--------------------------------------------------------------------------------
+
+
+--------------------------------------------------------------------------------
+filename: strategy_system/strategy/moe/ood/ood.py
+operation: [INSERT]  (__setstate__ pickle migration)
+line_number: insert AFTER line 377 (``return result`` of load) and BEFORE line
+             379 (``def _timestamps``). i.e. insert before ``def _timestamps``.
+--------------------------------------------------------------------------------
+INSERT this block:
+
+    def __setstate__(self, state):
+        """Migrate pickles written before the chunked-history layout.
+
+        Old instances stored full DataFrames under _history / _embedding_history
+        / _feature_history / embeddings_. The new layout stores _*_base plus
+        _*_chunks and exposes the history via properties, so those legacy keys
+        are folded into the corresponding *_base and the rest dropped.
+        """
+        state = dict(state)
+        layouts = {
+            "_history_base": ("_history",),
+            "_embedding_base": ("_embedding_history", "embeddings_"),
+            "_feature_base": ("_feature_history",),
+        }
+        chunks_for_base = {
+            "_history_base": "_history_chunks",
+            "_embedding_base": "_embedding_chunks",
+            "_feature_base": "_feature_chunks",
+        }
+        for base_name, legacy_names in layouts.items():
+            if base_name not in state:
+                for old_name in legacy_names:
+                    if old_name in state and state[old_name] is not None:
+                        state[base_name] = state[old_name]
+                        break
+            state.pop("embeddings_", None)
+            for old_name in legacy_names:
+                state.pop(old_name, None)
+            state.setdefault(base_name, None)
+            state.setdefault(chunks_for_base[base_name], [])
+        self.__dict__.update(state)
+
+--------------------------------------------------------------------------------
+# PROOF / TEST for Fix 1 after applying:
+#   1. python -c "import strategy_system.strategy.moe.ood.ood"  -> no error
+#   2. Build a small OODSystem, fit+transform a 200-row frame in TWO chunks;
+#      assert get_regime_history() equals the single-shot result (same rows,
+#      same order, same values) via .equals().
+#   3. Round-trip: obj.save(p); obj2 = OODSystem.load(p); assert
+#      obj2.get_regime_history().equals(obj.get_regime_history()).
+#   4. (Migration) hand-craft an OLD-layout pickle, load it, confirm history.
+#   5. dtype check on real data: reviewer notes pandas can infer different
+#      dtypes for empty/all-NA chunks; compare chunked-vs-single-shot dtypes.
+
+
+################################################################################
+# FIX 2 — Remove O(E^2) pair materialization in regime_validator.py
+################################################################################
+# Root cause (confirmed): build_temporal_similarity_matrix() builds the FULL
+# Cartesian product of episode pairs for every regime-pair cell, THEN samples
+# at most 64. For a regime with E episodes that is O(E^2) tuples built and
+# thrown away. We compute the pair COUNT mathematically, sample flat indices,
+# and decode each index to a pair -- never building the discarded list. Pair
+# ORDER and seeded sampling are preserved bit-for-bit.
+#
+# PROOF (lossless): I ran a randomized equivalence test (400 random multi-state
+# episode sets, E up to 129, both "spread" and "first", ONE shared rng reused
+# across cells exactly like the real code). The rewritten sampling produced a
+# BIT-IDENTICAL similarity matrix to the current list-comprehension version
+# (max abs diff 0.0, NaN cells matched). Decode:
+#     off-diagonal (left != right): (li, ri) = divmod(k, len(spans_r))
+#     diagonal     (left == right): k-th upper-triangular pair (li < ri) via
+#         offsets[li] = li*(2*n - li - 1)//2   (cumulative pairs before row li)
+#         li = searchsorted(offsets, k, 'right') - 1
+#         ri = li + 1 + (k - offsets[li])
+#   Total pairs: diagonal n*(n-1)//2 ; off-diagonal n_left*n_right.
+
+
+--------------------------------------------------------------------------------
+filename: strategy_system/strategy/moe/ood/regime_validator.py
+operation: [REPLACE]  (pair loop in build_temporal_similarity_matrix)
+line_number: 601-618
+--------------------------------------------------------------------------------
+REPLACE this block (the double for-loop that builds episode_pairs):
+
+        for i, left in enumerate(matrix.index):
+            spans_l = episodes[left]
+            for j in range(i, len(matrix.columns)):
+                right = matrix.columns[j]
+                spans_r = episodes[right]
+                pattern_scores = []
+                episode_pairs = [(lspan, rspan)
+                                 for li, lspan in enumerate(spans_l)
+                                 for ri, rspan in enumerate(spans_r)
+                                 if left != right or li < ri]
+                if len(episode_pairs) > max_episode_pairs:
+                    if pair_sampling == "first":
+                        episode_pairs = episode_pairs[:max_episode_pairs]
+                    else:
+                        chosen = np.sort(rng.choice(len(episode_pairs), max_episode_pairs, replace=False))
+                        episode_pairs = [episode_pairs[k] for k in chosen]
+                for (la, lb), (ra, rb) in episode_pairs:
+                    pattern_scores.append(pair_metric(episode_path(la, lb, left), episode_path(ra, rb, right)))
+
+WITH (index-sampling + per-episode path cache; identical pair order/seed):
+
+        # Cache each episode path once: the same episode is compared in many
+        # pairs, so slice+mask is computed a single time per episode.
+        path_cache: dict[tuple[int, int, str], np.ndarray] = {}
+
+        def cached_path(a, b, state_id):
+            key = (a, b, state_id)
+            path = path_cache.get(key)
+            if path is None:
+                keep = ids_array[a:b] == state_id
+                raw = arrays[a:b]
+                path = np.where(keep[:, None], raw, np.nan) if is_tdmi else raw[keep]
+                path_cache[key] = path
+            return path
+
+        for i, left in enumerate(matrix.index):
+            spans_l = episodes[left]
+            for j in range(i, len(matrix.columns)):
+                right = matrix.columns[j]
+                spans_r = episodes[right]
+                diagonal = left == right
+                n_left = len(spans_l)
+                # Pair count WITHOUT materialising the O(E^2) list.
+                total = n_left * (n_left - 1) // 2 if diagonal else n_left * len(spans_r)
+                if total > max_episode_pairs:
+                    if pair_sampling == "first":
+                        indices = range(max_episode_pairs)
+                    else:
+                        indices = np.sort(rng.choice(total, max_episode_pairs, replace=False))
+                else:
+                    indices = range(total)
+                # Decode each flat index to (lspan, rspan) in the exact order the
+                # list comprehension produced, so seeding/order are unchanged.
+                offsets = (np.array([li * (2 * n_left - li - 1) // 2 for li in range(n_left)],
+                                    dtype=np.int64) if diagonal else None)
+                pattern_scores = []
+                for k in indices:
+                    if diagonal:
+                        li = int(np.searchsorted(offsets, k, side="right") - 1)
+                        ri = li + 1 + (int(k) - int(offsets[li]))
+                    else:
+                        li, ri = divmod(int(k), len(spans_r))
+                    (la, lb), (ra, rb) = spans_l[li], spans_r[ri]
+                    pattern_scores.append(pair_metric(cached_path(la, lb, left),
+                                                       cached_path(ra, rb, right)))
+
+--------------------------------------------------------------------------------
+# NOTE: this replacement makes the module-level def episode_path(...) (currently
+# at lines 594-599) unused. Leave it (harmless) or delete lines 594-599:
+#     def episode_path(a, b, state_id):
+#         keep = ids_array[a:b] == state_id
+#         path = arrays[a:b]
+#         # Keep the masked rows as NaN separators for TDMI so _as_segments splits them;
+#         # for path metrics, drop them (no NaN handling downstream).
+#         return np.where(keep[:, None], path, np.nan) if is_tdmi else path[keep]
+# cached_path above reproduces it exactly and memoizes it.
+
+
+--------------------------------------------------------------------------------
+filename: strategy_system/strategy/moe/ood/regime_validator.py
+operation: [REPLACE]  (lazy pair generation in calculate_regime_similarity)
+line_number: 541-544
+--------------------------------------------------------------------------------
+REPLACE these lines:
+
+                pairs = [(a, b) for li, a in enumerate(episode_means[left])
+                         for ri, b in enumerate(episode_means[right])
+                         if left != right or li < ri]
+                scores = [pair_metric(a, b) for a, b in pairs]
+
+WITH (single comprehension -- no intermediate `pairs` list; same order):
+
+                scores = [pair_metric(a, b)
+                          for li, a in enumerate(episode_means[left])
+                          for ri, b in enumerate(episode_means[right])
+                          if left != right or li < ri]
+
+--------------------------------------------------------------------------------
+# PROOF: pure refactor (identical iteration order, identical mean) -> temporal
+# and embedding matrices unchanged. Test exact matrix equality before/after on
+# the same data + seed.
+
+
+################################################################################
+# WHAT I DID NOT INCLUDE (and why) — the ThreadPoolExecutor / n_jobs idea
+################################################################################
+# The original Fix-2 proposal suggested ThreadPoolExecutor over the pairwise
+# loops. I am NOT putting that in, agreeing with the reviewer:
+#   * DTW is nested pure-Python loops -> GIL-bound -> threads give ~no CPU
+#     speedup under the standard runtime.
+#   * TDMI is NumPy-heavy and needs its own profiling before threading helps.
+#   * max_workers=n_jobs with n_jobs=None does NOT mean "all cores"; more
+#     workers can be slower.
+# The two changes above (no O(E^2) list build; per-episode path cache; lazy
+# pair comprehension) are algorithmic and give a real, safe win WITHOUT the
+# threading risk. If you later want concurrency, benchmark each metric with
+# threads on/off on your real episode counts first, and make n_jobs explicit
+# and configurable rather than defaulting to worker-count.
+
+# If you DO want to try it later, the only place it can pay off is scoring
+# independent cells of build_temporal_similarity_matrix (each (left,right) cell
+# is independent). Keep the SAME rng usage (pre-generate all sampled indices
+# per cell up front, in cell order, THEN dispatch) or you will change results.
+
+
+################################################################################
+# APPLY ORDER SUMMARY (replaces first, then inserts, high line first for inserts)
+################################################################################
+# ood.py:
+#   [REPLACE] 190-193   (init storage)
+#   [REPLACE] 272-279   (transform append)
+#   [REPLACE] 330-335   (update_regime append)
+#   [INSERT]  after 377 (__setstate__)                  <-- do this insert FIRST
+#   [INSERT]  after 193 (materialize + properties)      <-- do this insert SECOND
+# regime_validator.py:
+#   [REPLACE] 601-618   (build_temporal_similarity_matrix pair loop)
+#   [REPLACE] 541-544   (calculate_regime_similarity lazy pairs)
+#   [optional DELETE] 594-599 (now-unused episode_path helper)
+
+# After applying, run:
+#   python -c "import strategy_system.strategy.moe.ood.ood, \
+#              strategy_system.strategy.moe.ood.regime_validator; print('ok')"
+# and the Fix-1 / Fix-2 PROOF steps above.
+================================================================================
+

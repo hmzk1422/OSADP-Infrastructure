@@ -43,7 +43,8 @@ class RegimeValidator:
             return _metrics.pearson_similarity
         raise ValueError(f"unsupported feature_similarity metric: {name}")
 
-    def _temporal_metric(self):
+    def _temporal_metric(self, tdmi_kwargs: dict | None = None):
+        """Resolve the temporal metric; pass fixed TDMI settings through consistently."""
         name = self.metrics["temporal_pattern_similarity"]
         if name == "resampled":
             return self.calculate_temporal_similarity
@@ -51,6 +52,12 @@ class RegimeValidator:
             return _metrics.dtw_similarity
         elif name == "flattened_cosine":
             return _metrics.flattened_cosine_similarity
+        elif name == "tdmi":
+            options = dict(tdmi_kwargs or {})
+            allowed = {"max_lag", "bins", "min_pairs", "n_surrogates", "seed", "floor"}
+            options = {key: value for key, value in options.items()
+                       if key in allowed and value is not None}
+            return _metrics.make_tdmi_similarity(**options)
         raise ValueError(f"unsupported temporal_pattern_similarity metric: {name}")
 
     def _duration_metric(self):
@@ -129,29 +136,302 @@ class RegimeValidator:
         return self.calculate_embedding_similarity(left, right)
 
     def _episodes(self, labels: Sequence[str], include_null: bool = False) -> dict[str, list[tuple[int, int]]]:
-        ids = list(map(str, labels))
-        runs: list[tuple[str, int, int]] = []
-        start = 0
-        while start < len(ids):
-            end = start + 1
-            while end < len(ids) and ids[end] == ids[start]:
-                end += 1
-            runs.append((ids[start], start, end))
-            start = end
+        """Vectorized episode run extractor using NumPy."""
+        arr = np.asarray(labels, dtype=str)
+        if arr.size == 0:
+            return {}
+        
+        # Find continuous run boundaries instantly via vectorization
+        change = np.flatnonzero(arr[:-1] != arr[1:])
+        starts = np.concatenate([[0], change + 1])
+        ends = np.concatenate([change + 1, [len(arr)]])
+        run_states = arr[starts]
+        
         episodes: dict[str, list[tuple[int, int]]] = {}
-        for state_id, start, end in runs:
+        for state_id, start, end in zip(run_states, starts, ends):
             if state_id == self.null_id and not include_null:
                 continue
             spans = episodes.setdefault(state_id, [])
-            if spans:
+            if spans and self.episode_gap_tolerance > 0:
                 previous_start, previous_end = spans[-1]
                 gap = start - previous_end
                 if (gap <= self.episode_gap_tolerance
-                        and all(value == self.null_id for value in ids[previous_end:start])):
+                        and np.all(arr[previous_end:start] == self.null_id)):
                     spans[-1] = (previous_start, end)
                     continue
-            spans.append((start, end))
+            spans.append((int(start), int(end)))
         return episodes
+    
+    @staticmethod
+    def _contiguous_runs(ids: np.ndarray, state_id: str, start: int, end: int) -> list[tuple[int, int]]:
+        """Maximal runs of ``state_id`` inside ``[start, end)``; null gaps are never bridged."""
+        mask = (ids[start:end] == state_id).astype(np.int8)
+        edges = np.flatnonzero(np.diff(np.concatenate([[0], mask, [0]])))
+        return [(start + a, start + b) for a, b in zip(edges[::2], edges[1::2])]
+
+    @staticmethod
+    def _check_alignment(labels, values) -> None:
+        """Refuse inputs whose pandas indexes disagree (equal length is not alignment).
+
+        A default ``RangeIndex`` on exactly one side is treated as "positional" and passes.
+        """
+        pandas_types = (pd.Series, pd.DataFrame)
+        if not (isinstance(labels, pandas_types) and isinstance(values, pandas_types)):
+            return
+        left, right = labels.index, values.index
+        if left.equals(right):
+            return
+        if isinstance(left, pd.RangeIndex) != isinstance(right, pd.RangeIndex):
+            return
+        raise ValueError("labels and values have different indexes; align them before validating")
+
+    @staticmethod
+    def _finite_mean(array) -> float:
+        array = np.asarray(array, dtype=np.float64)
+        array = array[np.isfinite(array)]
+        return float(array.mean()) if len(array) else np.nan
+
+    def _tdmi_collect(self, regimes, values, max_lag=None, bins=None, min_pairs=None,
+                      n_surrogates=None, seed: int = 0,
+                      bin_selection_end: int | None = None) -> dict:
+        """Per-episode within-episode TDMI estimates (the shared first pass).
+
+        Episodes follow ``_episodes`` (null gaps within tolerance are merged) but lag pairs
+        are formed only inside contiguous runs of the latent, so neither episode boundaries
+        nor null gaps create pairs. One bin count is used for every episode and latent.
+
+        If ``bin_selection_end`` is supplied, automatic bin selection uses only complete
+        episodes ending at or before that row (the training period); later episodes are
+        still estimated, with the fixed training-selected bin count.
+        """
+        labels = regimes[self.regime_column] if isinstance(regimes, pd.DataFrame) else pd.Series(regimes)
+        self._check_alignment(regimes if isinstance(regimes, pd.DataFrame) else labels, values)
+        matrix = self._as_matrix(values)
+        if matrix.ndim == 1:
+            matrix = matrix[:, None]
+        if len(labels) != len(matrix):
+            raise ValueError("labels and values must have equal row counts")
+        names = list(values.columns) if isinstance(values, pd.DataFrame) else [f"f{i}" for i in range(matrix.shape[1])]
+        ids = labels.astype(str).to_numpy()
+        times = None
+        if isinstance(regimes, pd.DataFrame) and "timestamp" in regimes:
+            times = pd.to_datetime(regimes["timestamp"], utc=True, errors="coerce").to_numpy()
+        n_surrogates = _metrics.TDMI_SURROGATES if n_surrogates is None else int(n_surrogates)
+        eff_pairs = _metrics.TDMI_MIN_PAIRS if min_pairs is None else int(min_pairs)
+        max_lag, bins, _ = _metrics._check_tdmi_args(max_lag, bins, eff_pairs)
+        if n_surrogates < 0:
+            raise ValueError("n_surrogates must be >= 0")
+
+        raw = []
+        for state_id, spans in self._episodes(ids).items():
+            for start, end in spans:
+                segments = [matrix[a:b] for a, b in self._contiguous_runs(ids, state_id, start, end)]
+                if segments:
+                    raw.append((state_id, start, end, segments))
+        if bins is None:
+            sizes = [
+                len(seg) - 1
+                for _, start, end, segments in raw
+                if bin_selection_end is None or end <= int(bin_selection_end)
+                for seg in segments
+                if len(seg) - 1 >= eff_pairs
+            ]
+            bins = _metrics.tdmi_bins(np.median(sizes)) if sizes else 2
+        episodes = []
+        for index, (state_id, start, end, segments) in enumerate(raw):
+            estimate = _metrics.tdmi_estimate(segments, max_lag, bins, min_pairs, n_surrogates, seed=[seed, index])
+            row = {"latent_id": state_id, "start": start, "end": end,
+                   "observations": int(sum(len(seg) for seg in segments)), "estimate": estimate}
+            if times is not None:
+                row["start_time"], row["end_time"] = times[start], times[end - 1]
+            episodes.append(row)
+        lags = episodes[0]["estimate"].mi.shape[0] if episodes else int(max_lag or _metrics.TDMI_MAX_LAG)
+        return {"episodes": episodes, "bins": bins, "names": names, "lags": lags,
+                "n_rows": len(matrix), "n_surrogates": n_surrogates, "bin_selection_end": bin_selection_end}
+
+    def _cells(self, estimate) -> tuple[np.ndarray, np.ndarray | None]:
+        """(raw cells clipped at 0, null-calibrated cells or None)."""
+        raw = np.maximum(estimate.mi, 0.0)
+        return raw, (_metrics.tdmi_calibrate(estimate) if estimate.null is not None else None)
+
+    def _tdmi_tables(self, collected: dict, min_episodes: int = 2) -> tuple[pd.DataFrame, pd.DataFrame]:
+        columns = ["episode_count", "observations", "recurrent", "tdmi", "tdmi_lag1", "tdmi_null", "tdmi_net", "tdmi_p",
+                   "tdmi_sig_frac", "tdmi_se", "tdmi_others", "tdmi_excess", "tdmi_gt_others", "tdmi_rank"]
+        episodes = collected["episodes"]
+        if not episodes:
+            empty = pd.DataFrame(columns=columns)
+            empty.index.name = "latent_id"
+            return empty, pd.DataFrame()
+
+        episode_rows, signed = [], {}
+        for index, ep in enumerate(episodes):
+            est = ep["estimate"]
+            raw, cal = self._cells(est)
+            signed.setdefault(ep["latent_id"], []).append(self._finite_mean(est.mi))
+            row = {k: v for k, v in ep.items() if k != "estimate"}
+            row.update({"n_pairs": int(est.weight[0].max()), "tdmi": self._finite_mean(raw),
+                        "tdmi_lag1": self._finite_mean(raw[0]),
+                        "tdmi_cal": self._finite_mean(cal) if cal is not None else np.nan,
+                        "tdmi_sig_frac": float(np.mean(cal[np.isfinite(cal)] > 0)) if cal is not None and np.isfinite(cal).any() else np.nan})
+            episode_rows.append(row)
+        episode_frame = pd.DataFrame(episode_rows)
+        episode_frame.insert(1, "episode", episode_frame.groupby("latent_id").cumcount())
+
+        rows = {}
+        for state_id in pd.unique(episode_frame["latent_id"]):
+            members = [ep for ep in episodes if ep["latent_id"] == state_id]
+            est = _metrics.combine_tdmi_estimates([ep["estimate"] for ep in members])
+            raw, cal = self._cells(est)
+            score = self._finite_mean(raw)
+            row = {"episode_count": len(members), "observations": int(sum(ep["observations"] for ep in members)),
+                   "tdmi": score, "tdmi_lag1": self._finite_mean(raw[0]),
+                   "tdmi_null": np.nan, "tdmi_p": np.nan, "tdmi_sig_frac": np.nan}
+            if est.null is not None:
+                clipped = np.maximum(est.null, 0.0)
+                finite = np.isfinite(clipped)
+                flat = clipped.reshape(len(clipped), -1)
+                counts = finite.reshape(len(clipped), -1).sum(axis=1)
+                null_scores = np.where(counts > 0, np.where(finite.reshape(len(clipped), -1), flat, 0.0).sum(axis=1)
+                                       / np.maximum(counts, 1), np.nan)
+                row["tdmi_null"] = self._finite_mean(null_scores)
+                row["tdmi_p"] = float((1 + np.sum(null_scores >= score)) / (len(null_scores) + 1)) if np.isfinite(score) else np.nan
+                row["tdmi_sig_frac"] = float(np.mean(cal[np.isfinite(cal)] > 0)) if np.isfinite(cal).any() else np.nan
+            per_episode = np.asarray([v for v in signed[state_id] if np.isfinite(v)])
+            row["tdmi_se"] = float(per_episode.std(ddof=1) / np.sqrt(len(per_episode))) if len(per_episode) > 1 else np.nan
+            rows[state_id] = row
+        table = pd.DataFrame.from_dict(rows, orient="index")
+        table.index.name = "latent_id"
+        table["recurrent"] = table["episode_count"] >= int(min_episodes)
+        table["tdmi_net"] = table["tdmi"] - table["tdmi_null"]
+        # Contrast on the null-adjusted score when surrogates exist, so latents whose episodes are
+        # shorter (higher noise floor) are not advantaged; otherwise on the raw score.
+        basis = table["tdmi_net"] if table["tdmi_net"].notna().any() else table["tdmi"]
+        others = []
+        for state_id in table.index:
+            rest = basis[basis.index != state_id].dropna()
+            others.append(float(rest.mean()) if len(rest) else np.nan)
+        table["tdmi_others"] = others
+        table["tdmi_excess"] = basis - table["tdmi_others"]
+        table["tdmi_gt_others"] = basis > table["tdmi_others"]
+        table["tdmi_rank"] = basis.rank(ascending=False, method="min")
+        return table[columns], episode_frame
+
+    def calculate_tdmi(self, regimes: pd.DataFrame | Sequence[str], values,
+                       max_lag: int | None = None, bins: int | None = None,
+                       min_pairs: int | None = None, min_episodes: int = 2,
+                       n_surrogates: int | None = None, seed: int = 0,
+                       return_episodes: bool = False):
+        """Time-delayed mutual information (TDMI) per latent regime.
+
+        ``values`` are the row-aligned features (or embeddings) whose temporal
+        self-dependence I(x[t]; x[t+tau]) is measured for tau = 1..max_lag bars. Estimation
+        is within-episode (level shifts between recurrences cannot create dependence), and
+        every estimate has a circular-shift surrogate null. Returns a frame indexed by
+        ``latent_id`` (joinable with ``recurrence`` / ``persistence`` / ``expectancy_stability``):
+
+            episode_count, observations, recurrent
+            tdmi            pair-weighted within-episode TDMI, mean over lags and features (nats)
+            tdmi_lag1       the same at lag 1
+            tdmi_null       mean TDMI of the surrogates (what "no temporal structure" scores)
+            tdmi_net        tdmi - tdmi_null (null-adjusted)
+            tdmi_p          surrogate p-value of ``tdmi`` against that null (vs. no structure,
+                            NOT a test between latents)
+            tdmi_sig_frac   share of (lag, feature) cells above the null's 95th percentile
+            tdmi_se         standard error of per-episode TDMI across recurrences
+            tdmi_others / tdmi_excess / tdmi_gt_others / tdmi_rank   exploratory contrasts with
+                            the other latents, on ``tdmi_net`` when surrogates are on; descriptive,
+                            not significance tests
+
+        With ``return_episodes=True`` also returns the per-episode frame. ``n_surrogates=0``
+        skips the null (the null/p/sig columns are then NaN).
+        """
+        collected = self._tdmi_collect(regimes, values, max_lag, bins, min_pairs, n_surrogates, seed)
+        table, episodes = self._tdmi_tables(collected, min_episodes)
+        return (table, episodes) if return_episodes else table
+
+    def calculate_tdmi_fingerprints(self, regimes: pd.DataFrame | Sequence[str], values,
+                                    max_lag: int | None = None, bins: int | None = None,
+                                    min_pairs: int | None = None, n_surrogates: int | None = None,
+                                    seed: int = 0) -> pd.DataFrame:
+        """Null-calibrated (lag x feature) TDMI fingerprint of each latent.
+
+        Rows are ``latent_id``; columns are a (lag, feature) MultiIndex, so *which* feature
+        carries the temporal dependence is preserved (``tdmi`` averages it away).
+        """
+        collected = self._tdmi_collect(regimes, values, max_lag, bins, min_pairs, n_surrogates, seed)
+        episodes = collected["episodes"]
+        columns = pd.MultiIndex.from_product([range(1, collected["lags"] + 1), collected["names"]],
+                                             names=["lag", "feature"])
+        rows = {}
+        for state_id in dict.fromkeys(ep["latent_id"] for ep in episodes):
+            est = _metrics.combine_tdmi_estimates([ep["estimate"] for ep in episodes if ep["latent_id"] == state_id])
+            raw, cal = self._cells(est)
+            rows[state_id] = (cal if cal is not None else raw).ravel()
+        frame = pd.DataFrame.from_dict(rows, orient="index", columns=columns) if rows else pd.DataFrame(columns=columns)
+        frame.index.name = "latent_id"
+        return frame
+
+    def _tdmi_recurrence(self, collected: dict, train_fraction: float = 0.5) -> pd.DataFrame:
+        if not 0.0 < train_fraction < 1.0:
+            raise ValueError("train_fraction must be in (0, 1)")
+        cut = int(round(collected["n_rows"] * train_fraction))
+        episodes = collected["episodes"]
+        # Purged chronological split: episodes straddling the cut belong to neither side.
+        train = [ep for ep in episodes if ep["end"] <= cut]
+        test = [ep for ep in episodes if ep["start"] >= cut]
+
+        def fingerprint(est):
+            raw, cal = self._cells(est)
+            return (cal if cal is not None else raw).ravel()
+
+        prints = {}
+        for state_id in dict.fromkeys(ep["latent_id"] for ep in train):
+            prints[state_id] = fingerprint(_metrics.combine_tdmi_estimates(
+                [ep["estimate"] for ep in train if ep["latent_id"] == state_id]))
+        columns = ["test_episodes", "own_similarity", "other_similarity", "similarity_gap", "top1_hit_rate"]
+        test = [ep for ep in test if ep["latent_id"] in prints]
+        out = pd.DataFrame(columns=columns)
+        out.index.name = "latent_id"
+        out.attrs.update({"top1": np.nan, "chance": np.nan, "majority_baseline": np.nan, "n_test": len(test)})
+        if len(test) == 0 or len(prints) < 2:
+            return out
+        known = list(prints)
+        rows, hits = {}, []
+        for ep in test:
+            fp = fingerprint(ep["estimate"])
+            sims = np.asarray([_metrics.tdmi_fingerprint_similarity(fp, prints[k]) for k in known])
+            own = known.index(ep["latent_id"])
+            best = np.flatnonzero(np.isclose(sims, np.nanmax(sims))) if np.isfinite(sims).any() else np.array([], dtype=int)
+            hit = (1.0 / len(best)) if own in best else 0.0          # ties share the credit
+            others = np.delete(sims, own)
+            rows.setdefault(ep["latent_id"], []).append((sims[own], self._finite_mean(others), hit))
+            hits.append(hit)
+        for state_id, vals in rows.items():
+            arr = np.asarray(vals, dtype=np.float64)
+            out.loc[state_id] = [len(arr), self._finite_mean(arr[:, 0]), self._finite_mean(arr[:, 1]),
+                                 self._finite_mean(arr[:, 0] - arr[:, 1]), float(arr[:, 2].mean())]
+        shares = pd.Series([ep["latent_id"] for ep in test]).value_counts(normalize=True)
+        out.attrs.update({"top1": float(np.mean(hits)), "chance": 1.0 / len(known),
+                          "majority_baseline": float(shares.max()), "n_test": len(test)})
+        return out
+
+    def calculate_tdmi_recurrence(self, regimes: pd.DataFrame | Sequence[str], values,
+                                  train_fraction: float = 0.5, max_lag: int | None = None,
+                                  bins: int | None = None, min_pairs: int | None = None,
+                                  n_surrogates: int | None = None, seed: int = 0) -> pd.DataFrame:
+        """Out-of-sample recurrence of TDMI fingerprints.
+
+        Latent fingerprints are built from episodes in the first ``train_fraction`` of the
+        rows only; each later episode is then matched against every latent's fingerprint.
+        ``top1_hit_rate`` is how often an episode is closest to its own latent (ties share
+        credit); compare ``attrs['top1']`` with ``attrs['chance']`` (1 / #latents) and
+        ``attrs['majority_baseline']``. ``own_similarity`` vs ``other_similarity`` gives the
+        gap per latent. Note: if the latent labels were themselves fitted on the full sample,
+        this tests the labels' temporal structure, not the representation's out-of-sample
+        stability -- fit the regime model on the training window for that.
+        """
+        collected = self._tdmi_collect(regimes, values, max_lag, bins, min_pairs, n_surrogates, seed)
+        return self._tdmi_recurrence(collected, train_fraction)
 
     def calculate_regime_persistence(self, regimes: pd.DataFrame | Sequence[str]) -> pd.DataFrame:
         labels = regimes[self.regime_column] if isinstance(regimes, pd.DataFrame) else pd.Series(regimes)
@@ -225,12 +505,14 @@ class RegimeValidator:
         return pd.DataFrame(rows).set_index("latent_id") if rows else pd.DataFrame()
 
     def calculate_transition_stability(self, regimes: pd.DataFrame | Sequence[str]) -> float:
-        labels = regimes[self.regime_column] if isinstance(regimes, pd.DataFrame) else list(regimes)
-        values = list(map(str, labels))
-        if len(values) < 2:
+        """Vectorized transition stability calculation."""
+        labels = regimes[self.regime_column] if isinstance(regimes, pd.DataFrame) else regimes
+        arr = np.asarray(labels, dtype=str)
+        if len(arr) < 2:
             return 1.0
-        return float(1.0 - sum(a != b for a, b in zip(values, values[1:])) / (len(values) - 1))
-
+        changes = np.sum(arr[:-1] != arr[1:])
+        return float(1.0 - changes / (len(arr) - 1))
+    
     def calculate_regime_similarity(self, embeddings, labels: Sequence[str] | pd.Series,
                                     metric=None) -> pd.DataFrame:
         label_series = pd.Series(labels)
@@ -278,32 +560,62 @@ class RegimeValidator:
         standardized = np.clip(standardized, -10.0, 10.0)
         return self.calculate_regime_similarity(standardized, labels, metric=self._feature_metric())
 
-    def build_temporal_similarity_matrix(self, embeddings: pd.DataFrame, labels: Sequence[str] | pd.Series) -> pd.DataFrame:
-        """Pairwise similarity of within-episode temporal embedding paths."""
-        ids = pd.Series(labels, index=embeddings.index).astype(str)
+    def build_temporal_similarity_matrix(self, embeddings: pd.DataFrame, labels: Sequence[str] | pd.Series,
+                                         max_episode_pairs: int = 64, pair_sampling: str = "spread",
+                                         sample_seed: int = 0, tdmi_kwargs: dict | None = None) -> pd.DataFrame:
+        """Pairwise similarity of within-episode temporal paths.
+
+        At most ``max_episode_pairs`` episode pairs are scored per cell. ``"spread"`` (default)
+        draws them with a seeded RNG over all pairs, so every recurrence is represented;
+        ``"first"`` is the legacy behaviour (first N in chronological order, which
+        over-represents the earliest episodes).
+
+        For TDMI, all-invalid rows are kept as separators (never deleted and bridged over),
+        so two runs interrupted by another latent are compared as independent runs, and the
+        same estimator settings (``tdmi_kwargs``) are used for every episode.
+        """
+        if pair_sampling not in ("spread", "first"):
+            raise ValueError("pair_sampling must be 'spread' or 'first'")
+        if max_episode_pairs < 1:
+            raise ValueError("max_episode_pairs must be >= 1")
+        if isinstance(labels, pd.Series):
+            self._check_alignment(labels, embeddings)
+        ids = pd.Series(np.asarray(labels), index=embeddings.index).astype(str)
         episodes = self._episodes(ids)
         matrix = pd.DataFrame(np.nan, index=list(episodes), columns=list(episodes), dtype=float)
         arrays = embeddings.to_numpy(dtype=np.float64)
         ids_array = ids.to_numpy()
-        pair_metric = self._temporal_metric()
+        rng = np.random.default_rng(sample_seed)
+        is_tdmi = self.metrics["temporal_pattern_similarity"] == "tdmi"
+        options = dict(tdmi_kwargs or {})
+        options.pop("bin_selection_end", None)
+        pair_metric = self._temporal_metric(options) if is_tdmi else self._temporal_metric()
+
+        def episode_path(a, b, state_id):
+            keep = ids_array[a:b] == state_id
+            path = arrays[a:b]
+            # Keep the masked rows as NaN separators for TDMI so _as_segments splits them;
+            # for path metrics, drop them (no NaN handling downstream).
+            return np.where(keep[:, None], path, np.nan) if is_tdmi else path[keep]
+
         for i, left in enumerate(matrix.index):
             spans_l = episodes[left]
             for j in range(i, len(matrix.columns)):
                 right = matrix.columns[j]
                 spans_r = episodes[right]
                 pattern_scores = []
-                episode_pairs = [(li, ri, lspan, rspan)
+                episode_pairs = [(lspan, rspan)
                                  for li, lspan in enumerate(spans_l)
                                  for ri, rspan in enumerate(spans_r)
                                  if left != right or li < ri]
-                for _, _, (la, lb), (ra, rb) in episode_pairs[:64]:
-                        # A diagonal compares different recurrences of the same ID;
-                        # it never compares an episode with itself.
-                        left_values = arrays[la:lb]
-                        right_values = arrays[ra:rb]
-                        left_values = left_values[(ids_array[la:lb] == left)]
-                        right_values = right_values[(ids_array[ra:rb] == right)]
-                        pattern_scores.append(pair_metric(left_values, right_values))
+                if len(episode_pairs) > max_episode_pairs:
+                    if pair_sampling == "first":
+                        episode_pairs = episode_pairs[:max_episode_pairs]
+                    else:
+                        chosen = np.sort(rng.choice(len(episode_pairs), max_episode_pairs, replace=False))
+                        episode_pairs = [episode_pairs[k] for k in chosen]
+                for (la, lb), (ra, rb) in episode_pairs:
+                    pattern_scores.append(pair_metric(episode_path(la, lb, left), episode_path(ra, rb, right)))
                 finite = [score for score in pattern_scores if np.isfinite(score)]
                 pattern = float(np.mean(finite)) if finite else np.nan
                 matrix.loc[left, right] = matrix.loc[right, left] = pattern
@@ -421,9 +733,35 @@ class RegimeValidator:
                         features: pd.DataFrame | None = None,
                         outcomes: pd.DataFrame | None = None,
                         outcome_columns: Sequence[str] | None = None,
-                        ground_truth: Sequence[str] | None = None) -> dict[str, pd.DataFrame | float | bool]:
-        """Return diagnostics by dimension; outcomes are analyzed only if passed."""
+                        ground_truth: Sequence[str] | None = None,
+                        include_tdmi: bool | None = None,
+                        tdmi_kwargs: dict | None = None) -> dict[str, pd.DataFrame | float | bool]:
+        """Return diagnostics by dimension; outcomes are analyzed only if passed.
+
+        ``include_tdmi`` adds ``tdmi`` (per latent), ``tdmi_episodes`` (per episode),
+        ``tdmi_recurrence`` (out-of-sample fingerprint matching) and ``tdmi_recurrence_top1``,
+        computed on ``features`` if given, else ``embeddings``. ``None`` (default) turns it on
+        only when ``temporal_pattern_similarity`` is set to ``tdmi``. ``tdmi_kwargs`` may hold
+        max_lag, bins, min_pairs, n_surrogates, seed, min_episodes, train_fraction, and floor.
+
+        The same ``tdmi_kwargs`` are threaded into the temporal similarity matrix and the TDMI
+        tables so every TDMI output is estimated under one configuration. When ``bins`` is left
+        automatic it is chosen from complete episodes ending within the initial
+        ``train_fraction`` of the rows only, never from the held-out period.
+        """
         labels = regimes[self.regime_column]
+        for obj in (embeddings, features, outcomes):
+            if obj is not None:
+                self._check_alignment(regimes, obj)
+        options = dict(tdmi_kwargs or {})
+        min_episodes = int(options.pop("min_episodes", 2))
+        train_fraction = float(options.pop("train_fraction", 0.5))
+        floor = options.pop("floor", None)
+        allowed = {"max_lag", "bins", "min_pairs", "n_surrogates", "seed"}
+        unknown = set(options) - allowed
+        if unknown:
+            raise TypeError(f"unknown tdmi_kwargs: {sorted(unknown)}")
+        tdmi_options = {key: value for key, value in options.items() if value is not None}
         result: dict[str, pd.DataFrame | float | bool] = {
             "recurrence": self.validate_regime_recurrence(regimes),
             "persistence": self.calculate_regime_persistence(regimes),
@@ -436,9 +774,21 @@ class RegimeValidator:
             result["transition_stability_pre_smoothing"] = raw_validator.calculate_transition_stability(regimes["raw_latent_id"])
             result["persistence_post_smoothing"] = result["persistence"]
             result["transition_stability_post_smoothing"] = result["transition_stability"]
+        bin_cut = int(round(len(regimes) * train_fraction))
         if embeddings is not None:
             result["embedding_similarity"] = self.build_regime_similarity_matrix(embeddings, labels)
-            result["temporal_pattern_similarity"] = self.build_temporal_similarity_matrix(embeddings, labels)
+            use_tdmi = self.metrics["temporal_pattern_similarity"] == "tdmi"
+            matrix_options = dict(tdmi_options)
+            if floor is not None:
+                matrix_options["floor"] = floor
+            if use_tdmi:
+                matrix_options["bin_selection_end"] = bin_cut
+            # TDMI is defined on observed order-flow/features when supplied; other
+            # temporal metrics continue to compare embeddings.
+            temporal_source = features if use_tdmi and features is not None else embeddings
+            result["temporal_pattern_similarity"] = self.build_temporal_similarity_matrix(
+                temporal_source, labels, tdmi_kwargs=matrix_options
+            )
             result["episode_duration_similarity"] = self.build_duration_similarity_matrix(regimes)
             result["within_between_separation_ratio"] = self.calculate_separation_ratio(embeddings, labels)
         if features is not None:
@@ -448,4 +798,22 @@ class RegimeValidator:
             result["expectancy_similarity"] = self.build_expectancy_matrix(regimes, outcomes, outcome_columns)
         if ground_truth is not None:
             result["ground_truth_scores"] = self.calculate_ground_truth_scores(labels, ground_truth)
+        explicit_tdmi = include_tdmi is not None
+        if include_tdmi is None:
+            include_tdmi = self.metrics["temporal_pattern_similarity"] == "tdmi"
+        if include_tdmi:
+            source = features if features is not None else embeddings
+            if source is None:
+                if explicit_tdmi:
+                    raise ValueError("include_tdmi=True requires features or embeddings")
+            else:
+                collected = self._tdmi_collect(
+                    regimes, source, **tdmi_options,
+                    bin_selection_end=bin_cut if not options.get("bins") else None
+                )
+                result["tdmi"], result["tdmi_episodes"] = self._tdmi_tables(collected, min_episodes)
+                result["tdmi"].attrs["source"] = "features" if features is not None else "embeddings"
+                recurrence = self._tdmi_recurrence(collected, train_fraction)
+                result["tdmi_recurrence"] = recurrence
+                result["tdmi_recurrence_top1"] = recurrence.attrs["top1"]
         return result

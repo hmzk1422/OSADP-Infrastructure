@@ -3,6 +3,8 @@ OSADP-Core Version  : v1.0.0
 Author              : Himaska Lin  
 version             : v1.0.0
 
+> VERY IMPORTANT NOTE: As of now, we won't use custom-made GP as GPLearn fulfills all of our requirements.
+
 Scope: `evolution.py`, `population.py`, `grammar.py`, `evaluation.py`, `feature_library.py`, plus the glue in `strategy.py` (`run_gp`).
 
 How to read this document: the system is explained as numbered segments **in the order they execute**. Each segment says **What** it does (with the actual numbers from the code), **Why** it is built that way, and **Cost** (time and memory). Timings are **measured** on synthetic data unless marked *extrapolated* (see Section 7). Where a rationale is not stated in the code comments, it is my reading of the design and I say so.
