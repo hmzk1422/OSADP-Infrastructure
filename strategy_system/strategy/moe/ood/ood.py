@@ -187,10 +187,134 @@ class OODSystem:
         self.require_model_for_trade = bool(require_model_for_trade)
         self.timestamp_col = timestamp_col
         self._fitted = False
-        self._history = pd.DataFrame()
-        self.embeddings_: pd.DataFrame | None = None
-        self._embedding_history = pd.DataFrame()
-        self._feature_history = pd.DataFrame()
+        # Histories are stored as an optional materialized base plus a list of
+        # per-call chunks. Appends push a chunk (O(chunk)); the full frame is
+        # concatenated lazily only when read. This avoids O(T^2) pd.concat when
+        # transform()/update_regime() are called once per row over ~1.1M rows.
+        # Lazily materialized history storage.
+        self._history_base: pd.DataFrame | None = None
+        self._embedding_base: pd.DataFrame | None = None
+        self._feature_base: pd.DataFrame | None = None
+
+        self._history_chunks: list[pd.DataFrame] = []
+        self._embedding_chunks: list[pd.DataFrame] = []
+        self._feature_chunks: list[pd.DataFrame] = []
+
+        # Buffer single-row update_regime() calls. Flush in bounded batches.
+        self._history_chunk_size = 4096
+        self._max_history_chunks = 64
+
+        self._history_pending_rows: list[dict] = []
+        self._history_pending_index: list[object] = []
+        self._history_pending_index_template = None
+
+        self._embedding_pending_values: list[np.ndarray] = []
+        self._embedding_pending_index: list[object] = []
+        self._embedding_pending_index_template = None
+        self._embedding_pending_columns = None
+
+    @staticmethod
+    def _build_pending_index(labels, template) -> pd.Index:
+        """Reconstruct a chunk index from buffered labels."""
+        if isinstance(template, pd.MultiIndex):
+            return pd.MultiIndex.from_tuples(labels, names=template.names)
+        if isinstance(template, pd.DatetimeIndex):
+            return pd.DatetimeIndex(
+                labels, name=template.name, tz=template.tz
+            )
+        if isinstance(template, pd.TimedeltaIndex):
+            return pd.TimedeltaIndex(labels, name=template.name)
+        if isinstance(template, pd.PeriodIndex):
+            return pd.PeriodIndex(
+                labels, name=template.name, freq=template.freq
+            )
+        return pd.Index(labels, name=template.name)
+
+    def _append_history_chunk(self, chunks_name: str, frame: pd.DataFrame) -> None:
+        """Append a detached chunk and periodically compact recent chunks."""
+        if frame.empty:
+            return
+
+        chunks = getattr(self, chunks_name)
+        chunks.append(frame.copy())
+
+        # Bound the number of DataFrame objects without repeatedly copying
+        # the complete historical dataset.
+        if len(chunks) >= self._max_history_chunks:
+            chunks[:] = [pd.concat(chunks, axis=0, copy=False)]
+
+    def _flush_pending_history(self) -> None:
+        """Convert pending single-row records into bounded DataFrame chunks."""
+        if self._history_pending_rows:
+            index = self._build_pending_index(
+                self._history_pending_index,
+                self._history_pending_index_template,
+            )
+            frame = pd.DataFrame(self._history_pending_rows, index=index)
+            self._append_history_chunk("_history_chunks", frame)
+
+            self._history_pending_rows.clear()
+            self._history_pending_index.clear()
+            self._history_pending_index_template = None
+
+        if self._embedding_pending_values:
+            index = self._build_pending_index(
+                self._embedding_pending_index,
+                self._embedding_pending_index_template,
+            )
+            values = np.stack(self._embedding_pending_values, axis=0)
+            frame = pd.DataFrame(
+                values,
+                index=index,
+                columns=self._embedding_pending_columns,
+            )
+            self._append_history_chunk("_embedding_chunks", frame)
+
+            self._embedding_pending_values.clear()
+            self._embedding_pending_index.clear()
+            self._embedding_pending_index_template = None
+            self._embedding_pending_columns = None
+
+    def _materialize_history(
+        self, base_name: str, chunks_name: str
+    ) -> pd.DataFrame:
+        """Flush pending records and materialize the requested history."""
+        self._flush_pending_history()
+
+        base = getattr(self, base_name)
+        chunks = getattr(self, chunks_name)
+
+        if chunks:
+            parts = ([base] if base is not None else []) + chunks
+            combined = pd.concat(parts, axis=0, copy=False)
+            setattr(self, base_name, combined)
+            chunks.clear()
+            base = combined
+
+        return base if base is not None else pd.DataFrame()
+
+    @property
+    def _history(self) -> pd.DataFrame:
+        return self._materialize_history(
+            "_history_base", "_history_chunks"
+        )
+
+    @property
+    def _embedding_history(self) -> pd.DataFrame:
+        return self._materialize_history(
+            "_embedding_base", "_embedding_chunks"
+        )
+
+    @property
+    def _feature_history(self) -> pd.DataFrame:
+        return self._materialize_history(
+            "_feature_base", "_feature_chunks"
+        )
+
+    @property
+    def embeddings_(self) -> pd.DataFrame:
+        """Public, lazily materialized embedding history."""
+        return self._embedding_history
 
     def fit(self, df: pd.DataFrame, y=None) -> "OODSystem":
         """Fit encoder schema/parameters. ``y`` is intentionally ignored."""
@@ -269,14 +393,27 @@ class OODSystem:
         assignments["trade_allowed"] = assignments["state_mature"] & stable_assignment & (
             assignments["model_ready"] | (not self.require_model_for_trade))
         assignments["timestamp"] = timestamps
-        self._history = pd.concat([self._history, assignments.iloc[process_from:]])
-        self._embedding_history = pd.concat([self._embedding_history, embeddings.iloc[process_from:]])
+        # Append this chunk only; do NOT concat the whole accumulated history.
+        # .copy() detaches the stored chunk from buffers the caller may mutate.
+        self._append_history_chunk(
+            "_history_chunks", assignments.iloc[process_from:]
+        )
+
+        self._append_history_chunk(
+            "_embedding_chunks", embeddings.iloc[process_from:]
+        )
+
         selected = primitives.iloc[process_from:].drop(
-            columns=[timestamp_name] if timestamp_name is not None and timestamp_name in primitives else [],
+            columns=(
+                [timestamp_name]
+                if timestamp_name is not None
+                and timestamp_name in primitives
+                else []
+            ),
             errors="ignore",
         )
-        self._feature_history = pd.concat([self._feature_history, selected])
-        self.embeddings_ = self._embedding_history
+        self._append_history_chunk("_feature_chunks", selected)
+
         return assignments
 
     def fit_transform(self, df: pd.DataFrame, y=None) -> pd.DataFrame:
@@ -327,12 +464,44 @@ class OODSystem:
             and not assigned.get("transition_pending", False)
             and (assigned["model_ready"] or not self.require_model_for_trade)
         )
-        self._history = pd.concat([self._history, pd.DataFrame([assigned], index=indexed.index)])
-        self._embedding_history = pd.concat([
-            self._embedding_history,
-            pd.DataFrame([values], index=indexed.index, columns=columns),
-        ])
-        self.embeddings_ = self._embedding_history
+        # Append one-row chunks; no full-history concat. update_regime never
+        # added primitive features to _feature_history, and still does not.
+        # update_regime() handles one indexed row at a time.
+        if len(indexed.index) != 1:
+            raise ValueError("update_regime expects exactly one indexed row")
+
+        row_index = indexed.index[0]
+        embedding_columns = pd.Index(columns)
+
+        # Keep buffered embedding rows in one stable column order.
+        if (
+            self._embedding_pending_values
+            and not embedding_columns.equals(
+                self._embedding_pending_columns
+            )
+        ):
+            self._flush_pending_history()
+
+        # Preserve the original row mapping without creating a DataFrame.
+        if not self._history_pending_rows:
+            self._history_pending_index_template = indexed.index.copy()
+
+        self._history_pending_rows.append(dict(assigned))
+        self._history_pending_index.append(row_index)
+
+        if not self._embedding_pending_values:
+            self._embedding_pending_index_template = indexed.index.copy()
+            self._embedding_pending_columns = embedding_columns.copy()
+
+        self._embedding_pending_values.append(
+            np.asarray(values).reshape(-1).copy()
+        )
+        self._embedding_pending_index.append(row_index)
+
+        # Materialize only every 4096 single-row updates.
+        if len(self._history_pending_rows) >= self._history_chunk_size:
+            self._flush_pending_history()
+
         return assigned
 
     def get_regime(self, regime_id: str | None = None):
@@ -375,6 +544,51 @@ class OODSystem:
         if not isinstance(result, cls) or result.schema_version != cls.schema_version:
             raise ValueError("saved OOD system type or schema version is incompatible")
         return result
+
+    def __setstate__(self, state):
+        """Migrate pickles written before the chunked-history layout.
+
+        Old instances stored full DataFrames under _history / _embedding_history
+        / _feature_history / embeddings_. The new layout stores _*_base plus
+        _*_chunks and exposes the history via properties, so those legacy keys
+        are folded into the corresponding *_base and the rest dropped.
+        """
+        state = dict(state)
+        layouts = {
+            "_history_base": ("_history",),
+            "_embedding_base": ("_embedding_history", "embeddings_"),
+            "_feature_base": ("_feature_history",),
+        }
+        chunks_for_base = {
+            "_history_base": "_history_chunks",
+            "_embedding_base": "_embedding_chunks",
+            "_feature_base": "_feature_chunks",
+        }
+        for base_name, legacy_names in layouts.items():
+            if base_name not in state:
+                for old_name in legacy_names:
+                    if old_name in state and state[old_name] is not None:
+                        state[base_name] = state[old_name]
+                        break
+            state.pop("embeddings_", None)
+            for old_name in legacy_names:
+                state.pop(old_name, None)
+            state.setdefault(base_name, None)
+            state.setdefault(chunks_for_base[base_name], [])
+        # Complete the migration: legacy pickles have none of the new
+        # buffer/compaction attrs, and every history read/update touches them.
+        # (Not in the spec's __setstate__ verbatim, but its PROOF step 4
+        # requires reading history from a migrated instance.)
+        state.setdefault("_history_chunk_size", 4096)
+        state.setdefault("_max_history_chunks", 64)
+        state.setdefault("_history_pending_rows", [])
+        state.setdefault("_history_pending_index", [])
+        state.setdefault("_history_pending_index_template", None)
+        state.setdefault("_embedding_pending_values", [])
+        state.setdefault("_embedding_pending_index", [])
+        state.setdefault("_embedding_pending_index_template", None)
+        state.setdefault("_embedding_pending_columns", None)
+        self.__dict__.update(state)
 
     def _timestamps(self, df: pd.DataFrame):
         name = self.timestamp_col or getattr(self.encoder, "timestamp_col", None) or ("timestamp" if "timestamp" in df else None)

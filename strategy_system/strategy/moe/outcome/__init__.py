@@ -11,6 +11,15 @@ from .alignment import (
     build_model_frame,
     chronological_train_mask,
 )
+from .models import (
+    classifier_model,
+    loss_function,
+    raw_fraction_unit,
+    regressor_model,
+    rr_unit,
+    timeout_function,
+    tp_function,
+)
 from .outcomes import (
     MetalabelResult,
     OutcomeResult,
@@ -37,6 +46,8 @@ from .triple_barrier import (
     evaluate_regressor,
     resolve_feature_cols,
     run_triple_barrier,
+    tb_classifier,
+    tb_regressor,
 )
 
 __all__ = [
@@ -59,13 +70,22 @@ __all__ = [
     "build_triple_barrier_fixed",
     "build_triple_barrier_predicted",
     "build_triple_barrier_sequence",
+    "classifier_model",
     "chronological_train_mask",
     "evaluate_classifier",
     "evaluate_regressor",
     "fit_metalabel_tree",
     "fit_state_linregs",
+    "loss_function",
     "predict_excursions",
+    "raw_fraction_unit",
+    "regressor_model",
     "resolve_feature_cols",
+    "rr_unit",
     "run_outcomes",
     "run_triple_barrier",
+    "tb_classifier",
+    "tb_regressor",
+    "timeout_function",
+    "tp_function",
 ]

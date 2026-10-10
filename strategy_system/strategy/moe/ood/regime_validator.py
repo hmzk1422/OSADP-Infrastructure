@@ -6,6 +6,7 @@ from collections.abc import Sequence
 
 import numpy as np
 import pandas as pd
+from tqdm.auto import tqdm
 
 from . import metrics as _metrics
 
@@ -238,7 +239,7 @@ class RegimeValidator:
             ]
             bins = _metrics.tdmi_bins(np.median(sizes)) if sizes else 2
         episodes = []
-        for index, (state_id, start, end, segments) in enumerate(raw):
+        for index, (state_id, start, end, segments) in enumerate(tqdm(raw, desc="TDMI Estimation")):
             estimate = _metrics.tdmi_estimate(segments, max_lag, bins, min_pairs, n_surrogates, seed=[seed, index])
             row = {"latent_id": state_id, "start": start, "end": end,
                    "observations": int(sum(len(seg) for seg in segments)), "estimate": estimate}
@@ -535,16 +536,17 @@ class RegimeValidator:
                 episode_means[state_id] = means
         ids = list(episode_means)
         matrix = pd.DataFrame(np.nan, index=ids, columns=ids, dtype=float)
-        for i, left in enumerate(ids):
+        for i, left in enumerate(tqdm(ids, desc="Embedding Similarity")):
             for j in range(i, len(ids)):
                 right = ids[j]
-                pairs = [(a, b) for li, a in enumerate(episode_means[left])
-                         for ri, b in enumerate(episode_means[right])
-                         if left != right or li < ri]
-                scores = [pair_metric(a, b) for a, b in pairs]
+                scores = [pair_metric(a, b)
+                          for li, a in enumerate(episode_means[left])
+                          for ri, b in enumerate(episode_means[right])
+                          if left != right or li < ri]
                 finite = [score for score in scores if np.isfinite(score)]
                 score = float(np.mean(finite)) if finite else np.nan
                 matrix.loc[left, right] = matrix.loc[right, left] = score
+        return matrix
         return matrix
 
     def build_regime_similarity_matrix(self, embeddings, labels: Sequence[str] | pd.Series) -> pd.DataFrame:
@@ -591,31 +593,50 @@ class RegimeValidator:
         options.pop("bin_selection_end", None)
         pair_metric = self._temporal_metric(options) if is_tdmi else self._temporal_metric()
 
-        def episode_path(a, b, state_id):
-            keep = ids_array[a:b] == state_id
-            path = arrays[a:b]
-            # Keep the masked rows as NaN separators for TDMI so _as_segments splits them;
-            # for path metrics, drop them (no NaN handling downstream).
-            return np.where(keep[:, None], path, np.nan) if is_tdmi else path[keep]
+        # Cache each episode path once: the same episode is compared in many
+        # pairs, so slice+mask is computed a single time per episode.
+        path_cache: dict[tuple[int, int, str], np.ndarray] = {}
 
-        for i, left in enumerate(matrix.index):
+        def cached_path(a, b, state_id):
+            key = (a, b, state_id)
+            path = path_cache.get(key)
+            if path is None:
+                keep = ids_array[a:b] == state_id
+                raw = arrays[a:b]
+                path = np.where(keep[:, None], raw, np.nan) if is_tdmi else raw[keep]
+                path_cache[key] = path
+            return path
+
+        for i, left in enumerate(tqdm(matrix.index, desc="Temporal Similarity")):
             spans_l = episodes[left]
             for j in range(i, len(matrix.columns)):
                 right = matrix.columns[j]
                 spans_r = episodes[right]
-                pattern_scores = []
-                episode_pairs = [(lspan, rspan)
-                                 for li, lspan in enumerate(spans_l)
-                                 for ri, rspan in enumerate(spans_r)
-                                 if left != right or li < ri]
-                if len(episode_pairs) > max_episode_pairs:
+                diagonal = left == right
+                n_left = len(spans_l)
+                # Pair count WITHOUT materialising the O(E^2) list.
+                total = n_left * (n_left - 1) // 2 if diagonal else n_left * len(spans_r)
+                if total > max_episode_pairs:
                     if pair_sampling == "first":
-                        episode_pairs = episode_pairs[:max_episode_pairs]
+                        indices = range(max_episode_pairs)
                     else:
-                        chosen = np.sort(rng.choice(len(episode_pairs), max_episode_pairs, replace=False))
-                        episode_pairs = [episode_pairs[k] for k in chosen]
-                for (la, lb), (ra, rb) in episode_pairs:
-                    pattern_scores.append(pair_metric(episode_path(la, lb, left), episode_path(ra, rb, right)))
+                        indices = np.sort(rng.choice(total, max_episode_pairs, replace=False))
+                else:
+                    indices = range(total)
+                # Decode each flat index to (lspan, rspan) in the exact order the
+                # list comprehension produced, so seeding/order are unchanged.
+                offsets = (np.array([li * (2 * n_left - li - 1) // 2 for li in range(n_left)],
+                                    dtype=np.int64) if diagonal else None)
+                pattern_scores = []
+                for k in indices:
+                    if diagonal:
+                        li = int(np.searchsorted(offsets, k, side="right") - 1)
+                        ri = li + 1 + (int(k) - int(offsets[li]))
+                    else:
+                        li, ri = divmod(int(k), len(spans_r))
+                    (la, lb), (ra, rb) = spans_l[li], spans_r[ri]
+                    pattern_scores.append(pair_metric(cached_path(la, lb, left),
+                                                       cached_path(ra, rb, right)))
                 finite = [score for score in pattern_scores if np.isfinite(score)]
                 pattern = float(np.mean(finite)) if finite else np.nan
                 matrix.loc[left, right] = matrix.loc[right, left] = pattern
