@@ -526,10 +526,23 @@ def fit_metalabel_tree(
     feature_frame = pd.DataFrame({"linreg_pred": predicted}, index=frame.index)
     if endpoint_times is not None:
         endpoint = pd.to_datetime(endpoint_times, utc=True, errors="coerce")
+        # pandas 3: merge_asof requires identical datetime units (us vs ns
+        # raises MergeError). Coerce both sides to ns before the join.
+        try:
+            if isinstance(endpoint, pd.Series):
+                endpoint = endpoint.dt.as_unit("ns")
+            else:
+                endpoint = pd.DatetimeIndex(endpoint).as_unit("ns")
+        except Exception:
+            pass
         error = pd.Series(realized - predicted, index=frame.index)
         known = pd.DataFrame({"_endpoint": endpoint, "_error": error}).dropna()
         if not known.empty and isinstance(frame.index, pd.DatetimeIndex):
             clock = pd.to_datetime(frame.index, utc=True, errors="coerce")
+            try:
+                clock = pd.DatetimeIndex(clock).as_unit("ns")
+            except Exception:
+                pass
             merged = pd.merge_asof(
                 pd.DataFrame({"_time": clock}).sort_values("_time", kind="mergesort"),
                 known.sort_values("_endpoint", kind="mergesort"),

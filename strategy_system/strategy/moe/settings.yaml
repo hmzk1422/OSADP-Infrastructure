@@ -1,11 +1,20 @@
 # OFMR scalp — single source of truth for every tunable parameter.
-# Loaded by strategy.py::load_settings() and handed down the pipeline:
+# Loaded by ops/settings.py::load_settings() and handed down the pipeline:
 #   data      -> exchange/loader.py
 #   features  -> features.py::compute_features
 #   ood       -> ood/ raw-temporal state detector
 #   gp        -> gp/ state-conditioned feature search
 #   outcome   -> outcome/ forward targets and triple-barrier labels
 #   policy    -> policies/orderflow_prediction.py
+#   ops       -> ops/ log / output / report / models locations
+
+ops:
+  log_dir: log           # -> ops/log/strategy.log, ood.log, gp.log, ...
+  output_dir: output     # -> ops/output/ood.csv, gp.csv, ... (overwrite)
+  report_dir: report     # -> ops/report/ood.txt, gp.txt, run.txt
+  models_dir: models     # -> ops/models/regime/, latent_*/, manifest.json
+  output: true           # false disables ops/output/*.csv writes
+
 
 data:
   # orderbook: matched L2 parquet (exchange/loader.py)
@@ -40,7 +49,7 @@ ood:                       # causal temporal regime discovery
     epochs: 10
     embedding_dim: 16
     num_codes: 64          # vq-vae only
-    device: cuda
+    device: cpu
   sequence_window: 32
   embedding_bins: 8        # only used by temporal_window
   normalization_window: 500
@@ -226,6 +235,7 @@ forecast_compare:         # research harness inside strategy_testing (linreg vs 
   price_col: null         # null -> mid_price if present else price_close
 
 policy:                   # orderflow prediction policy (the rules)
+  enabled: false          # true -> run evaluate_orderflow_policy inside run_policy
   price_col: mid_price
   rolling_window: 36000   # 1h of 100ms bars
   step: 600

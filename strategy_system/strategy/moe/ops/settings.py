@@ -6,7 +6,7 @@ from pathlib import Path
 
 import yaml
 
-DEFAULT_SETTINGS_PATH = Path(__file__).resolve().parent / "settings.yaml"
+DEFAULT_SETTINGS_PATH = Path(__file__).resolve().parent.parent / "settings.yaml"
 
 
 def load_settings(path: str | Path | None = None) -> dict:
@@ -16,3 +16,6 @@ def load_settings(path: str | Path | None = None) -> dict:
     if not isinstance(settings, dict):
         raise ValueError(f"{settings_path} must contain a YAML mapping.")
     return settings
+
+
+__all__ = ["DEFAULT_SETTINGS_PATH", "load_settings"]

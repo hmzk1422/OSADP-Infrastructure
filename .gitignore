@@ -36,6 +36,16 @@ build/
 *.png
 main/logs/
 
+# ── MoE ops/ runtime artifacts (fixed-name logs / csvs / reports / bundles) ─
+strategy_system/strategy/moe/ops/log/
+strategy_system/strategy/moe/ops/output/
+strategy_system/strategy/moe/ops/report/
+strategy_system/strategy/moe/ops/models/
+!strategy_system/strategy/moe/ops/log/.gitkeep
+!strategy_system/strategy/moe/ops/output/.gitkeep
+!strategy_system/strategy/moe/ops/report/.gitkeep
+!strategy_system/strategy/moe/ops/models/.gitkeep
+
 # ── Editors / OS ─────────────────────────────────────────────────────────────
 .vscode/
 .idea/
