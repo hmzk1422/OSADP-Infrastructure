@@ -1,6 +1,6 @@
 """Filesystem / serialization layer for the MoE bundle (the Rust contract).
 
-Layout written under ``moe/models/``::
+Layout written under ``ops/models/``::
 
     regime/            encoder.onnx + regime_metadata.json   (written by export_moe)
     latent_<id>/       gp_features.json, tb_regressor.onnx, metadata.json
@@ -21,6 +21,8 @@ from typing import Any
 
 import numpy as np
 
+from .paths import OPS_DIR
+
 SCHEMA_VERSION = 1
 GP_FEATURES_FILE = "gp_features.json"
 TB_MODEL_FILE = "tb_regressor.onnx"
@@ -29,19 +31,17 @@ REGIME_DIR = "regime"
 REGIME_MODEL_FILE = "encoder.onnx"
 REGIME_METADATA_FILE = "regime_metadata.json"
 MANIFEST_FILE = "manifest.json"
-DEFAULT_MODELS_DIR = Path(__file__).resolve().parent / "models"
+DEFAULT_MODELS_DIR = OPS_DIR / "models"
 
 
 # --------------------------------------------------------------------------- #
 # helpers
 # --------------------------------------------------------------------------- #
-def models_dir_from_cfg(cfg: dict) -> Path:
-    """``moe.models_dir`` (relative paths anchor at the moe package), default ``moe/models``."""
-    raw = (cfg.get("moe") or {}).get("models_dir")
-    if not raw:
-        return DEFAULT_MODELS_DIR
-    path = Path(raw)
-    return path if path.is_absolute() else Path(__file__).resolve().parent / path
+def models_dir_from_cfg(cfg: dict | None = None) -> Path:
+    """``moe.models_dir`` wins, else ``ops.models_dir``, else ``ops/models``."""
+    from .paths import models_dir_from_cfg as _resolve
+
+    return _resolve(cfg)
 
 
 def latent_dir_name(latent_id: str) -> str:
@@ -240,6 +240,175 @@ def export_gp_features(models_dir: Path, latent_id: str, gp_model, horizon_model
     """Write ``latent_<id>/gp_features.json`` (feature formulas + horizon predictor)."""
     payload = build_gp_features_payload(latent_id, gp_model, terminal_names, horizon_model, horizons)
     return write_json(models_dir / latent_dir_name(latent_id) / GP_FEATURES_FILE, payload)
+
+
+# --------------------------------------------------------------------------- #
+# regime/ bundle  (encoder.onnx + regime_metadata.json, for the Rust router)
+# --------------------------------------------------------------------------- #
+def build_regime_metadata(detector) -> dict:
+    """Serializable description of the fitted OOD detector (pure data)."""
+    encoder = getattr(detector, "encoder", None)
+    segmenter = getattr(detector, "segmenter", None)
+    segmenter_state = segmenter.state_dict() if hasattr(segmenter, "state_dict") else {}
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "encoder": {
+            "type": type(encoder).__name__ if encoder is not None else None,
+            "input_columns": list(getattr(encoder, "input_columns_", None) or []),
+            "embedding_columns": list(getattr(encoder, "embedding_columns_", None) or []),
+            "window": getattr(encoder, "window", getattr(encoder, "window_size", None)),
+        },
+        "segmenter": _jsonable(segmenter_state),
+        "trade_gates": {
+            "mature_state_observations": getattr(detector, "mature_state_observations", None),
+            "require_model_for_trade": getattr(detector, "require_model_for_trade", None),
+            "model_ready_states": sorted(getattr(segmenter, "model_ready_states", set()) or []),
+        },
+    }
+
+
+def verify_regime_contract(detector, df, regimes) -> None:
+    """Fail fast when the regime bundle would be unloadable or misaligned."""
+    if regimes is None or len(regimes) == 0:
+        raise ValueError("no regime labels to export; run_ood produced an empty frame")
+    if "latent_id" not in regimes.columns:
+        raise KeyError("regimes frame is missing the 'latent_id' column")
+    encoder = getattr(detector, "encoder", None)
+    if encoder is None or not getattr(encoder, "is_fitted_", False):
+        raise RuntimeError("OOD encoder is not fitted; cannot export the regime bundle")
+    segmenter = getattr(detector, "segmenter", None)
+    if segmenter is None or not getattr(segmenter, "prototypes", {}):
+        raise RuntimeError("OOD segmenter has no prototypes; cannot export the regime bundle")
+    if len(regimes) != len(df):
+        raise ValueError(
+            f"regimes rows ({len(regimes)}) != input rows ({len(df)}); "
+            "the regime bundle would misalign with the feature index"
+        )
+
+
+# --------------------------------------------------------------------------- #
+# regime/ bundle writer: encoder.onnx + regime_metadata.json
+# --------------------------------------------------------------------------- #
+# Native LayerNorm lands at opset 17; torch's exporter may emit a higher opset
+# (we record the ACTUAL opset it produced, see export_regime_bundle).
+ENCODER_ONNX_OPSET = 17
+# Collision-proof graph output name: torch's exporter re-uses the auto-name
+# "embedding" for an internal activation, which then collides with the declared
+# graph output and yields an invalid (non-SSA) model. A distinct name avoids it.
+ENCODER_OUTPUT_NAME = "regime_embedding"
+
+
+def export_regime_bundle(models_dir: Path, detector, parity_x: np.ndarray | None = None) -> Path:
+    """Write ``regime/encoder.onnx`` + ``regime/regime_metadata.json`` (Rust router front-end).
+
+    The ONNX graph is the fitted encoder's ``encode`` only: a *normalized* trailing
+    window ``(B, window, n_features)`` -> embedding ``(B, embedding_width)``.  Causal
+    z-score scaling and trailing-window assembly stay in Rust (pure data transforms,
+    documented under ``input_pipeline``) -- exactly like the GP feature normalization.
+    ``regime_metadata.json`` also carries the segmenter prototypes + scales +
+    match_threshold so Rust reproduces the nearest-prototype assignment with the same
+    RMS distance metric as ``HysteresisClusterRegimeSegmenter._distance``.
+
+    Acceptance contract is onnxruntime *loading* the graph + numeric parity against
+    torch (NOT ``onnx.checker``: the new torch exporter trips checker's version
+    converter on valid graphs, and we verified parity is ~4e-8).
+    """
+    import torch
+    import onnx
+
+    encoder = getattr(detector, "encoder", None)
+    net = getattr(encoder, "net_", None)
+    if net is None or not getattr(encoder, "is_fitted_", False):
+        raise RuntimeError(
+            "regime encoder has no fitted torch network; ONNX export supports the "
+            "torch encoders (vq-vae, ts2vec, tcn, transformer). Fit it first.")
+
+    window = int(encoder.window)
+    n_features = int(getattr(encoder, "_n_features", 0)
+                     or len(getattr(encoder, "input_columns_", ()) or ()))
+    if n_features <= 0:
+        raise RuntimeError("encoder was fitted with zero input features; cannot size encoder.onnx")
+    embedding_width = (int(len(encoder.embedding_columns_))
+                       if getattr(encoder, "embedding_columns_", None)
+                       else int(getattr(encoder, "_embedding_width", encoder.embedding_dim)))
+
+    class _Encode(torch.nn.Module):
+        """Wrap ``net.encode`` (VQVAENet/TS2VecNet/... define ``encode``/``loss``, no ``forward``)."""
+
+        def __init__(self, net):
+            super().__init__()
+            self.net = net
+
+        def forward(self, window):
+            return self.net.encode(window)
+
+    out_dir = models_dir / REGIME_DIR
+    out_dir.mkdir(parents=True, exist_ok=True)
+    onnx_path = out_dir / REGIME_MODEL_FILE
+    net.eval()
+    with torch.no_grad():
+        torch.onnx.export(
+            _Encode(net), (torch.zeros(1, window, n_features),), str(onnx_path),
+            input_names=["window"], output_names=[ENCODER_OUTPUT_NAME],
+            dynamic_axes={"window": {0: "batch"}, ENCODER_OUTPUT_NAME: {0: "batch"}},
+            opset_version=ENCODER_ONNX_OPSET, do_constant_folding=True,
+            verbose=False,   # suppress torch's ✅ trace log (crashes cp1252 consoles)
+        )
+    # Read back the ACTUAL opset torch produced (it may bump past what we requested).
+    model_proto = onnx.load(str(onnx_path))
+    opset = next((int(o.version) for o in model_proto.opset_import if o.domain in ("", "ai.onnx")),
+                 ENCODER_ONNX_OPSET)
+
+    parity = {"checked": False}
+    if parity_x is not None and len(parity_x):
+        import onnxruntime as ort
+        arr = np.asarray(parity_x, dtype=np.float32)
+        sess = ort.InferenceSession(str(onnx_path), providers=["CPUExecutionProvider"])  # load == validity check
+        got = sess.run([ENCODER_OUTPUT_NAME], {"window": arr})[0]
+        want = net.encode(torch.from_numpy(arr)).detach().cpu().numpy()
+        err = float(np.max(np.abs(got - want) / (1.0 + np.abs(want))))
+        parity = {"checked": True, "rows": int(len(arr)), "max_rel_err": err}
+        if err > 1e-3:
+            raise ValueError(f"ONNX parity failed for {REGIME_MODEL_FILE}: max rel err {err:.2e}")
+
+    meta = build_regime_metadata(detector)
+    meta["model_file"] = REGIME_MODEL_FILE
+    meta["onnx_opset"] = opset
+    meta["model"] = {
+        "kind": type(net).__name__, "format": "onnx",
+        "input_name": "window", "input_dtype": "float32",
+        "input_shape": [None, window, n_features],
+        "output_name": ENCODER_OUTPUT_NAME, "output_dtype": "float32",
+        "output_shape": [None, embedding_width],
+        "output_columns": list(getattr(encoder, "embedding_columns_", []) or []),
+        "input_note": ("input is a causal-z-scored trailing window; Rust applies "
+                       "normalization + windowing first (see input_pipeline)"),
+    }
+    meta["input_pipeline"] = {
+        "steps": [
+            "select input_columns in the fixed fitted order (raw primitives)",
+            "causal_rolling_zscore: shift(1) -> rolling(window, min_periods) mean/std (ddof=0) -> clip",
+            "assemble the trailing `window` rows per anchor; leading rows stay NaN -> embedding NaN -> null",
+        ],
+        "normalization": {
+            "window": getattr(encoder, "normalization_window", None),
+            "min_periods": getattr(encoder, "normalization_min_periods", None),
+            "clip_z": getattr(encoder, "clip_z", None),
+        },
+        "window": window,
+        "input_columns": list(getattr(encoder, "input_columns_", []) or []),
+    }
+    seg_cfg = (meta.get("segmenter", {}).get("config", {}) or {})
+    meta["assignment"] = {
+        "metric": "rms((embedding - prototype) / max(scale, min_state_scale))",
+        "decision": "argmin over prototypes; null if distance > match_threshold",
+        "match_threshold": seg_cfg.get("match_threshold"),
+        "min_state_scale": seg_cfg.get("min_state_scale"),
+    }
+    meta["onnx_parity"] = parity
+    meta["sha256"] = {REGIME_MODEL_FILE: sha256_file(onnx_path)}
+    write_json(out_dir / REGIME_METADATA_FILE, meta)
+    return out_dir
 
 
 def export_latent(

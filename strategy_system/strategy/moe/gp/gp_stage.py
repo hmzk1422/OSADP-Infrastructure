@@ -11,10 +11,10 @@ from typing import NamedTuple
 import numpy as np
 import pandas as pd
 
-from .features import compute_features
-from .gp import GPEvolutionResult, extrapolate_features
-from .gp.evolution import build_gp_inputs
-from .outcome import (
+from ..features import compute_features
+from . import GPEvolutionResult, extrapolate_features
+from .evolution import build_gp_inputs
+from ..outcome import (
     align_regimes_to_index,
     build_gp_source,
     build_supervision_targets,
