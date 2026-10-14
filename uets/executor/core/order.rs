@@ -173,12 +173,12 @@ impl OrderRequest {
         price: f64,
         tick_size: f64,
     ) -> Self {
-        let snapped = if tick_size.is_finite() && tick_size > 0.0 && price.is_finite() && price > 0.0
-        {
-            (price / tick_size).round() * tick_size
-        } else {
-            price
-        };
+        let snapped =
+            if tick_size.is_finite() && tick_size > 0.0 && price.is_finite() && price > 0.0 {
+                (price / tick_size).round() * tick_size
+            } else {
+                price
+            };
         Self {
             symbol: symbol.into(),
             side,
@@ -252,12 +252,19 @@ impl OrderRequest {
 #[derive(Clone, Debug, PartialEq)]
 pub enum OrderError {
     EmptySymbol,
-    NonPositiveQuantity { qty: f64 },
+    NonPositiveQuantity {
+        qty: f64,
+    },
     MissingLimitPrice,
-    LimitPriceNotPositive { price: f64 },
+    LimitPriceNotPositive {
+        price: f64,
+    },
     /// Limit price is not on the venue tick grid: reject locally instead of
     /// paying a round trip for the venue's INVALID_TICK_SIZE.
-    OffTickPrice { price: f64, tick: f64 },
+    OffTickPrice {
+        price: f64,
+        tick: f64,
+    },
 }
 
 impl fmt::Display for OrderError {
