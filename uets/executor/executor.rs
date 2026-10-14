@@ -116,9 +116,10 @@ fn print_help() {
          \x20 ticker [SYMBOL]         24h rolling ticker (default: btcusdt)\n\
          \x20 all-tickers             all-symbols mini-ticker stream (!miniTicker@arr)\n\
          \x20 multi [SYMBOLS...]      multiple diff-depth streams on one connection\n\
-         \x20 record [SYMBOL] [DIR]    live capture -> merged CSV under DIR\n\
+         \x20 record SYM1 [SYM2 ...] [DIR] live capture -> one merged CSV per symbol under DIR\n\
          \x20                         (default DIR: market_data/live_db)\n\
-         \x20                         flags: --rows N   stop after N rows\n\
+         \x20                         flags: --dir DIR  explicit output dir (removes ambiguity)\n\
+         \x20                                --rows N   stop after N rows *per symbol*\n\
          \x20                                --append  keep the existing file\n\
          \x20 monitor [SYMBOL]        live tape + 20-level orderbook monitor;\n\
          \x20                         view with:  python uets/display.py [SYMBOL]\n\
@@ -270,22 +271,7 @@ mod record {
             .flush_every(1);
             let mut capture = Self {
                 merger: Merger::new(levels),
-                reorder: ReorderBuffer::new(lateness_ms, REORDER_CAP)
-                    // The watermark is exchange time, so it only advances when
-                    // an event arrives. On a quiet book that holds rows hostage
-                    // until the next flurry moves it, and the flurry then
-                    // releases the whole backlog at once: measured on live
-                    // BTCUSDT, 41% of rows shared an identical timestamp with
-                    // their predecessor, which is a batch release rather than a
-                    // 100 ms stream. Age bounds the wait in wall-clock terms so
-                    // a row is never held longer than this regardless of
-                    // whether the exchange is talking.
-                    //
-                    // One cadence tick, not the 200ms lateness window: the
-                    // guard should only fire on a genuine stall, never during
-                    // ordinary traffic, so the ordering guarantee is untouched
-                    // in the normal case.
-                    .max_hold(Duration::from_millis(120)),
+                reorder: ReorderBuffer::new(lateness_ms, REORDER_CAP),
                 csv,
                 reseeds_pending: false,
                 seeded: false,
@@ -731,8 +717,7 @@ mod record {
         );
         eprintln!(
             "[capture] applied={} diffs={} trades={} gaps={} seeds={} \
-             covered_dropped={} foreign_dropped={} staged_dropped={} \
-             age_released={} late_dropped={} venue={}",
+             covered_dropped={} foreign_dropped={} staged_dropped={} venue={}",
             counters.events_applied,
             counters.diff_frames,
             counters.trades,
@@ -741,12 +726,6 @@ mod record {
             guard.covered_dropped,
             guard.foreign_dropped,
             guard.staged_dropped,
-            // Rows released by the wall-clock age guard rather than by the
-            // watermark. Non-zero is not an error, but it IS an ordering
-            // compromise, so it belongs in the same line as the other loss
-            // counters instead of being invisible.
-            guard.reorder.age_released(),
-            guard.reorder.late_dropped(),
             venue_name(guard.trade_owner),
         );
         Ok(())
@@ -996,6 +975,200 @@ mod strategy_tests {
     }
 }
 
+/// `record` argument parsing: `record SYM1 [SYM2 ...] [DIR] [--dir DIR] [--rows N] [--append]`.
+///
+/// Every positional that is not path-like is a symbol; a trailing path-like
+/// positional (contains `/`, `\` or `.`, or is an existing directory) is the
+/// output dir, which keeps `record btcusdt <dir>` working. `--dir` always
+/// wins and removes all ambiguity when a bare directory name would otherwise
+/// read as a symbol:
+///
+/// ```text
+/// record btcusdt                     # one symbol, default dir
+/// record btcusdt ethusdt bnbusdt     # three symbols, default dir
+/// record btcusdt ethusdt ./captures  # two symbols, explicit dir
+/// record btcusdt out --dir out       # bare dirname needs --dir
+/// ```
+fn parse_record_args(rest: &[String]) -> Result<(Vec<String>, String, Option<u64>, bool), String> {
+    let mut dir_flag: Option<String> = None;
+    let mut max_rows: Option<u64> = None;
+    let mut append = false;
+    let mut positionals: Vec<String> = Vec::new();
+    let mut i = 0;
+    while i < rest.len() {
+        match rest[i].as_str() {
+            "--rows" => {
+                let value = rest.get(i + 1).ok_or("--rows expects a number")?;
+                max_rows = Some(
+                    value
+                        .parse::<u64>()
+                        .map_err(|_| format!("--rows expects a number, got: {value}"))?,
+                );
+                i += 2;
+            }
+            "--dir" => {
+                dir_flag = Some(
+                    rest.get(i + 1)
+                        .cloned()
+                        .ok_or("--dir expects a directory")?,
+                );
+                i += 2;
+            }
+            "--append" => {
+                append = true;
+                i += 1;
+            }
+            other if other.starts_with("--") => {
+                i += 1; // unknown flag: skip rather than misread as a symbol
+            }
+            other => {
+                positionals.push(other.to_string());
+                i += 1;
+            }
+        }
+    }
+    let mut symbols = positionals;
+    let dir = match dir_flag {
+        Some(d) => d,
+        None => {
+            // Backward compatible: `record btcusdt <dir>` still resolves the
+            // second positional as the dir -- but only when it is path-like,
+            // so `record btcusdt ethusdt` reads as two symbols.
+            if symbols.len() >= 2 && looks_like_dir(symbols.last().expect("len checked")) {
+                symbols.pop().expect("len checked")
+            } else {
+                default_live_db_dir()
+            }
+        }
+    };
+    if symbols.is_empty() {
+        symbols.push("btcusdt".to_string());
+    }
+    Ok((symbols, dir, max_rows, append))
+}
+
+/// Symbols are bare alphanumerics (`btcusdt`); anything with a separator, a
+/// dot, or an existing directory on disk reads as an output path.
+fn looks_like_dir(s: &str) -> bool {
+    s.contains('/') || s.contains('\\') || s.contains('.') || std::path::Path::new(s).is_dir()
+}
+
+/// Run `record`: one capture thread per symbol, one CSV per symbol.
+///
+/// Each thread owns its websocket pair, seed thread, merger, and CSV writer,
+/// so symbols never block each other -- nineteen quiet books and one frantic
+/// book still write at their own cadences. `--rows N` applies per symbol.
+/// Ctrl+C stops the process; per-row flushing (fix A) means at most one row
+/// per symbol is lost on a hard kill.
+fn run_record(rest: &[String]) -> ExitCode {
+    let (symbols, dir, max_rows, append) = match parse_record_args(rest) {
+        Ok(parsed) => parsed,
+        Err(e) => {
+            eprintln!("record: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    if symbols.len() == 1 {
+        let mut config = live::CaptureConfig::new(&symbols[0], dir);
+        config.max_rows = max_rows;
+        config.append = append;
+        return match record::run(config) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("capture failed: {e}");
+                ExitCode::FAILURE
+            }
+        };
+    }
+    eprintln!("[record] {} symbols -> {}", symbols.len(), dir);
+    let handles: Vec<std::thread::JoinHandle<(String, Result<(), String>)>> = symbols
+        .into_iter()
+        .map(|symbol| {
+            let dir = dir.clone();
+            std::thread::spawn(move || {
+                let mut config = live::CaptureConfig::new(&symbol, &dir);
+                config.max_rows = max_rows;
+                config.append = append;
+                let outcome = record::run(config);
+                (symbol, outcome)
+            })
+        })
+        .collect();
+    let mut failed = false;
+    for handle in handles {
+        match handle.join() {
+            Ok((symbol, Ok(()))) => eprintln!("[record] {symbol}: done"),
+            Ok((symbol, Err(e))) => {
+                eprintln!("[record] {symbol}: failed: {e}");
+                failed = true;
+            }
+            Err(_) => {
+                eprintln!("[record] worker panicked");
+                failed = true;
+            }
+        }
+    }
+    if failed {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
+    }
+}
+
+#[cfg(test)]
+mod record_args_tests {
+    use super::*;
+
+    fn args(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn empty_defaults_to_btcusdt() {
+        let (syms, _dir, rows, append) = parse_record_args(&[]).expect("parses");
+        assert_eq!(syms, vec!["btcusdt"]);
+        assert!(rows.is_none() && !append);
+    }
+
+    #[test]
+    fn two_bare_words_are_two_symbols() {
+        let (syms, _dir, _, _) = parse_record_args(&args(&["btcusdt", "ethusdt"])).expect("parses");
+        assert_eq!(syms, vec!["btcusdt", "ethusdt"]);
+    }
+
+    #[test]
+    fn trailing_path_is_dir_not_symbol() {
+        let (syms, dir, _, _) =
+            parse_record_args(&args(&["btcusdt", "ethusdt", "./captures"])).expect("parses");
+        assert_eq!(syms, vec!["btcusdt", "ethusdt"]);
+        assert_eq!(dir, "./captures");
+    }
+
+    #[test]
+    fn dir_flag_wins_over_heuristic() {
+        let (syms, dir, _, _) =
+            parse_record_args(&args(&["btcusdt", "out", "--dir", "out"])).expect("parses");
+        assert_eq!(syms, vec!["btcusdt", "out"]);
+        assert_eq!(dir, "out");
+    }
+
+    #[test]
+    fn single_symbol_with_legacy_dir() {
+        let (syms, dir, _, _) =
+            parse_record_args(&args(&["btcusdt", "market_data/live_db"])).expect("parses");
+        assert_eq!(syms, vec!["btcusdt"]);
+        assert_eq!(dir, "market_data/live_db");
+    }
+
+    #[test]
+    fn rows_and_append_parse() {
+        let (_, _, rows, append) =
+            parse_record_args(&args(&["btcusdt", "--rows", "50", "--append"])).expect("parses");
+        assert_eq!(rows, Some(50));
+        assert!(append);
+    }
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let cmd = args.first().map(String::as_str).unwrap_or("help");
@@ -1046,44 +1219,7 @@ fn main() -> ExitCode {
             reader::multiple_streams(&symbols);
         }
         "record" => {
-            // Live capture -> the merged 128-column CSV, byte-compatible with
-            // the historical table. Streams until Ctrl+C unless a row cap is
-            // given as `--rows N` in the output-dir position's sibling flag.
-            let symbol = if first().is_empty() {
-                "btcusdt".into()
-            } else {
-                first()
-            };
-            // A flag is not a positional. Without this, `record btcusdt
-            // --rows 10` would take "--rows" as the output directory and write
-            // the capture into a directory literally named `--rows`.
-            let dir = rest
-                .iter()
-                .skip(1)
-                .find(|a| !a.starts_with("--") && !a.chars().all(|c| c.is_ascii_digit()))
-                .cloned()
-                .unwrap_or_else(default_live_db_dir);
-            let mut config = live::CaptureConfig::new(&symbol, dir);
-            // `--rows N` bounds the capture, which is what makes it testable
-            // and scriptable instead of only interactive.
-            if let Some(index) = rest.iter().position(|a| a == "--rows") {
-                if let Some(value) = rest.get(index + 1) {
-                    match value.parse::<u64>() {
-                        Ok(n) => config.max_rows = Some(n),
-                        Err(_) => {
-                            eprintln!("--rows expects a number, got: {value}");
-                            return ExitCode::FAILURE;
-                        }
-                    }
-                }
-            }
-            if rest.iter().any(|a| a == "--append") {
-                config.append = true;
-            }
-            if let Err(e) = record::run(config) {
-                eprintln!("capture failed: {e}");
-                return ExitCode::FAILURE;
-            }
+            return run_record(&rest);
         }
         "monitor" => {
             let symbol = if first().is_empty() {

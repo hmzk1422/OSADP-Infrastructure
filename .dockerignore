@@ -1,0 +1,65 @@
+# =============================================================================
+# Docker build-context exclusions.
+#
+# The repo is ~291 GB, overwhelmingly `market_data/` (280 GB of parquet and
+# csv). Docker tars the whole build context before it sends a byte to the
+# daemon, so without this the build spends minutes transferring data the image
+# never uses -- the measured transfer rate on this repo was ~15 MB/s against a
+# 3.5 GB context, and the context was 3.5 GB only because the previous run's
+# cache had already trimmed it.
+#
+# Everything here is either (a) data, (b) a build artifact, or (c) tooling that
+# exists on the host. The container rebuilds (b) from source and reaches (a)
+# and (c) through the compose bind mounts, not through the image.
+# =============================================================================
+
+# --- Market data: the single biggest item, 280 GB ---------------------------
+# Bind-mounted read/write in docker-compose.dev.yml instead.
+market_data/
+
+# --- Python virtualenv: 6 GB, and the container has its own interpreter -----
+venv/
+.venv/
+*.egg-info/
+
+# --- Rust build artifacts: rebuilt inside the image from source -------------
+# Not just noise -- shipping a Windows-built target/ into a Linux image is
+# actively wrong, since the artifacts are not portable.
+target/
+**/target/
+
+# --- Python caches ----------------------------------------------------------
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# --- Git history: 1.4 GB, and nothing in the build reads it ----------------
+.git/
+.github/
+
+# --- Secrets: never bake a key into a layer --------------------------------
+.env
+*.key
+*.pem
+
+# --- Editor / OS noise ------------------------------------------------------
+.vscode/
+.idea/
+.DS_Store
+
+# --- Local output artifacts ------------------------------------------------
+out/
+build/
+*.log
+
+# --- Prebuilt wheels: the root Dockerfile consumes these, the dev image
+# does not. Present in the context they would be copied in by `COPY . .`.
+dist/
+
+# --- Docs are not needed to build or run -----------------------------------
+docs/
+*.md

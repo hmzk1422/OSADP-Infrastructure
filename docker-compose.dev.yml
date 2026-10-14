@@ -1,0 +1,53 @@
+# =============================================================================
+# Dev container for the uets websocket capture.
+#
+# The point of the bind mounts: everything the container writes lands in the
+# repo on the host, so a CSV produced inside Linux is readable from Windows
+# Explorer and from the Python tooling without a `docker cp`.
+#
+#   docker compose -f docker-compose.dev.yml run --rm uets-dev
+#   docker compose -f docker-compose.dev.yml run --rm uets-dev \
+#       bash -c "cd uets && cargo run --quiet --bin dev_test -- record btcusdt market_data/live_db --rows 200"
+# =============================================================================
+services:
+  uets-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    image: osadp-core-dev:latest
+    container_name: uets-dev
+    # Keeps the container alive so `docker exec` can drive it; `run --rm` with
+    # an explicit command overrides this for one-shot captures.
+    command: sleep infinity
+    restart: unless-stopped
+
+    volumes:
+      # Whole repo, so an edit on Windows is live in the container with no
+      # rebuild of the image. cargo target/ is inside these trees and is
+      # therefore shared too -- that is the tradeoff for dropping the cold
+      # compile, and it is the right one for a dev loop.
+      - ./uets:/workspace/uets
+      - ./components:/workspace/components
+      - ./tools:/workspace/tools
+      - ./market_data:/workspace/market_data
+      - ./uets/out:/workspace/uets/out
+
+      # Named volume for the cargo registry: it is large and host-specific
+      # (Windows line endings on .crates.toml are not a thing, but the paths
+      # and the file count are), and sharing it across a bind mount just makes
+      # every `cargo` invocation slower on Windows.
+      - cargo-registry:/usr/local/cargo/registry
+
+    environment:
+      # Keeps the capture's exchange-time reasoning honest. The timestamps are
+      # exchange epoch ms either way, but a TZ mismatch makes logs confusing.
+      TZ: UTC
+      # Surfaced in [capture] lines so a container run is never mistaken for a
+      # host run when comparing output.
+      UETS_RUNTIME: docker-linux
+
+    # No ports: nothing in this image serves anything. The websocket client is
+    # an outbound connection, which needs no published port.
+
+volumes:
+  cargo-registry:
