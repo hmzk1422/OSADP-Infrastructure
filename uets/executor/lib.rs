@@ -1,3 +1,5 @@
+#[path = "../aggregator/mod.rs"]
+pub mod aggregator;
 pub mod connectors;
 pub mod core;
 pub mod exchange;

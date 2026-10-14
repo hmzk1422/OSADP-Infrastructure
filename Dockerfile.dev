@@ -1,0 +1,84 @@
+# =============================================================================
+# OSADP-Core -- DEV container (Linux, builds from source)
+# =============================================================================
+# Why this exists: the websocket and socket work cannot be built or tested on
+# win32. `std::os::unix::net::UnixStream` is unix-only and tokio has no UDS on
+# Windows, so Linux is the only place the socket layer compiles at all. This
+# image builds the Rust crates from source, so it is the environment the live
+# capture and (later) the UNIX-domain socket spine are developed in.
+#
+# Distinct from the root `Dockerfile`, which is the slim *runtime* image: it
+# consumes prebuilt CI wheels from dist/ and carries no Rust toolchain. Do not
+# merge the two -- a dev image with a compiler in it is the wrong shape to ship.
+#
+# Build + run:
+#   docker compose -f docker-compose.dev.yml run --rm uets-dev
+#   docker compose -f docker-compose.dev.yml run --rm uets-dev \
+#       cargo run --quiet --bin dev_test -- record btcusdt --rows 200
+# =============================================================================
+FROM rust:1.97-bookworm AS rust
+
+# Python 3.11 to match the runtime image and the local venv, so a behaviour
+# difference is never a Python-version difference.
+FROM python:3.11-slim-bookworm
+
+# Cargo/Rustup live in /usr/local/cargo in the official image.
+COPY --from=rust /usr/local/cargo /usr/local/cargo
+COPY --from=rust /usr/local/rustup /usr/local/rustup
+ENV PATH=/usr/local/cargo/bin:$PATH \
+    CARGO_HOME=/usr/local/cargo \
+    RUSTUP_HOME=/usr/local/rustup
+
+# `pkg-config` + `libssl-dev` + `clang`: rocksdb-sys (the Python rocksdb
+# binding) and several Rust crates need them at build time. Without them the
+# failure is a linker error deep in a build script, which is a miserable thing
+# to debug from a cold image.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        pkg-config \
+        libssl-dev \
+        clang \
+        git \
+        ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /workspace
+
+# Python deps.
+#
+# The repo vendors no real requirements.txt (the README references one that was
+# never committed), so a stub with a comment lives at the repo root purely so
+# this COPY always resolves -- `COPY requirements.txt` of a missing file fails
+# the build, and a glob that matches nothing fails too.
+#
+# COPY has no shell form: it is exec-form, so a `2>/dev/null || true` guard is
+# parsed as a third *path* and fails with
+# `failed to calculate checksum ... "/2>/dev/null": not found`.
+#
+# The Rust crates need no Python at all, which is why a stub is honest rather
+# than a workaround. Install the research stack into a running container when
+# it is actually wanted.
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt && \
+    echo "requirements.txt held no installable packages (stub) -- nothing to do"
+
+# Source last: every edit above this line is cached, so iterating on Rust does
+# not re-run apt or pip.
+COPY . .
+
+# Warm the target dir for the two crates so the first interactive `cargo run`
+# is not a cold 5-minute compile. Failure is tolerated: a cold image that works
+# beats a fast image that does not build.
+RUN cd components/pipelines/event_merger/live && cargo build --release \
+    && cd - && cd uets && cargo build --release --bin dev_test \
+    || true
+
+# Non-root, but the source tree must stay writable: `cargo` writes target/ and
+# the capture writes CSVs, both of which are bind-mounted from the host.
+RUN useradd --create-home --shell /bin/bash dev \
+    && chown -R dev:dev /workspace /usr/local/cargo
+USER dev
+
+ENV CARGO_TERM_COLOR=always
+
+CMD ["/bin/bash"]

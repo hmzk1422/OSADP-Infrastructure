@@ -19,7 +19,6 @@
 
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
-use std::time::{Duration, Instant};
 
 use crate::event::MarketEvent;
 
@@ -68,24 +67,6 @@ pub struct ReorderBuffer {
     capacity: usize,
     overflow_dropped: u64,
     arrival: u64,
-    /// Wall-clock instant the oldest still-buffered event was pushed.
-    ///
-    /// The watermark is an *exchange-time* notion, so it only advances when a
-    /// new event arrives. On a quiet stream that means a held row can sit for
-    /// seconds and then be released together with whatever finally moves the
-    /// watermark -- the flat-then-burst profile measured in the capture file.
-    /// Age is the missing term: it bounds how long a row waits regardless of
-    /// whether the exchange is talking.
-    oldest_pushed_at: Option<Instant>,
-    /// How long a row may wait on exchange-time progress before age forces it
-    /// out. `Duration::ZERO` disables the guard and restores pure watermark
-    /// behaviour.
-    max_hold: Duration,
-    /// Rows released early by the age guard rather than by the watermark.
-    ///
-    /// Counted, not silent: an early release is a real ordering compromise, so
-    /// the operator can see how often it happens.
-    age_released: u64,
 }
 
 impl ReorderBuffer {
@@ -102,33 +83,7 @@ impl ReorderBuffer {
             capacity,
             overflow_dropped: 0,
             arrival: 0,
-            oldest_pushed_at: None,
-            max_hold: Duration::ZERO,
-            age_released: 0,
         }
-    }
-
-    /// Release held events once they are older than `max_hold`, even if the
-    /// watermark has not moved far enough to make them emittable.
-    ///
-    /// This is the fix for the flat-then-burst capture profile. Without it the
-    /// buffer is driven purely by exchange time: a quiet book holds rows
-    /// hostage, and the next trade flurry moves the watermark enough to
-    /// release the whole backlog in one batch. Measured on a live BTCUSDT
-    /// capture, 41% of rows shared an identical timestamp with their
-    /// predecessor -- that is a batch release, not a 100 ms stream.
-    ///
-    /// `Duration::ZERO` (the default from [`ReorderBuffer::new`]) keeps the
-    /// original watermark-only behaviour, so historical replay is unaffected
-    /// unless a caller opts in.
-    pub fn max_hold(mut self, max_hold: Duration) -> Self {
-        self.max_hold = max_hold;
-        self
-    }
-
-    /// Rows released early because they aged past [`ReorderBuffer::max_hold`].
-    pub fn age_released(&self) -> u64 {
-        self.age_released
     }
 
     /// Offer an event; returns the events that are now safe to emit.
@@ -158,13 +113,11 @@ impl ReorderBuffer {
         let arrival = self.arrival;
         self.arrival += 1;
         self.heap.push(Reverse((key, arrival)));
-        self.pending.push(Entry { key, arrival, event });
-        // The oldest buffered event is the one whose age bounds the wait. Set
-        // only on the empty -> non-empty edge so the clock is not restarted by
-        // every later arrival.
-        if self.oldest_pushed_at.is_none() {
-            self.oldest_pushed_at = Some(Instant::now());
-        }
+        self.pending.push(Entry {
+            key,
+            arrival,
+            event,
+        });
 
         self.drain_ready()
     }
@@ -175,7 +128,6 @@ impl ReorderBuffer {
         self.pending.sort_by_key(|entry| (entry.key, entry.arrival));
         out.extend(self.pending.drain(..).map(|entry| entry.event));
         self.heap.clear();
-        self.oldest_pushed_at = None;
         out
     }
 
@@ -200,28 +152,8 @@ impl ReorderBuffer {
         if self.watermark_ms == i64::MIN {
             return Vec::new();
         }
+        let cutoff = self.watermark_ms - self.lateness_ms;
         let mut ready: Vec<Entry> = Vec::new();
-
-        // The age guard. Normally the cutoff trails the watermark by the
-        // lateness window, so an event waits for the exchange to prove no
-        // earlier event is still coming. When the stream goes quiet the
-        // watermark stops advancing and that proof never arrives -- so the
-        // held rows wait for the *next* flurry, which then releases them all
-        // at once. Age converts "wait indefinitely for exchange progress" into
-        // "wait at most max_hold", which keeps the row cadence even without
-        // weakening the ordering guarantee during normal traffic.
-        let aged_out = match self.oldest_pushed_at {
-            Some(oldest) if !self.max_hold.is_zero() => oldest.elapsed() >= self.max_hold,
-            _ => false,
-        };
-        // An aged-out buffer emits everything it holds: the cutoff moves to the
-        // watermark itself, because waiting longer is the failure being fixed.
-        let cutoff = if aged_out {
-            self.watermark_ms
-        } else {
-            self.watermark_ms - self.lateness_ms
-        };
-
         // The heap top is the smallest key, so stop as soon as it is not safe.
         // Copy the key out before popping: peeking borrows `self.heap`
         // immutably, which cannot overlap the `pop` below.
@@ -238,19 +170,6 @@ impl ReorderBuffer {
             }
         }
         ready.sort_by_key(|entry| (entry.key, entry.arrival));
-
-        // Only count an event as age-released when age is genuinely why it
-        // went: during normal traffic the widened cutoff is still behind the
-        // rows that would have gone anyway, so this stays a true signal.
-        if aged_out && !ready.is_empty() {
-            self.age_released += ready.len() as u64;
-        }
-        // Restart the age clock only when the buffer actually drained. A
-        // partial drain leaves older rows behind, and their age is what bounds
-        // the wait -- resetting here would let the backlog age forever.
-        if self.pending.is_empty() {
-            self.oldest_pushed_at = None;
-        }
         ready.into_iter().map(|entry| entry.event).collect()
     }
 }
@@ -334,100 +253,5 @@ mod tests {
         buffer.push(trade(200, 2));
         let times: Vec<i64> = buffer.flush().iter().map(|e| e.event_time_ms()).collect();
         assert_eq!(times, vec![100, 200, 300]);
-    }
-
-    // -- The age guard -----------------------------------------------------
-    //
-    // The watermark is exchange time, so it only moves when a new event
-    // arrives. These tests cover what happens between arrivals.
-    //
-    // Note on style: every `push` return is collected. An earlier release is
-    // real output, and dropping it on the floor is how a test ends up asserting
-    // a shorter sequence than the buffer actually produced.
-
-    #[test]
-    fn without_max_hold_a_held_event_waits_for_the_watermark() {
-        // The default: unchanged behaviour, so historical replay is untouched.
-        // 900 sits inside the 200ms window of 1000, so it is buffered, not
-        // dropped as late and not emitted.
-        let mut buffer = ReorderBuffer::new(200, 1024);
-        assert!(buffer.push(trade(1000, 1)).is_empty());
-        assert!(buffer.push(trade(900, 2)).is_empty());
-        assert_eq!(buffer.len(), 2, "both still buffered behind the watermark");
-        assert_eq!(buffer.age_released(), 0);
-    }
-
-    #[test]
-    fn max_hold_releases_a_backlog_the_watermark_would_have_held() {
-        // The flat-then-burst fix. With a 200ms window the 1000ms event would
-        // stay buffered behind the 1200ms watermark and wait for the next
-        // flurry; age releases it instead.
-        let mut buffer = ReorderBuffer::new(200, 1024).max_hold(Duration::from_millis(10));
-        assert!(buffer.push(trade(1000, 1)).is_empty());
-
-        // Too young to force anything.
-        std::thread::sleep(Duration::from_millis(3));
-        assert!(
-            buffer.push(trade(1100, 2)).is_empty(),
-            "3ms is inside the 10ms hold"
-        );
-
-        // Aged out: the held 1000ms event goes without waiting for traffic.
-        std::thread::sleep(Duration::from_millis(15));
-        let released = buffer.push(trade(1200, 3));
-        assert!(
-            released.iter().any(|e| e.event_time_ms() == 1000),
-            "the aged 1000ms event must be released, got {released:?}"
-        );
-        assert!(buffer.age_released() > 0, "an early release must be counted");
-    }
-
-    #[test]
-    fn age_guard_still_emits_in_total_order() {
-        // Widening the cutoff must not scramble the order: the sort key is
-        // unchanged, only the cutoff moved.
-        let mut buffer = ReorderBuffer::new(200, 1024).max_hold(Duration::from_millis(10));
-        let mut all = Vec::new();
-        all.extend(buffer.push(trade(1000, 1)));
-        all.extend(buffer.push(trade(1100, 2)));
-        all.extend(buffer.push(trade(1200, 3)));
-        std::thread::sleep(Duration::from_millis(15));
-        all.extend(buffer.push(trade(1300, 4)));
-        all.extend(buffer.flush());
-
-        let times: Vec<i64> = all.iter().map(|e| e.event_time_ms()).collect();
-        assert_eq!(times, vec![1000, 1100, 1200, 1300], "order is preserved");
-        assert_eq!(buffer.len(), 0, "nothing left behind");
-    }
-
-    #[test]
-    fn age_guard_does_not_reorder_events_that_arrive_normally() {
-        // Healthy traffic: the widened cutoff is behind the rows the watermark
-        // would have released anyway, so the guard never has to widen anything.
-        let mut buffer = ReorderBuffer::new(200, 1024).max_hold(Duration::from_millis(50));
-        let mut all = Vec::new();
-        for ms in (1000..1400).step_by(100) {
-            all.extend(buffer.push(trade(ms, (ms / 100) as u64)));
-        }
-        all.extend(buffer.flush());
-        let times: Vec<i64> = all.iter().map(|e| e.event_time_ms()).collect();
-        assert_eq!(times, vec![1000, 1100, 1200, 1300]);
-    }
-
-    #[test]
-    fn zero_max_hold_disables_the_age_guard() {
-        // Same event sequence as the age test above, with the guard off. The
-        // 1000ms event must still be buffered -- proving the release in
-        // `max_hold_releases_a_backlog_the_watermark_would_have_held` came from
-        // age and not from the cutoff arithmetic alone.
-        let mut buffer = ReorderBuffer::new(200, 1024).max_hold(Duration::ZERO);
-        assert!(buffer.push(trade(1000, 1)).is_empty());
-        std::thread::sleep(Duration::from_millis(15));
-        assert!(
-            buffer.push(trade(1100, 2)).is_empty(),
-            "Duration::ZERO must restore pure watermark behaviour"
-        );
-        assert_eq!(buffer.len(), 2);
-        assert_eq!(buffer.age_released(), 0);
     }
 }

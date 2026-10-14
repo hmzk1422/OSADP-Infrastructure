@@ -58,3 +58,7 @@ filelist.txt
 
 # ── RocksDB ─────────────────────────────────────────────────────────────────
 data/
+# ── UETS runtime: Unix-domain sockets + live captures ─────────────────────
+uets/sockets/
+uets/out/live/
+market_data/live_db/
