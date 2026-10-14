@@ -252,11 +252,40 @@ mod record {
             } else {
                 CsvRecorder::create(path)
             }
+            // One row, one syscall.
+            //
+            // This is the live capture path, and its output is read by a human
+            // or a trader watching the file *while it is being written*. The
+            // previous `.flush_every(64)` batched 64 rows -- roughly a minute
+            // of market time -- into the OS at once, so the file sat flat and
+            // then jumped. Measured: 104 of 116 samples had zero new rows and
+            // 5 had >=20, which is exactly that flat-then-burst profile.
+            //
+            // At ~10 rows/s the syscall cost is irrelevant; what matters is
+            // that a row lands on disk when it is produced, not a minute later.
+            // The reorder buffer is what actually decides *when* a row becomes
+            // emittable, and that is a separate problem (see the watermark
+            // note on `Capture::emit`); this only removes the sink-side batching.
             .map_err(|e| e.to_string())?
-            .flush_every(64);
+            .flush_every(1);
             let mut capture = Self {
                 merger: Merger::new(levels),
-                reorder: ReorderBuffer::new(lateness_ms, REORDER_CAP),
+                reorder: ReorderBuffer::new(lateness_ms, REORDER_CAP)
+                    // The watermark is exchange time, so it only advances when
+                    // an event arrives. On a quiet book that holds rows hostage
+                    // until the next flurry moves it, and the flurry then
+                    // releases the whole backlog at once: measured on live
+                    // BTCUSDT, 41% of rows shared an identical timestamp with
+                    // their predecessor, which is a batch release rather than a
+                    // 100 ms stream. Age bounds the wait in wall-clock terms so
+                    // a row is never held longer than this regardless of
+                    // whether the exchange is talking.
+                    //
+                    // One cadence tick, not the 200ms lateness window: the
+                    // guard should only fire on a genuine stall, never during
+                    // ordinary traffic, so the ordering guarantee is untouched
+                    // in the normal case.
+                    .max_hold(Duration::from_millis(120)),
                 csv,
                 reseeds_pending: false,
                 seeded: false,
@@ -702,7 +731,8 @@ mod record {
         );
         eprintln!(
             "[capture] applied={} diffs={} trades={} gaps={} seeds={} \
-             covered_dropped={} foreign_dropped={} staged_dropped={} venue={}",
+             covered_dropped={} foreign_dropped={} staged_dropped={} \
+             age_released={} late_dropped={} venue={}",
             counters.events_applied,
             counters.diff_frames,
             counters.trades,
@@ -711,6 +741,12 @@ mod record {
             guard.covered_dropped,
             guard.foreign_dropped,
             guard.staged_dropped,
+            // Rows released by the wall-clock age guard rather than by the
+            // watermark. Non-zero is not an error, but it IS an ordering
+            // compromise, so it belongs in the same line as the other loss
+            // counters instead of being invisible.
+            guard.reorder.age_released(),
+            guard.reorder.late_dropped(),
             venue_name(guard.trade_owner),
         );
         Ok(())
