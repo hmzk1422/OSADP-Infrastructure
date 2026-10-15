@@ -26,6 +26,7 @@ is within-episode; see the TDMI section below for the design and its caveats.
 from __future__ import annotations
 
 import hashlib
+import re
 from collections.abc import Callable, Sequence
 from typing import NamedTuple
 
@@ -601,3 +602,246 @@ def resolve_metrics(overrides) -> dict[str, str]:
             raise ValueError(f"metric '{name}' is not valid for slot '{slot}'; choose from {sorted(impls)}")
         resolved[slot] = name
     return resolved
+
+
+
+# --------------------------------------------------------------------------- #
+# InfoNet (metric): objective-based regime segmentation.
+#
+#   A regime is a stretch where the objective -- the forward price move expressed
+#   as risk-reward (rr) -- is PERSISTENTLY predicted by a group of features.
+#
+#   rr_h[t] = (price[t + h] - price[t]) / (vol[t] * sqrt(h))      one column per horizon h
+#
+# How a stretch is judged (every knob below is a persistence/granularity control):
+#   1. The series is cut into blocks of ``block`` bars every ``stride`` bars
+#      (granularity: small block / small stride = fine, local segmentation).
+#   2. In each block, every (feature, horizon) cell gets the Miller-Madow MI between
+#      feature[t] and rr_h[t], rank-binned inside the block (level/scale shifts between
+#      blocks cannot fake dependence) and calibrated against circular-shift surrogates
+#      with the permutation-test order statistic (``alpha`` = per-cell false-positive rate).
+#      Surrogate k uses one shift shared by every cell of the block, as in the TDMI section.
+#   3. A block is INFORMATIVE at horizon h when at least ``min_features`` features are
+#      above their null (the "group of features").
+#   4. Informative blocks are PERSISTENT when they form a run of >= ``min_run`` informative
+#      blocks; runs separated by <= ``tolerance`` uninformative blocks are bridged.
+#      Effective minimum span in bars = block + (min_run - 1) * stride.
+#   5. Rows inside persistent runs are the regime (``mask`` per horizon, ``regime`` any).
+#
+# ``score`` = share of evaluated blocks that sit inside a persistent run, in [0, 1].
+# ``info``  = mean calibrated excess MI (nats) of the above-null cells in those blocks.
+#
+# Caveats: this is an EX-POST objective (it reads forward outcomes by design), so it is a
+# training / validation target, not a causal signal. Rr targets overlap for h > 1, so the
+# surrogate shift is floored at ``overlap`` bars. ``overlap`` defaults to the largest horizon
+# found in ``rr_<h>`` target column names (else the largest default horizon), so custom
+# horizons from ``infonet_target`` are respected automatically.
+# A trend inside a block that drives both a feature and rr still looks like information.
+# Features predicting rr marginally is measured; interactions between features are not.
+# Multiplicity: with min_features=1 and D features about 1-(1-alpha)^D of null blocks pass;
+# raise min_features or lower alpha as D grows.
+# --------------------------------------------------------------------------- #
+INFONET_HORIZONS = (4, 16, 64)   # bars ahead for the rr targets
+INFONET_VOL_WINDOW = 100         # causal rolling window of the 1-bar price change std
+INFONET_BLOCK = 200              # bars per evaluation block
+INFONET_ALPHA = 0.05             # per-cell false-positive rate against the surrogate null
+INFONET_SURROGATES = 49          # circular-shift surrogates per block (needs >= 1/alpha - 1)
+INFONET_MIN_PAIRS = 30           # a cell needs this many finite pairs in a block
+INFONET_MIN_FEATURES = 1         # features above null for a block to be informative
+INFONET_MIN_RUN = 2              # consecutive informative blocks that make a regime
+INFONET_TOLERANCE = 0            # uninformative blocks a run may bridge
+INFONET_SEED = 0
+
+
+class InfoNetResult(NamedTuple):
+    """Everything ``infonet_estimate`` measures; B blocks, D features, H horizons, T rows."""
+    score: float               # persistent coverage in [0, 1], mean over horizons; NaN if nothing evaluable
+    info: float                # mean calibrated excess MI (nats) over above-null cells in persistent blocks
+    horizon_score: np.ndarray  # (H,) persistent coverage per horizon
+    feature_hits: np.ndarray   # (D, H) share of persistent blocks in which each feature is above null
+    evidence: np.ndarray       # (B, D, H) calibrated excess MI (nats); NaN where undefined
+    defined: np.ndarray        # (B, H) block had at least one evaluable cell
+    informative: np.ndarray    # (B, H) >= min_features features above null
+    persistent: np.ndarray     # (B, H) informative and inside a run of >= min_run
+    starts: np.ndarray         # (B,) first row of each block
+    ends: np.ndarray           # (B,) one past the last row of each block
+    mask: np.ndarray           # (T, H) rows inside persistent runs, per horizon
+    regime: np.ndarray         # (T,) rows inside a persistent run at any horizon
+
+
+def infonet_target(price, horizons=INFONET_HORIZONS, vol_window: int = INFONET_VOL_WINDOW,
+                   min_periods: int | None = None) -> pd.DataFrame:
+    """Forward price change in risk-reward units, one ``rr_<h>`` column per horizon.
+
+    ``rr_h[t] = (price[t+h] - price[t]) / (vol[t] * sqrt(h))`` with ``vol[t]`` the causal
+    rolling std of ``price.diff()`` up to and including ``t``. The last ``h`` rows of each
+    column are NaN (no outcome yet), as are rows before the volatility has warmed up.
+    """
+    horizons = tuple(int(h) for h in horizons)
+    if not horizons or min(horizons) < 1:
+        raise ValueError("horizons must be positive integers")
+    series = price if isinstance(price, pd.Series) else pd.Series(np.asarray(price, dtype=np.float64))
+    series = pd.to_numeric(series, errors="coerce").astype(np.float64)
+    vol = series.diff().rolling(int(vol_window), min_periods=min_periods or max(int(vol_window) // 2, 2)).std(ddof=0)
+    vol = vol.where(vol > 1e-12)
+    out = {f"rr_{h}": series.diff(h).shift(-h) / (vol * np.sqrt(h)) for h in horizons}
+    return pd.DataFrame(out, index=series.index).replace([np.inf, -np.inf], np.nan)
+
+
+def _infonet_matrix(values, name: str) -> np.ndarray:
+    array = np.asarray(values, dtype=np.float64)
+    if array.ndim == 1:
+        array = array[:, None]
+    if array.ndim != 2:
+        raise ValueError(f"{name} must be 1-D or 2-D")
+    return np.where(np.isinf(array), np.nan, array)
+
+
+def _infer_overlap(target) -> int:
+    """Serial overlap of the target in bars: the largest ``h`` among ``rr_<h>`` column names.
+
+    Falls back to the largest default horizon when the target has no such column names
+    (plain arrays), so pass ``overlap`` explicitly for those.
+    """
+    horizons = [int(match.group(1)) for column in getattr(target, "columns", [])
+                if (match := re.fullmatch(r"rr_(\d+)", str(column)))]
+    return max(horizons) if horizons else max(INFONET_HORIZONS)
+
+
+def _persistent_runs(flags: np.ndarray, min_run: int, tolerance: int) -> np.ndarray:
+    """Blocks inside runs of >= ``min_run`` informative blocks (gaps <= ``tolerance`` are bridged)."""
+    out = np.zeros(len(flags), dtype=bool)
+    index = np.flatnonzero(flags)
+    if not len(index):
+        return out
+    for group in np.split(index, np.flatnonzero(np.diff(index) - 1 > tolerance) + 1):
+        if len(group) >= min_run:
+            out[group[0]:group[-1] + 1] = True
+    return out
+
+
+def infonet_estimate(features, target, block=None, stride=None, alpha=None, min_features=None,
+                     min_run=None, tolerance=None, min_pairs=None, bins=None, n_surrogates=None,
+                     seed=INFONET_SEED, overlap=None) -> InfoNetResult:
+    """Where is ``target`` (rr per horizon, see ``infonet_target``) persistently predicted by features?
+
+    ``features`` is (T, D) and ``target`` is (T, H), row-aligned: ``features[t]`` is known at
+    ``t`` and ``target[t]`` is the outcome realised afterwards. ``overlap`` (bars) is inferred from
+    ``rr_<h>`` column names when ``target`` is a DataFrame from ``infonet_target``. Persistence is tuned with
+    ``min_run`` / ``tolerance`` (how long, how forgiving), the group size with ``min_features``,
+    the strictness with ``alpha``, and the granularity with ``block`` / ``stride``.
+    """
+    block = INFONET_BLOCK if block is None else int(block)
+    stride = block if stride is None else int(stride)
+    alpha = INFONET_ALPHA if alpha is None else float(alpha)
+    min_features = INFONET_MIN_FEATURES if min_features is None else int(min_features)
+    min_run = INFONET_MIN_RUN if min_run is None else int(min_run)
+    tolerance = INFONET_TOLERANCE if tolerance is None else int(tolerance)
+    min_pairs = INFONET_MIN_PAIRS if min_pairs is None else int(min_pairs)
+    n_surrogates = INFONET_SURROGATES if n_surrogates is None else int(n_surrogates)
+    overlap = _infer_overlap(target) if overlap is None else int(overlap)
+    if not np.isfinite(alpha) or not 0.0 < alpha < 1.0:
+        raise ValueError("alpha must be finite and strictly between 0 and 1")
+    if n_surrogates + 1 < 1.0 / alpha:
+        raise ValueError(f"n_surrogates={n_surrogates} is too few for alpha={alpha}; need >= {int(np.ceil(1.0 / alpha)) - 1}")
+    if min_pairs < 4 or block < min_pairs or stride < 1:
+        raise ValueError("require min_pairs >= 4, block >= min_pairs and stride >= 1")
+    if min_run < 1 or tolerance < 0 or overlap < 0:
+        raise ValueError("require min_run >= 1, tolerance >= 0 and overlap >= 0")
+    if block < 2 * overlap + 1:   # otherwise no cell can place a surrogate shift outside the target's overlap
+        raise ValueError(f"block={block} is too short for overlap={overlap}; need block >= {2 * overlap + 1} "
+                         "(use a longer block or shorter horizons)")
+    if bins is not None and int(bins) < 2:
+        raise ValueError("bins must be >= 2 (or None for the automatic rule)")
+    x, y = _infonet_matrix(features, "features"), _infonet_matrix(target, "target")
+    if len(x) != len(y):
+        raise ValueError("features and target must have the same number of rows")
+    rows, width = x.shape
+    horizons = y.shape[1]
+    if not 1 <= min_features <= width:
+        raise ValueError("min_features must be between 1 and the number of features")
+    if rows < block:
+        raise ValueError(f"need at least block={block} rows, got {rows}")
+
+    starts = np.arange(0, rows - block + 1, stride)
+    ends = starts + block
+    rng = np.random.default_rng(seed)
+    allowed = int(np.floor(alpha * (n_surrogates + 1)))      # same order statistic as tdmi_calibrate
+    evidence = np.full((len(starts), width, horizons), np.nan)
+    for b, start in enumerate(starts):
+        xb, yb = x[start:start + block], y[start:start + block]
+        shared = rng.uniform(0.25, 0.75, size=n_surrogates)  # one shift fraction for every cell of the block
+        for h in range(horizons):
+            for d in range(width):
+                ok = np.isfinite(xb[:, d]) & np.isfinite(yb[:, h])
+                n = int(ok.sum())
+                floor = max(n // 4, overlap)
+                if n < min_pairs or n < 2 * floor + 1:
+                    continue
+                n_bins = tdmi_bins(n) if bins is None else int(bins)
+                bx, by = _rank_bins(xb[ok, d], n_bins), _rank_bins(yb[ok, h], n_bins)
+                observed = _mi_batch(bx, by[None, :], n_bins)[0]
+                shifts = np.clip(np.rint(shared * n).astype(np.int64), floor, n - floor)
+                null = _mi_batch(bx, by[(np.arange(n)[None, :] + shifts[:, None]) % n], n_bins)
+                evidence[b, d, h] = max(observed - np.sort(null)[n_surrogates - allowed], 0.0)
+
+    above = np.nan_to_num(evidence, nan=0.0) > 0
+    defined = np.isfinite(evidence).any(axis=1)
+    informative = (above.sum(axis=1) >= min_features) & defined
+    persistent = np.stack([_persistent_runs(informative[:, h], min_run, tolerance) for h in range(horizons)], axis=1)
+    mask = np.zeros((rows, horizons), dtype=bool)
+    for b, h in zip(*np.nonzero(persistent)):
+        mask[starts[b]:ends[b], h] = True
+    n_defined, n_persistent = defined.sum(axis=0), persistent.sum(axis=0)
+    horizon_score = np.divide(n_persistent, n_defined, out=np.full(horizons, np.nan), where=n_defined > 0)
+    active = above & persistent[:, None, :]
+    score = float(np.nanmean(horizon_score)) if np.isfinite(horizon_score).any() else np.nan
+    info = (float(evidence[active].mean()) if active.any() else 0.0) if np.isfinite(score) else np.nan
+    feature_hits = np.divide(active.sum(axis=0), n_persistent[None, :], out=np.full((width, horizons), np.nan),
+                             where=n_persistent[None, :] > 0)
+    return InfoNetResult(score, info, horizon_score, feature_hits, evidence, defined, informative,
+                         persistent, starts, ends, mask, mask.any(axis=1))
+
+
+def infonet_score(features, target, **kwargs) -> float:
+    """Scalar InfoNet: share of evaluated blocks persistently predicted by the features, in [0, 1]."""
+    return infonet_estimate(features, target, **kwargs).score
+
+
+def infonet_segment(features, target, **kwargs) -> np.ndarray:
+    """Boolean (T,) regime mask: rows inside a persistent informative run at any horizon."""
+    return infonet_estimate(features, target, **kwargs).regime
+
+
+def infonet_regime_table(labels, features, target, null_id: str = "null", **kwargs) -> pd.DataFrame:
+    """Score existing regime labels by the same objective, one row per latent.
+
+    Each contiguous episode is evaluated on its own (blocks never cross an episode boundary);
+    episodes shorter than ``block`` are counted but cannot be evaluated. ``score`` pools blocks
+    over every episode and horizon of the latent.
+    """
+    labels = np.asarray(labels, dtype=object)
+    x, y = _infonet_matrix(features, "features"), _infonet_matrix(target, "target")
+    if not len(labels) == len(x) == len(y):
+        raise ValueError("labels, features and target must have the same number of rows")
+    block = INFONET_BLOCK if kwargs.get("block") is None else int(kwargs["block"])
+    if kwargs.get("overlap") is None:   # column names are lost in the array conversion above
+        kwargs["overlap"] = _infer_overlap(target)
+    bounds = np.r_[0, np.flatnonzero(labels[1:] != labels[:-1]) + 1, len(labels)]
+    table: dict = {}
+    for start, end in zip(bounds[:-1], bounds[1:]):
+        state = labels[start]
+        if state == null_id:
+            continue
+        row = table.setdefault(state, {"episodes": 0, "evaluated_episodes": 0, "persistent_blocks": 0, "evaluated_blocks": 0})
+        row["episodes"] += 1
+        if end - start < block:
+            continue
+        result = infonet_estimate(x[start:end], y[start:end], **kwargs)
+        row["evaluated_episodes"] += 1
+        row["persistent_blocks"] += int(result.persistent.sum())
+        row["evaluated_blocks"] += int(result.defined.sum())
+    frame = pd.DataFrame.from_dict(table, orient="index", columns=["episodes", "evaluated_episodes", "persistent_blocks", "evaluated_blocks"])
+    frame["score"] = frame["persistent_blocks"] / frame["evaluated_blocks"].where(frame["evaluated_blocks"] > 0)
+    frame.index.name = "latent_id"
+    return frame

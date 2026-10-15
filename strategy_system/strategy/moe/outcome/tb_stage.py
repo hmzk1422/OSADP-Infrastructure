@@ -44,8 +44,48 @@ def elapsed_errors(index: pd.Index, latent_id: pd.Series, realized: pd.Series,
     """Most recent ELAPSED residual (realized - predicted) of one latent; 0.0 before the first.
 
     Causal: a residual is only visible at rows whose clock >= the predicting row's
-    endpoint timestamp (backward merge_asof). Same-latent residuals only.
+    endpoint timestamp (backward asof). Same-latent residuals only.
+
+    Fast path: one stable argsort of the state's endpoints + searchsorted
+    gather (elapsed_err_kernel, parallel over rows). NaT endpoints are
+    excluded exactly -- never int64(NaT) masquerading as "always elapsed".
+    Any problem falls back to the legacy pandas merge_asof implementation.
     """
+    n = len(index)
+    zeros = np.zeros(n, dtype=np.float64)
+    if not isinstance(index, pd.DatetimeIndex):
+        return zeros
+    try:
+        from ..gp.jit_kernels import elapsed_err_kernel as _ee
+        clock_dt = pd.to_datetime(index, utc=True, errors="coerce")
+        clock = np.asarray(clock_dt.asi8, dtype=np.int64)
+        state_values = latent_id.astype("object").to_numpy()
+        state_rows = np.flatnonzero(state_values == state)
+        if state_rows.size == 0:
+            return zeros
+        end_dt = pd.DatetimeIndex(pd.to_datetime(pd.Series(endpoint), utc=True, errors="coerce"))
+        residual = (pd.to_numeric(realized, errors="coerce")
+                    - pd.to_numeric(predicted, errors="coerce")).to_numpy(dtype=np.float64)
+        ok = (state_values == state) & ~np.isnan(residual) & ~end_dt.isna().to_numpy()
+        if not ok.any():
+            return zeros
+        end_ns = np.asarray(end_dt.asi8, dtype=np.int64)[ok]
+        resid = np.ascontiguousarray(residual[ok])
+        order = np.argsort(end_ns, kind="mergesort")
+        end_sorted = np.ascontiguousarray(end_ns[order])
+        resid_sorted = np.ascontiguousarray(resid[order])
+        got = _ee(np.ascontiguousarray(clock), end_sorted, resid_sorted,
+                  np.ascontiguousarray(state_rows.astype(np.int64)))
+        out = zeros.copy()
+        out[state_rows] = np.where(np.isfinite(got), got, 0.0)
+        return out
+    except Exception:
+        return _elapsed_errors_pandas(index, latent_id, realized, predicted, endpoint, state)
+
+
+def _elapsed_errors_pandas(index: pd.Index, latent_id: pd.Series, realized: pd.Series,
+                           predicted: pd.Series, endpoint: pd.Series, state: str) -> np.ndarray:
+    """Legacy merge_asof implementation (reference + fallback)."""
     n = len(index)
     zeros = np.zeros(n, dtype=np.float64)
     if not isinstance(index, pd.DatetimeIndex):
@@ -109,8 +149,21 @@ def fit_latent_tb(base: pd.DataFrame, predictions: pd.DataFrame, targets: pd.Dat
                   latent_id: pd.Series, state: str, horizons: list, p: dict) -> TBFit:
     """Fit tb_regressor for one latent on [pred__h..., err__h...] only."""
     frame = base.copy()
-    for h in horizons:
-        frame[f"pred__{h}"] = pd.to_numeric(predictions[f"future_return__{h}"], errors="coerce")
+    if horizons:
+        pred_cols = [f"future_return__{h}" for h in horizons]
+        try:
+            import polars as pl
+            if not predictions.index.equals(base.index):
+                raise ValueError("predictions index must match base index")
+            plf = (pl.from_pandas(predictions[pred_cols])
+                   .select([pl.col(c).cast(pl.Float64, strict=False) for c in pred_cols])
+                   .to_pandas())
+            for h, c in zip(horizons, pred_cols):
+                frame[f"pred__{h}"] = plf[c].to_numpy()
+        except Exception:
+            # pandas path: index-aligned assignment, exactly as before
+            for h in horizons:
+                frame[f"pred__{h}"] = pd.to_numeric(predictions[f"future_return__{h}"], errors="coerce")
     for h in horizons:
         endpoint = f"future_timestamp__{h}"
         frame[f"err__{h}"] = (

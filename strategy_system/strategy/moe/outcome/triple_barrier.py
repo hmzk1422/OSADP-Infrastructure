@@ -37,7 +37,14 @@ TICK_SIZE = 0.01
 
 
 def quantize_price(price, tick: float = TICK_SIZE):
-    """Snap price(s) to the instrument tick (exact Decimal grid value)."""
+    """Snap price(s) to the instrument tick (exact Decimal grid value).
+
+    Fast paths give identical results with no per-element Python Decimal: the
+    numba quantize_tick_kernel for arrays/Series and quantize_tick_scalar for
+    scalars -- both match Decimal(str(v)).quantize(tick, ROUND_HALF_UP)
+    (ties away from zero) with the k*tick IEEE residue de-dusted. Any problem
+    falls back to the original per-element Decimal path.
+    """
     from decimal import Decimal, ROUND_HALF_UP
     q = Decimal(str(tick))
 
@@ -54,8 +61,23 @@ def quantize_price(price, tick: float = TICK_SIZE):
         return float(Decimal(str(f)).quantize(q, rounding=ROUND_HALF_UP))
 
     try:
-        if hasattr(price, "apply"):
+        from ..gp.jit_kernels import quantize_tick_kernel as _qt, quantize_tick_scalar as _qs
+    except Exception:
+        _qt, _qs = None, None
+    try:
+        if isinstance(price, pd.Series):
+            if _qt is not None:
+                try:
+                    out = _qt(np.ascontiguousarray(price.to_numpy(dtype=np.float64)), tick)
+                    return pd.Series(out, index=price.index, name=price.name)
+                except Exception:
+                    pass
             return price.apply(_one)
+        if _qt is not None and hasattr(price, "__len__") and not isinstance(price, (str, bytes)):
+            arr = np.asarray(price, dtype=np.float64).reshape(-1)
+            return _qt(np.ascontiguousarray(arr), tick)
+        if _qs is not None:
+            return _qs(price, tick)
         return _one(price)
     except Exception:
         return price
@@ -206,11 +228,23 @@ def _entry_events(
     time_ns = timestamps.asi8 if timestamps is not None else None
     fee_rate = float(fee_bps_per_side) / 10_000.0
 
-    for i, raw_side in enumerate(tqdm(sides_raw, desc="Evaluating Triple Barriers")):
-        if raw_side == 0 or not np.isfinite(raw_side):
-            continue
-        if raw_side not in (-1, 1):
-            raise ValueError(f"{signal_col} must contain only -1, 0, +1; found {raw_side!r} at row {i}")
+    # Vectorized row prefilter (same skip/raise semantics as the old per-row
+    # loop: side == 0 / non-finite rows skip, any other value than -1/+1 raises
+    # at the first offending row in order). The event loop below only touches
+    # active rows -- the dominant cost on 100k+ row frames was iterating every
+    # zero-side row through tqdm.
+    finite_side = np.isfinite(sides_raw)
+    active = finite_side & (sides_raw != 0)
+    bad = active & ~np.isin(sides_raw, (-1.0, 1.0))
+    if bad.any():
+        bad_i = int(np.flatnonzero(bad)[0])
+        raise ValueError(
+            f"{signal_col} must contain only -1, 0, +1; found {sides_raw[bad_i]!r} at row {bad_i}"
+        )
+    active_rows = np.flatnonzero(active)
+
+    for i in tqdm(active_rows, desc="Evaluating Triple Barriers"):
+        raw_side = sides_raw[i]
         side = int(raw_side)
         entry = prices[i]
         pt_width = float(pt_widths[i])
@@ -618,7 +652,20 @@ def _causal_feature_matrix(
       constant 0.0, no mean/std computed on any data, so no leakage.
     Returns (X, kept_cols).
     """
-    raw = df[feature_cols].apply(pd.to_numeric, errors="coerce").to_numpy(dtype=np.float64)
+    raw = None
+    try:
+        import polars as pl
+        # multithreaded cast+zero-fill; identical to to_numeric/coerce for
+        # numeric, numeric-string, and non-numeric columns (strict=False maps
+        # unparseable -> null -> NaN, exactly like errors="coerce").
+        plf = pl.from_pandas(df[feature_cols])
+        raw = (plf.select([pl.col(c).cast(pl.Float64, strict=False) for c in feature_cols])
+               .fill_null(np.nan).to_numpy())
+        raw = np.asarray(raw, dtype=np.float64).reshape(len(df), len(feature_cols))
+    except Exception:
+        raw = None
+    if raw is None:
+        raw = df[feature_cols].apply(pd.to_numeric, errors="coerce").to_numpy(dtype=np.float64)
     if raw.shape[1] == 0:
         raise ValueError("no feature columns to build the model matrix")
     train_finite = np.isfinite(raw[train_idx]).any(axis=0) if len(train_idx) else np.zeros(raw.shape[1], bool)
@@ -702,6 +749,28 @@ def simulate_barriers(d: BarrierData, tp_width: np.ndarray, sl_width: np.ndarray
 
 def forward_excursions(d: BarrierData) -> tuple[np.ndarray, np.ndarray]:
     """Side-adjusted MFE/MAE (positive fractions) over next H bars; NaN if path bad."""
+    try:
+        from ..gp.jit_kernels import excursion_kernel as _ex
+    except Exception:
+        _ex = None
+    if _ex is not None:
+        try:
+            import numpy as _np
+
+            entry = _np.ascontiguousarray(np.asarray(d.price, dtype=float).reshape(-1))
+            high = _np.ascontiguousarray(np.asarray(d.high, dtype=float).reshape(-1))
+            low = _np.ascontiguousarray(np.asarray(d.low, dtype=float).reshape(-1))
+            side = _np.ascontiguousarray(np.asarray(d.side, dtype=float).reshape(-1))
+            # prange kernel over (entry,high,low,timeout,side); same side-adjusted
+            # max-fraction math as the vectorized loop below, then path_ok mask.
+            mfe, mae = _ex(entry, high, low, int(d.horizon), side)
+            mfe = np.where(np.isfinite(mfe), np.maximum(mfe, 0.0), np.nan)
+            mae = np.where(np.isfinite(mae), np.maximum(mae, 0.0), np.nan)
+            mfe[~d.path_ok] = np.nan
+            mae[~d.path_ok] = np.nan
+            return mfe, mae
+        except Exception:
+            pass
     n, H = len(d.price), d.horizon
     p, s = d.price, d.side
     max_hi = np.full(n, -np.inf)

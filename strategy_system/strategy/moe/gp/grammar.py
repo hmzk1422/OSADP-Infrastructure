@@ -128,6 +128,8 @@ def _safe_divide(numerator: pd.Series, denominator: pd.Series) -> pd.Series:
 
 
 def _rolling(node_op: str, values: pd.Series, window: int) -> pd.Series:
+    # LEGACY fallback only; hot path uses TemporalFeatureCache + rolling_*_kernel (prange, float32).
+    # Kept for audit/unit tests. Do not call inside evolution loop.
     rolling = values.rolling(window=window, min_periods=window)
     if node_op == "rolling_mean":
         return rolling.mean()

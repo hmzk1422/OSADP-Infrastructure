@@ -12,18 +12,22 @@ from __future__ import annotations
 import numpy as np
 
 try:  # pragma: no cover - exercised implicitly
-    from numba import njit
+    from numba import njit, prange
 except ImportError:  # graceful fallback
     def njit(*args, **kwargs):
         if len(args) == 1 and callable(args[0]):
             return args[0]
         return lambda fn: fn
 
-__all__ = ["spearman_kernel", "blockwise_spearman_kernel", "abs_corr_exceeds"]
+    def prange(*args):
+        return range(*args)
+
+__all__ = ["spearman_kernel", "blockwise_spearman_kernel", "abs_corr_exceeds", "batch_spearman_kernel", "rolling_mean_kernel", "rolling_std_kernel", "lag_kernel", "diff_kernel", "quantize_tick_kernel", "barrier_sim_kernel", "excursion_kernel", "elapsed_err_kernel"]
 
 
 @njit(cache=True, nogil=True)
 def _average_ranks(values):
+    # NOTE: kept as serial core; parallel fan-out happens in spearman_kernel / batch kernel via prange.
     n = values.shape[0]
     order = np.argsort(values, kind="mergesort")
     ranks = np.empty(n, dtype=np.float64)
@@ -143,3 +147,276 @@ def abs_corr_exceeds(candidate, prior, mask, threshold, min_samples):
         return False
     corr = sab / np.sqrt(saa * sbb)
     return bool(np.isfinite(corr) and abs(corr) >= threshold)
+
+
+@njit(cache=True, nogil=True, parallel=True)
+def batch_spearman_kernel(vals, tgts, min_samples):
+    """Batched (rho, n) over stacked candidate matrix. Heavy: parallel fan-out."""
+    n_cand = vals.shape[0]
+    out_rho = np.empty(n_cand, dtype=np.float64)
+    out_n = np.empty(n_cand, dtype=np.int64)
+    for c in prange(n_cand):
+        rho, cnt = spearman_kernel(vals[c], tgts[c])
+        if cnt < min_samples or not np.isfinite(rho):
+            out_rho[c] = np.nan
+        else:
+            out_rho[c] = rho
+        out_n[c] = cnt
+    return out_rho, out_n
+
+
+@njit(cache=True, nogil=True, parallel=True)
+def rolling_mean_kernel(x, window):
+    """Causal rolling mean, min_periods=window. Heavy: parallel."""
+    n = x.shape[0]
+    out = np.empty(n, dtype=np.float32)
+    for i in prange(n):
+        if i + 1 < window:
+            out[i] = np.nan
+            continue
+        s = 0.0
+        c = 0
+        for j in range(i - window + 1, i + 1):
+            v = x[j]
+            if np.isfinite(v):
+                s += v
+                c += 1
+        if c < window:
+            out[i] = np.nan
+        else:
+            out[i] = np.float32(s / c)
+    return out
+
+
+@njit(cache=True, nogil=True, parallel=True)
+def rolling_std_kernel(x, window):
+    """Causal population rolling std (ddof=0), min_periods=window. Heavy: parallel."""
+    n = x.shape[0]
+    out = np.empty(n, dtype=np.float32)
+    for i in prange(n):
+        if i + 1 < window:
+            out[i] = np.nan
+            continue
+        s = 0.0
+        s2 = 0.0
+        c = 0
+        for j in range(i - window + 1, i + 1):
+            v = x[j]
+            if np.isfinite(v):
+                s += v
+                s2 += v * v
+                c += 1
+        if c < window:
+            out[i] = np.nan
+        else:
+            m = s / c
+            var = s2 / c - m * m
+            out[i] = np.float32(np.sqrt(var)) if var > 0.0 else np.float32(0.0)
+    return out
+
+
+@njit(cache=True, nogil=True)
+def lag_kernel(x, lag):
+    """Causal lag; NaN for i < lag. Lightweight: serial (no parallel)."""
+    n = x.shape[0]
+    out = np.empty(n, dtype=np.float32)
+    for i in range(n):
+        out[i] = np.nan if i < lag else x[i - lag]
+    return out
+
+
+@njit(cache=True, nogil=True)
+def diff_kernel(x, lag):
+    """Causal diff x[i]-x[i-lag]; NaN for i < lag. Lightweight: serial."""
+    n = x.shape[0]
+    out = np.empty(n, dtype=np.float32)
+    for i in range(n):
+        if i < lag:
+            out[i] = np.nan
+        else:
+            a = x[i]
+            b = x[i - lag]
+            out[i] = np.float32(a - b) if (np.isfinite(a) and np.isfinite(b)) else np.float32(np.nan)
+    return out
+
+
+
+def _tick_decimals(tick) -> int:
+    """Decimal places implied by Decimal(str(tick)) -- the exponent .quantize() uses.
+
+    quantize() ignores the tick's magnitude entirely: str(0.01) -> 2 decimals,
+    str(1.0) -> 1 decimal (grid 0.1), str(100) -> 0. This mirrors that rule
+    exactly for int and float ticks alike.
+    """
+    from decimal import Decimal
+    return max(0, -int(Decimal(str(tick)).as_tuple().exponent))
+
+
+def quantize_tick_kernel(price, tick):
+    """Tick snap with exact Decimal(str(v)).quantize(str(tick), ROUND_HALF_UP) parity.
+
+    Decimal .quantize() rounds to the tick's decimal EXPONENT (grid = 10^-d,
+    d from str(tick)), ties (exact .5) away from zero. The njit kernel
+    computes k = floor(|v|*10^d + 0.5 + bias) with bias = 1e-6 + count*1.1e-15
+    absorbing float error of v*10^d (canonical .5-tie doubles land within
+    ~half-ulp of the tie; values in that sub-tie window also resolve up --
+    indistinguishable from the tie in float64), then k/10^d is correctly
+    rounded to the nearest grid double = float(Decimal) bit for bit.
+    Non-finite values pass through. The wrapper resolves d from str(tick)
+    before entering numba (str() is unavailable in nopython mode).
+    """
+    arr = np.ascontiguousarray(np.asarray(price, dtype=np.float64).reshape(-1))
+    return _quantize_tick_kernel(arr, _tick_decimals(tick))
+
+
+@njit(cache=True, nogil=True)
+def _quantize_tick_kernel(price, decimals):
+    """Numba core: round-half-up to the 10^-decimals grid; ties away from zero."""
+    n = price.shape[0]
+    out = np.empty(n, dtype=np.float64)
+    s = 10.0 ** decimals
+    for i in range(n):
+        v = price[i]
+        if not np.isfinite(v):
+            out[i] = v
+            continue
+        c = np.abs(v) * s
+        k = np.floor(c + 0.5 + c * 1.1e-15 + 1e-6)
+        out[i] = (k / s) if v >= 0.0 else -(k / s)
+    return out
+
+
+def quantize_tick_scalar(v, tick: float) -> float:
+    """Python twin of quantize_tick_kernel: same str(tick) decimals, same IEEE
+    op order, same Decimal ROUND_HALF_UP parity (ties away from zero).
+
+    Non-numeric inputs and non-finite floats pass through unchanged (the
+    Decimal path also leaves non-finite values alone).
+    """
+    import math
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return v
+    if not math.isfinite(f):
+        return v
+    s = 10.0 ** _tick_decimals(tick)
+    c = abs(f) * s
+    k = math.floor(c + 0.5 + c * 1.1e-15 + 1e-6)
+    return (k / s) if f >= 0.0 else -(k / s)
+
+
+@njit(cache=True, nogil=True, parallel=True)
+def barrier_sim_kernel(entry, high, low, tp_w, sl_w, timeout, side):
+    """Per-event TP/SL/timeout sim. Heavy O(E*H): parallel over events.
+
+    Matches simulate_barriers semantics: side-aware barriers, stop wins ties,
+    timeout after timeout bars, exit = last available entry when timed out.
+    """
+    n = entry.shape[0]
+    outcome = np.empty(n, dtype=np.int64)
+    exit_px = np.empty(n, dtype=np.float64)
+    bars = np.empty(n, dtype=np.int64)
+    for e in prange(n):
+        if not (np.isfinite(entry[e]) and np.isfinite(tp_w[e]) and np.isfinite(sl_w[e])):
+            outcome[e] = 0
+            exit_px[e] = np.nan
+            bars[e] = 0
+            continue
+        s = side[e]
+        p = entry[e]
+        tp = p * (1.0 + tp_w[e]) if s > 0 else p * (1.0 - tp_w[e])
+        sl = p * (1.0 - sl_w[e]) if s > 0 else p * (1.0 + sl_w[e])
+        hit = 0
+        xp = p
+        lim = e + timeout
+        if lim > n:
+            lim = n
+        for t in range(e, lim):
+            h = high[t]
+            lo = low[t]
+            if s > 0:
+                sl_hit = np.isfinite(lo) and lo <= sl
+                tp_hit = np.isfinite(h) and h >= tp
+            else:
+                sl_hit = np.isfinite(h) and h >= sl
+                tp_hit = np.isfinite(lo) and lo <= tp
+            if sl_hit:
+                hit = -1
+                xp = sl
+                break
+            if tp_hit:
+                hit = 1
+                xp = tp
+                break
+        if hit == 0:
+            xp = entry[lim - 1] if (lim - 1 >= e and np.isfinite(entry[lim - 1])) else p
+        outcome[e] = hit
+        exit_px[e] = xp
+        bars[e] = lim - e
+    return outcome, exit_px, bars
+
+
+
+@njit(cache=True, nogil=True, parallel=True)
+def excursion_kernel(entry, high, low, timeout, side):
+    """Per-event max favorable/adverse excursion fractions. Heavy: parallel.
+
+    Matches forward_excursions semantics: future path is bars e+1..e+H
+    (entry bar excluded); tail uses whatever future bars remain.
+    """
+    n = entry.shape[0]
+    mfe = np.empty(n, dtype=np.float64)
+    mae = np.empty(n, dtype=np.float64)
+    for e in prange(n):
+        p = entry[e]
+        if not np.isfinite(p) or p == 0.0:
+            mfe[e] = np.nan
+            mae[e] = np.nan
+            continue
+        best_up = 0.0
+        best_dn = 0.0
+        lim = e + timeout + 1
+        if lim > n:
+            lim = n
+        for t in range(e + 1, lim):
+            h = high[t]
+            lo = low[t]
+            if np.isfinite(h):
+                r = (h - p) / p
+                if r > best_up:
+                    best_up = r
+            if np.isfinite(lo):
+                r = (lo - p) / p
+                if r < best_dn:
+                    best_dn = r
+        if side[e] > 0:
+            mfe[e] = best_up
+            mae[e] = -best_dn
+        else:
+            mfe[e] = -best_dn
+            mae[e] = best_up
+    return mfe, mae
+
+
+@njit(cache=True, nogil=True, parallel=True)
+def elapsed_err_kernel(clock_ns, end_ns, resid, pos_idx):
+    """Backward-asof gather: latest resid with end_ns <= clock. Heavy: parallel."""
+    n = pos_idx.shape[0]
+    m = end_ns.shape[0]
+    out = np.empty(n, dtype=np.float64)
+    for k in prange(n):
+        t = clock_ns[pos_idx[k]]
+        lo = 0
+        hi = m - 1
+        ans = -1
+        while lo <= hi:
+            mid = (lo + hi) // 2
+            if end_ns[mid] <= t:
+                ans = mid
+                lo = mid + 1
+            else:
+                hi = mid - 1
+        out[k] = 0.0 if ans < 0 else (resid[ans] if np.isfinite(resid[ans]) else 0.0)
+    return out
+

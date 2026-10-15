@@ -11,6 +11,7 @@ nothing else in the package touches storage.
 
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 
 from components.pipelines.event_merger.matched.parquet import (
@@ -54,10 +55,11 @@ def quantize_price(price, tick: float = BTCTICK):
 
     Scalar- and Series-safe. NaN passes through (no fake quote invented).
 
-    Uses Decimal(str(value)) with ROUND_HALF_UP so the result is the exact
-    decimal grid value (108613.2), not the nearest float64 to it
-    (108613.20000000001): plain float ``(p / 0.01).round() * 0.01`` re-dusts
-    because 0.01 itself is inexact in binary.
+    Fast paths (identical results, no per-element Python Decimal): the numba
+    quantize_tick_kernel for arrays/Series and quantize_tick_scalar for
+    scalars -- both match Decimal(str(value)) ROUND_HALF_UP exactly and
+    de-dust k*tick, so 108613.20000000001 still lands on 108613.2. Any
+    problem falls back to the original Decimal path below.
     """
     from decimal import Decimal, ROUND_HALF_UP
     q = Decimal(str(tick))
@@ -75,11 +77,31 @@ def quantize_price(price, tick: float = BTCTICK):
         return float(Decimal(str(f)).quantize(q, rounding=ROUND_HALF_UP))
 
     try:
-        if hasattr(price, "apply"):  # pandas Series
+        from strategy_system.strategy.moe.gp.jit_kernels import (
+            quantize_tick_kernel as _qt, quantize_tick_scalar as _qs)
+    except Exception:
+        _qt, _qs = None, None
+    try:
+        if hasattr(price, "apply"):  # pandas Series / DataFrame
+            if _qt is not None and isinstance(price, pd.Series):
+                try:
+                    out = _qt(np.ascontiguousarray(price.to_numpy(dtype=np.float64)), tick)
+                    return pd.Series(out, index=price.index, name=price.name)
+                except Exception:
+                    pass
             return price.apply(_one)
         if hasattr(price, "__iter__") and not isinstance(price, (str, bytes)):
             import pandas as _pd
-            return _pd.Series(list(price)).apply(_one)
+            series = _pd.Series(list(price))
+            if _qt is not None:
+                try:
+                    out = _qt(np.ascontiguousarray(series.to_numpy(dtype=np.float64)), tick)
+                    return _pd.Series(out)
+                except Exception:
+                    pass
+            return series.apply(_one)
+        if _qs is not None:
+            return _qs(price, tick)
         return _one(price)
     except Exception:
         return price
@@ -134,6 +156,10 @@ def _repair_one_file(df: pd.DataFrame) -> pd.DataFrame:
     Causal: LOB rows keep their book, TRADE/BOOKDEPTH rows inherit the last
     LIVE quote via forward-fill. Trade execution price stays strictly in the
     separate ``price`` column and never leaks into the book.
+
+    Fast path: one polars expression pass (multithreaded). Any polars failure
+    is logged and falls back to the original pandas body, so behavior is
+    identical either way.
     """
     if "event_type" not in df.columns:
         return df
@@ -142,27 +168,58 @@ def _repair_one_file(df: pd.DataFrame) -> pd.DataFrame:
     book_cols = _book_columns(df)
     if not book_cols:
         return df
-    is_lob = df["event_type"].astype(str).str.upper() == "LOB"
-    df.loc[~is_lob, book_cols] = pd.NA
-    for c in book_cols:
-        df[c] = pd.to_numeric(df[c], errors="coerce")
-    # Errant-quote (needle) mask: a LOB row with an absurd spread, a crossed
-    # book or a non-positive price is a feed ERROR (bid=5000 floors, ask
-    # +1..10% spikes; 1-3 rows long, then a sane quote arrives). Mask it so
-    # the causal ffill below HOLDS the last sane quote through the spike
-    # instead of computing mid=(bid+ask)/2 from garbage. No rows dropped.
-    _b, _a = df["best_bid_price"], df["best_ask_price"]
-    _mid = (_b + _a) / 2.0
-    _errant = _b.notna() & _a.notna() & (
-        (_b <= 0) | (_a <= _b) | ((_a - _b) > MAX_SPREAD * _mid)
-    )
-    df.loc[_errant, book_cols] = pd.NA
-    # ffill = last live quote (causal). bfill covers only the edge case
-    # where a file starts with TRADE rows before its first same-hour LOB.
-    df[book_cols] = df[book_cols].ffill().bfill()
-    # Passive mid on the instrument tick: (price/tick).round()*tick kills
-    # IEEE dust like 108613.20000000001 -> 108613.2 AND guarantees every
-    # downstream equality comparison / order price is tick-valid.
+    try:
+        import polars as pl
+        plf = pl.from_pandas(df)
+        is_lob = plf["event_type"].cast(pl.String).str.to_uppercase().fill_null("") == "LOB"
+        for c in book_cols:
+            plf = plf.with_columns(
+                pl.when(is_lob)
+                .then(pl.col(c).cast(pl.Float64, strict=False))
+                .otherwise(None)
+                .alias(c)
+            )
+        # Errant-quote (needle) mask: a LOB row with an absurd spread, a crossed
+        # book or a non-positive price is a feed ERROR (bid=5000 floors, ask
+        # +1..10% spikes; 1-3 rows long, then a sane quote arrives). Mask it so
+        # the causal ffill below HOLDS the last sane quote through the spike
+        # instead of computing mid=(bid+ask)/2 from garbage. No rows dropped.
+        b, a = plf["best_bid_price"], plf["best_ask_price"]
+        mid = (b + a) / 2.0
+        errant = b.is_not_null() & a.is_not_null() & (
+            (b <= 0) | (a <= b) | ((a - b) > MAX_SPREAD * mid)
+        )
+        for c in book_cols:
+            plf = plf.with_columns(
+                pl.when(errant).then(None).otherwise(pl.col(c)).alias(c)
+            )
+        # ffill = last live quote (causal). bfill covers only the edge case
+        # where a file starts with TRADE rows before its first same-hour LOB.
+        plf = plf.with_columns([pl.col(c).forward_fill().backward_fill().alias(c)
+                                for c in book_cols])
+        df = plf.to_pandas()
+    except Exception:
+        import logging
+        logging.getLogger(__name__).warning(
+            "polars book repair failed; falling back to pandas repair", exc_info=True
+        )
+        is_lob = df["event_type"].astype(str).str.upper() == "LOB"
+        df.loc[~is_lob, book_cols] = pd.NA
+        for c in book_cols:
+            df[c] = pd.to_numeric(df[c], errors="coerce")
+        # Errant-quote (needle) mask -- see the polars branch above.
+        _b, _a = df["best_bid_price"], df["best_ask_price"]
+        _mid = (_b + _a) / 2.0
+        _errant = _b.notna() & _a.notna() & (
+            (_b <= 0) | (_a <= _b) | ((_a - _b) > MAX_SPREAD * _mid)
+        )
+        df.loc[_errant, book_cols] = pd.NA
+        # ffill = last live quote (causal). bfill covers only the edge case
+        # where a file starts with TRADE rows before its first same-hour LOB.
+        df[book_cols] = df[book_cols].ffill().bfill()
+    # Passive mid on the instrument tick: kills IEEE dust like
+    # 108613.20000000001 -> 108613.2 AND guarantees every downstream equality
+    # comparison / order price is tick-valid (quantize_price kernel path).
     df["mid_price"] = quantize_price(
         (df["best_bid_price"] + df["best_ask_price"]) / 2.0, BTCTICK
     )
@@ -217,11 +274,24 @@ def load_L2(file_limit: int = 10, start: int = 0) -> pd.DataFrame:
             .reset_index(drop=True)
         )
         frames.append(_repair_one_file(_one))
-    df = (
-        pd.concat(frames, ignore_index=True)
-        .sort_values(sort_columns, kind="mergesort")
-        .reset_index(drop=True)
-    )
+    try:
+        import polars as pl
+        # Same sort keys as before; maintain_order keeps mergesort's stable
+        # duplicate handling and nulls_last mirrors pandas' NaN/NaT-last rule.
+        df = (pl.concat([pl.from_pandas(frame) for frame in frames])
+              .sort(sort_columns, maintain_order=True, nulls_last=True)
+              .to_pandas().reset_index(drop=True))
+    except Exception:
+        import logging
+        logging.getLogger(__name__).warning(
+            "polars global sort unavailable; falling back to pandas mergesort",
+            exc_info=True,
+        )
+        df = (
+            pd.concat(frames, ignore_index=True)
+            .sort_values(sort_columns, kind="mergesort")
+            .reset_index(drop=True)
+        )
 
     # Lossless-cadence tripwire: median gap must stay ~100ms or below.
     # check_tick_cadence raises if median > 200ms (rows dropped/duplicated).

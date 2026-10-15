@@ -17,15 +17,20 @@ from __future__ import annotations
 
 from tqdm.auto import tqdm
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 import pickle
+import warnings
 
 import numpy as np
 import pandas as pd
 
 from ._jit import NUMBA_AVAILABLE, temporal_window_kernel
 
+
+#: Dropped by auto-selection; the forward-looking subset also triggers a warning for explicit columns.
+_FORWARD_TOKENS = ("future", "fwd", "forward", "ahead", "outcome", "lead_", "next_ret", "target", "label")
+_EXCLUDED_TOKENS = ("timestamp", "_id", "trade_id") + _FORWARD_TOKENS
 
 def prepare_regime_input(
     df: pd.DataFrame,
@@ -48,13 +53,16 @@ def prepare_regime_input(
         missing = [column for column in columns if column not in df]
         if missing:
             raise KeyError(f"Missing regime input columns: {missing}")
+        flagged = [column for column in columns if any(token in str(column).lower() for token in _FORWARD_TOKENS)]
+        if flagged:
+            warnings.warn(f"feature_columns contain forward-looking names {flagged}; regime inputs must be "
+                          "known at each row's timestamp", UserWarning, stacklevel=2)
         values = df.loc[:, columns].apply(pd.to_numeric, errors="coerce")
     else:
         numeric = [
             column for column in df.columns
             if pd.api.types.is_numeric_dtype(df[column])
-            and not any(token in str(column).lower() for token in
-                        ("timestamp", "_id", "trade_id", "future", "target", "label"))
+            and not any(token in str(column).lower() for token in _EXCLUDED_TOKENS)
         ]
         price = price_column or next(
             (name for name in ("mid_price", "price_close", "close", "price") if name in df), None
@@ -64,6 +72,10 @@ def prepare_regime_input(
             values = pd.DataFrame({"log_return": np.log(series.where(series > 0)).diff()}, index=df.index)
         elif numeric:
             values = df.loc[:, numeric].apply(pd.to_numeric, errors="coerce")
+            if price in values:   # a raw price level is non-stationary and leaks scale: use its log return
+                level = values.pop(price)
+                name = "log_return" if "log_return" not in values else f"{price}_log_return"
+                values[name] = np.log(level.where(level > 0)).diff()
         else:
             raise ValueError("no numeric regime input columns found")
     values = values.replace([np.inf, -np.inf], np.nan)
@@ -99,9 +111,11 @@ class BaseRegimeEncoder(ABC):
 
     schema_version = 1
 
-    def __init__(self, feature_columns: Sequence[str] | None = None, timestamp_col: str | None = None):
+    def __init__(self, feature_columns: Sequence[str] | None = None, timestamp_col: str | None = None,
+                price_column: str | None = None):
         self.feature_columns = tuple(feature_columns) if feature_columns is not None else None
         self.timestamp_col = timestamp_col
+        self.price_column = price_column
         self.input_columns_: tuple[str, ...] | None = None
         self.embedding_columns_: tuple[str, ...] | None = None
         self.is_fitted_ = False
@@ -116,12 +130,9 @@ class BaseRegimeEncoder(ABC):
         name = self.timestamp_col or ("timestamp" if "timestamp" in df else None)
         times = None
         if name is not None:
-            if name not in df and isinstance(df.index, pd.DatetimeIndex):
-                times = pd.to_datetime(df.index, utc=True, errors="coerce")
-            elif name not in df:
+            if name not in df:   # an explicitly configured timestamp column must exist; no silent index fallback
                 raise KeyError(f"timestamp column {name!r} is missing")
-            else:
-                times = pd.to_datetime(df[name], utc=True, errors="coerce")
+            times = pd.to_datetime(df[name], utc=True, errors="coerce")
         elif isinstance(df.index, pd.DatetimeIndex):
             times = pd.to_datetime(df.index, utc=True, errors="coerce")
         if times is not None and (times.isna().any() or not times.is_monotonic_increasing):
@@ -131,7 +142,7 @@ class BaseRegimeEncoder(ABC):
         self._validate_time(df)
         timestamp_name = self.timestamp_col or ("timestamp" if "timestamp" in df else None)
         source = df.drop(columns=[timestamp_name]) if timestamp_name is not None and timestamp_name in df else df
-        values = prepare_regime_input(source, self.feature_columns)
+        values = prepare_regime_input(source, self.feature_columns, getattr(self, "price_column", None))
         if self.input_columns_ is not None and tuple(values.columns) != self.input_columns_:
             raise ValueError("regime input schema changed; feature names and order must remain fixed")
         return values
@@ -146,10 +157,41 @@ class BaseRegimeEncoder(ABC):
     @abstractmethod
     def transform(self, df: pd.DataFrame) -> pd.DataFrame:
         """Return causal embeddings aligned one-to-one with ``df``."""
+    #: True when parameters are learned from data (see ``fit_transform``).
+    is_learned = False
+
+    @property
+    def history_required(self) -> int | None:
+        """Past rows a chunk needs for output identical to a one-batch ``transform``.
+
+        ``None`` = the full history from the first row (unbounded state, e.g. expanding statistics).
+        """
+        return None
 
     def fit_transform(self, df: pd.DataFrame, y=None) -> pd.DataFrame:
+        """Fit and transform the SAME frame.
+
+        For learned encoders the fitted parameters have seen every row, so an early row's embedding
+        depends on later rows: in-sample, NOT point-in-time. Use ``walk_forward_embeddings`` for that.
+        """
+        if self.is_learned:
+            warnings.warn("fit_transform embeds the frame it was fitted on; learned parameters use future rows, "
+                          "so these embeddings are in-sample, not point-in-time (see walk_forward_embeddings)",
+                          UserWarning, stacklevel=2)
         self.fit_encoder(df, y=y)
         return self.transform(df)
+
+    def transform_chunk(self, df: pd.DataFrame, history: pd.DataFrame | None = None) -> pd.DataFrame:
+        """Embed a new chunk using earlier rows as context; returns only the rows of ``df``.
+
+        Passing ``history_required`` rows (or the full history when that is ``None``) makes the result
+        match transforming everything in one batch, up to floating-point rounding.
+        """
+        if history is None or len(history) == 0:
+            return self.transform(df)
+        need = self.history_required
+        context = history if need is None else history.iloc[-need:]
+        return self.transform(pd.concat([context, df])).iloc[len(context):]
 
     def save_encoder(self, path: str | Path) -> None:
         with Path(path).open("wb") as stream:
@@ -287,6 +329,33 @@ def encode_windows(encoder: BaseRegimeEncoder, df: pd.DataFrame) -> pd.DataFrame
     return encoder.transform(df)
 
 
+
+def walk_forward_embeddings(factory: Callable[[], BaseRegimeEncoder], df: pd.DataFrame, train_rows: int,
+                            step: int | None = None, expanding: bool = True) -> pd.DataFrame:
+    """Point-in-time embeddings: every row is encoded by a model fitted only on strictly earlier rows.
+
+    Rows ``[0, train_rows)`` seed the first fit and are NOT embedded (they would be in-sample).
+    Each following block of ``step`` rows is encoded by a fresh ``factory()`` encoder fitted on the
+    rows before the block (all of them if ``expanding``, else the last ``train_rows``), with enough
+    history prepended for batch-identical normalization. Costs one fit per block.
+    """
+    train_rows = int(train_rows)
+    step = max(len(df) - train_rows, 1) if step is None else int(step)
+    if train_rows < 2 or step < 1:
+        raise ValueError("train_rows must be >= 2 and step >= 1")
+    pieces, start = [], train_rows
+    while start < len(df):
+        stop = min(start + step, len(df))
+        train = df.iloc[:start] if expanding else df.iloc[max(0, start - train_rows):start]
+        encoder = factory().fit_encoder(train)
+        need = encoder.history_required
+        first = 0 if need is None else max(0, start - need)
+        pieces.append(encoder.transform(df.iloc[first:stop]).iloc[start - first:])
+        start = stop
+    if not pieces:
+        raise ValueError("train_rows leaves no rows to embed")
+    return pd.concat(pieces)
+
 # ---------------------------------------------------------------------------
 # Shared causal plumbing for learned encoders (no (rows, window, features) cube)
 # ---------------------------------------------------------------------------
@@ -335,9 +404,20 @@ class _ScaledWindowEncoder(BaseRegimeEncoder):
             raise ValueError("invalid window / embedding_dim / max_train_windows")
         self.window, self.embedding_dim = int(window), int(embedding_dim)
         self.max_train_windows, self.seed = int(max_train_windows), int(seed)
+        if normalization_window < 2 or normalization_min_periods < 2:
+            raise ValueError("normalization_window and normalization_min_periods must be >= 2")
+        if not np.isfinite(clip_z) or clip_z <= 0:
+            raise ValueError("clip_z must be finite and positive")
         self.normalization_window = int(max(normalization_window, window))
         self.normalization_min_periods = int(min(normalization_min_periods, self.normalization_window))
         self.clip_z = float(clip_z)
+
+    is_learned = True
+
+    @property
+    def history_required(self) -> int:
+        """Rows of past data that make a chunk's embeddings identical to a one-batch transform."""
+        return self.normalization_window + self.window
 
     def _scaled(self, df: pd.DataFrame) -> tuple[np.ndarray, np.ndarray, pd.DataFrame]:
         values = self.prepare_input(df)
@@ -442,6 +522,9 @@ class TorchRegimeEncoder(_ScaledWindowEncoder):
         split = int(len(rows) * (1.0 - self.val_fraction))
         train_rows = rows[:split] if self.val_fraction > 0 else rows
         val_rows = rows[rows >= (rows[split - 1] + self.window)] if self.val_fraction > 0 and split > 0 else rows[:0]
+        if len(train_rows) < 2:
+            raise ValueError(f"only {len(train_rows)} training window(s) remain after the validation split; "
+                             "need >= 2 (provide more rows or set val_fraction=0)")
         self.input_columns_ = tuple(values.columns)
         self._n_features = matrix.shape[1]
         device = self._device()

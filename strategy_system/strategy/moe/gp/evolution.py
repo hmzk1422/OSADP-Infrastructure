@@ -9,6 +9,8 @@ import numpy as np
 import pandas as pd
 
 from .grammar import Node, evaluate_expression, node_from_dict as _node_from_dict, node_to_dict as _node_to_dict, random_tree
+from .jit_kernels import spearman_kernel as _numba_spearman, blockwise_spearman_kernel as _numba_blockwise
+from .feature_cache import build_temporal_cache, evaluate_expression_cached
 from .population import (crossover, create_initial_population, deduplicate_population,
                          filter_constant_features, filter_invalid_features,
                          filter_redundant_features, initialize_population, mutate,
@@ -275,18 +277,16 @@ class GPEvolutionResult:
 
 
 def _spearman(left: np.ndarray, right: np.ndarray, min_samples: int) -> tuple[float, int]:
-    valid = np.isfinite(left) & np.isfinite(right)
-    count = int(valid.sum())
+    """Tie-averaged Spearman rho via the numba kernel (no per-call pandas rank allocs)."""
+    a = np.ascontiguousarray(left, dtype=np.float64).reshape(-1)
+    b = np.ascontiguousarray(right, dtype=np.float64).reshape(-1)
+    if a.size != b.size:
+        raise ValueError("spearman inputs must have equal length")
+    rho, count = _numba_spearman(a, b)
+    count = int(count)
     if count < min_samples:
         return np.nan, count
-    x = pd.Series(left[valid]).rank(method="average").to_numpy(dtype=np.float64)
-    y = pd.Series(right[valid]).rank(method="average").to_numpy(dtype=np.float64)
-    x = x - x.mean()
-    y = y - y.mean()
-    denom = np.sqrt(np.dot(x, x) * np.dot(y, y))
-    if denom <= 1e-15:
-        return np.nan, count
-    return float(np.dot(x, y) / denom), count
+    return float(rho), count
 
 
 def _correlation_tstat(correlation: float, sample_count: int) -> float:
@@ -443,17 +443,16 @@ def _blockwise_spearman(
     block_count: int,
     min_block_samples: int,
 ) -> np.ndarray:
-    """Compute separate train ICs over chronological blocks."""
-    blocks = np.array_split(np.arange(train_end), block_count)
-    correlations = []
-    for positions in blocks:
-        mask = train_mask[positions]
-        if int(mask.sum()) < min_block_samples:
-            continue
-        correlation, count = _spearman(values[positions][mask], target[positions][mask], min_block_samples)
-        if count >= min_block_samples and np.isfinite(correlation):
-            correlations.append(correlation)
-    return np.asarray(correlations, dtype=np.float64)
+    """Compute separate train ICs over chronological blocks (one numba kernel)."""
+    v = np.ascontiguousarray(values, dtype=np.float64).reshape(-1)
+    t = np.ascontiguousarray(target, dtype=np.float64).reshape(-1)
+    m = np.ascontiguousarray(train_mask, dtype=np.bool_).reshape(-1)
+    if not (v.size == t.size == m.size) or train_end > v.size:
+        raise ValueError("blockwise spearman inputs must share one length and cover train_end")
+    return np.asarray(
+        _numba_blockwise(v, t, m, int(train_end), int(block_count), int(min_block_samples)),
+        dtype=np.float64,
+    )
 
 
 def _is_correlated_duplicate(
@@ -463,16 +462,13 @@ def _is_correlated_duplicate(
     threshold: float,
     min_samples: int,
 ) -> bool:
+    from .jit_kernels import abs_corr_exceeds as _exceeds
+
+    cand = np.ascontiguousarray(np.asarray(candidate, dtype=np.float64).reshape(-1))
+    mk = np.ascontiguousarray(np.asarray(mask, dtype=np.bool_).reshape(-1))
     for prior in selected:
-        valid = mask & np.isfinite(candidate) & np.isfinite(prior)
-        if int(valid.sum()) < min_samples:
-            continue
-        left = candidate[valid]
-        right = prior[valid]
-        if np.std(left) <= 1e-12 or np.std(right) <= 1e-12:
-            continue
-        correlation = float(np.corrcoef(left, right)[0, 1])
-        if np.isfinite(correlation) and abs(correlation) >= threshold:
+        pr = np.ascontiguousarray(np.asarray(prior, dtype=np.float64).reshape(-1))
+        if bool(_exceeds(cand, pr, mk, float(threshold), int(min_samples))):
             return True
     return False
 
@@ -648,6 +644,11 @@ def extrapolate_features(
     report_rows: list[dict[str, Any]] = []
     train_end = split_boundary
     train_inputs = inputs.iloc[:train_end]
+    # One temporal cache for the whole run: (var, window) float32 arrays are
+    # precomputed once instead of pandas shift/rolling re-run per candidate.
+    # The train prefix is a zero-copy causal view of the same arrays.
+    temporal_cache = build_temporal_cache(inputs, windows)
+    train_cache = temporal_cache.prefix(train_end)
 
     # Each state-target pair has an independent population and objective.
     for state_id in tqdm(states, desc="GP State Search"):
@@ -672,14 +673,21 @@ def extrapolate_features(
             search_variables = tuple(ridge_names or cheap_names)
             population = initialize_population(rng, search_variables, population_size, max_height, windows)
 
+            def _train_eval(node):
+                """Cached train-prefix eval; pandas fallback keeps invalid-node detection exact."""
+                try:
+                    return evaluate_expression_cached(node, train_cache, train_inputs.index)
+                except (ValueError, KeyError, TypeError, FloatingPointError, AttributeError, OverflowError):
+                    return evaluate_expression(node, train_inputs)
+
             def screen_expression_population(candidates):
                 candidates = deduplicate_population(filter_invalid_features(candidates, search_variables, max_height))
                 sample_mask = train_mask_pair[:train_end]
-                candidates = filter_constant_features(candidates, train_inputs, sample_mask=sample_mask)
+                candidates = filter_constant_features(candidates, train_inputs, sample_mask=sample_mask, cache=train_cache)
                 if not candidates:
                     return []
                 expression_frame = pd.DataFrame(
-                    {str(node): evaluate_expression(node, train_inputs).iloc[train_rows].to_numpy(dtype=float)
+                    {str(node): _train_eval(node).iloc[train_rows].to_numpy(dtype=float)
                      for node in candidates},
                     index=features.index[train_rows],
                 )
@@ -690,7 +698,8 @@ def extrapolate_features(
                                               max_features=min(16, len(cheap)))
                 survivors = [node for node in candidates if str(node) in set(ridge)]
                 survivors = filter_redundant_features(survivors, train_inputs, threshold=correlation_threshold,
-                                                      min_samples=min_block_samples, sample_mask=sample_mask)
+                                                      min_samples=min_block_samples, sample_mask=sample_mask,
+                                                      cache=train_cache)
                 return survivors
 
             population = screen_expression_population(population)
@@ -703,9 +712,12 @@ def extrapolate_features(
                 key = str(node)
                 if key not in score_cache:
                     try:
-                        values = evaluate_expression(node, train_inputs).to_numpy(dtype=np.float64)
-                    except (FloatingPointError, OverflowError, ValueError, KeyError):
-                        values = np.full(train_end, np.nan, dtype=np.float64)
+                        values = evaluate_expression_cached(node, train_cache, train_inputs.index).to_numpy(dtype=np.float64)
+                    except (FloatingPointError, OverflowError, ValueError, KeyError, TypeError, AttributeError):
+                        try:
+                            values = evaluate_expression(node, train_inputs).to_numpy(dtype=np.float64)
+                        except (FloatingPointError, OverflowError, ValueError, KeyError):
+                            values = np.full(train_end, np.nan, dtype=np.float64)
                     train_pair = train_mask_pair[:train_end]
                     train_ic, count = _spearman(values[train_pair], y[:train_end][train_pair], min_state_samples)
                     block_ics = _blockwise_spearman(values, y[:train_end], train_pair, train_end,
@@ -771,7 +783,10 @@ def extrapolate_features(
             for node, fitness, train_ic, n_train, block_mean, block_std, n_blocks in final_scored:
                 if not np.isfinite(fitness) or str(node) in unique_selected:
                     continue
-                values = evaluate_expression(node, inputs).to_numpy(dtype=np.float64)
+                try:
+                    values = evaluate_expression_cached(node, temporal_cache, features.index).to_numpy(dtype=np.float64)
+                except (FloatingPointError, OverflowError, ValueError, KeyError, TypeError, AttributeError):
+                    values = evaluate_expression(node, inputs).to_numpy(dtype=np.float64)
                 validation_ic, n_validation = _spearman(
                     values[validation_mask_pair],
                     y[validation_mask_pair],

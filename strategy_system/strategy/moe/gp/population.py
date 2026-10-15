@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 from tqdm.auto import tqdm
+from .feature_cache import evaluate_expression_cached
 from .grammar import (Node, all_paths, evaluate_expression, has_nested_partial,
                       random_tree, replace_at_path, validate_expression)
 
@@ -24,46 +25,86 @@ def filter_invalid_features(population, primitive_features=None, max_depth=10):
     return [node for node in population if validate_expression(node, primitive_features, max_depth)]
 
 
-def filter_constant_features(population, frame, min_unique=2, sample_mask=None):
+def filter_constant_features(population, frame, min_unique=2, sample_mask=None, cache=None):
+    """Drop expressions with < min_unique finite values (optionally on sample rows).
+
+    Uses the caller's precomputed TemporalFeatureCache when given (the evolution
+    hot loop passes its run-level cache); if the cache is None a default one is
+    built once. A cache-evaluation failure falls back to the pandas evaluator so
+    a cache gap can never silently drop a valid node.
+    """
+    mask = None
+    if sample_mask is not None:
+        mask = np.asarray(sample_mask, dtype=bool)
+        if len(mask) != len(frame):
+            raise ValueError("sample_mask must match the frame rows")
+    if cache is None:
+        try:
+            from .feature_cache import build_temporal_cache as _bc
+            cache = _bc(frame)
+        except Exception:
+            cache = None
     kept = []
     for node in population:
         try:
-            values = evaluate_expression(node, frame)
-            if sample_mask is not None:
-                mask = np.asarray(sample_mask, dtype=bool)
-                if len(mask) != len(frame):
-                    raise ValueError("sample_mask must match the frame rows")
-                values = values.iloc[np.flatnonzero(mask)]
-            values = values.replace([np.inf, -np.inf], np.nan).dropna()
-            if values.nunique() >= min_unique:
+            if cache is not None:
+                try:
+                    values = evaluate_expression_cached(node, cache, frame.index).to_numpy(dtype=np.float64)
+                except (ValueError, KeyError, TypeError, FloatingPointError, AttributeError, OverflowError):
+                    values = evaluate_expression(node, frame).to_numpy(dtype=np.float64)
+            else:
+                values = evaluate_expression(node, frame).to_numpy(dtype=np.float64)
+            if mask is not None:
+                values = values[mask]
+            values = values[np.isfinite(values)]
+            if np.unique(values).size >= min_unique:
                 kept.append(node)
         except (ValueError, KeyError, TypeError, FloatingPointError, AttributeError):
             continue
     return kept
 
 
-def filter_redundant_features(population, frame, threshold=0.98, min_samples=30, sample_mask=None):
-    """Keep the first representative from each highly correlated expression group."""
+def filter_redundant_features(population, frame, threshold=0.98, min_samples=30, sample_mask=None, cache=None):
+    """Keep the first representative from each highly correlated expression group.
+
+    Uses the caller's TemporalFeatureCache when given (pandas fallback on any
+    cache failure). The mask is validated once up front and prior values are
+    stored already-masked, so every stored series has identical length.
+    """
     if not 0 < threshold <= 1:
         raise ValueError("threshold must be in (0, 1]")
+    mask = np.ones(len(frame), dtype=bool) if sample_mask is None else np.asarray(sample_mask, dtype=bool)
+    if len(mask) != len(frame):
+        raise ValueError("sample_mask must match the frame rows")
+    if cache is None:
+        try:
+            from .feature_cache import build_temporal_cache as _bc
+            cache = _bc(frame)
+        except Exception:
+            cache = None
+    from .jit_kernels import abs_corr_exceeds as _ex
+
     kept, values = [], []
     for node in tqdm(population, desc="Filtering Redundant Expressions", leave=False):
         try:
-            series = evaluate_expression(node, frame).to_numpy(dtype=float)
+            if cache is not None:
+                try:
+                    series = evaluate_expression_cached(node, cache, frame.index).to_numpy(dtype=np.float64)
+                except (ValueError, KeyError, TypeError, FloatingPointError, AttributeError, OverflowError):
+                    series = evaluate_expression(node, frame).to_numpy(dtype=np.float64)
+            else:
+                series = evaluate_expression(node, frame).to_numpy(dtype=np.float64)
         except (ValueError, KeyError, TypeError, FloatingPointError, AttributeError):
             continue
-        mask = np.ones(len(series), dtype=bool) if sample_mask is None else np.asarray(sample_mask, dtype=bool)
-        if len(mask) != len(series):
+        if len(series) != len(mask):
             raise ValueError("sample_mask must match the frame rows")
         series = series[mask]
-        duplicate = False
-        for prior in values:
-            valid = np.isfinite(series) & np.isfinite(prior)
-            if valid.sum() >= min_samples and np.std(series[valid]) > 1e-12 and np.std(prior[valid]) > 1e-12:
-                corr = np.corrcoef(series[valid], prior[valid])[0, 1]
-                if np.isfinite(corr) and abs(corr) >= threshold:
-                    duplicate = True
-                    break
+        all_true = np.ones(series.size, dtype=bool)
+        duplicate = any(
+            bool(_ex(np.ascontiguousarray(series), np.ascontiguousarray(prior), all_true,
+                     float(threshold), int(min_samples)))
+            for prior in values
+        )
         if not duplicate:
             kept.append(node)
             values.append(series)
