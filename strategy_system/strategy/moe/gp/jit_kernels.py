@@ -22,7 +22,7 @@ except ImportError:  # graceful fallback
     def prange(*args):
         return range(*args)
 
-__all__ = ["spearman_kernel", "blockwise_spearman_kernel", "abs_corr_exceeds", "batch_spearman_kernel", "rolling_mean_kernel", "rolling_std_kernel", "lag_kernel", "diff_kernel", "quantize_tick_kernel", "barrier_sim_kernel", "excursion_kernel", "elapsed_err_kernel"]
+__all__ = ["spearman_kernel", "blockwise_spearman_kernel", "abs_corr_exceeds", "batch_spearman_kernel", "rolling_mean_kernel", "rolling_std_kernel", "lag_kernel", "diff_kernel", "quantize_tick_kernel", "barrier_sim_kernel", "excursion_kernel", "elapsed_err_kernel", "barrier_outcome_kernel"]
 
 
 @njit(cache=True, nogil=True)
@@ -419,4 +419,50 @@ def elapsed_err_kernel(clock_ns, end_ns, resid, pos_idx):
                 hi = mid - 1
         out[k] = 0.0 if ans < 0 else (resid[ans] if np.isfinite(resid[ans]) else 0.0)
     return out
+
+
+@njit(cache=True, nogil=True, parallel=True)
+def barrier_outcome_kernel(high, low, side, tp_level, sl_level, timeout):
+    """TP/SL/timeout outcome for EVERY row. Exact mirror of the vectorized
+    O(n*H) k-loop in outcome/triple_barrier.simulate_barriers, early-exiting
+    per row and parallel over rows.
+
+    Contract (must stay bit-identical to the k-loop):
+      - path = bars e+1 .. min(e+timeout, n-1); the entry bar is excluded;
+      - stop is checked before TP on each bar (stop wins ties);
+      - raw IEEE comparisons (NaN level or NaN bar never hits, +inf hits);
+      - both levels NaN (side-0 / unscored rows) -> outcome 0 immediately;
+      - outcome: +1 TP first, -1 SL first (or tie), 0 timeout/no event.
+    """
+    n = side.shape[0]
+    outcome = np.empty(n, dtype=np.int64)
+    for e in prange(n):
+        sl = sl_level[e]
+        tp = tp_level[e]
+        if np.isnan(sl) and np.isnan(tp):
+            # comparisons against NaN are always False in the k-loop too
+            outcome[e] = 0
+            continue
+        s = side[e]
+        hit = 0
+        for k in range(1, timeout + 1):
+            t = e + k
+            if t >= n:
+                break
+            h = high[t]
+            lo = low[t]
+            if s > 0.0:
+                sl_hit = lo <= sl
+                tp_hit = h >= tp
+            else:
+                sl_hit = h >= sl
+                tp_hit = lo <= tp
+            if sl_hit:
+                hit = -1
+                break
+            if tp_hit:
+                hit = 1
+                break
+        outcome[e] = hit
+    return outcome
 

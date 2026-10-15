@@ -9,7 +9,9 @@ Output: moe/models/{regime/, latent_<id>/, manifest.json}  (the Rust contract).
 
 from __future__ import annotations
 
+import os
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from typing import NamedTuple
 
 import pandas as pd
@@ -115,6 +117,10 @@ def run_tb(df: pd.DataFrame, gp_stage: GPStage, cfg: dict) -> tuple[pd.DataFrame
     (TB_TRAIN_FRACTION_ALL in tb_stage.py). Latents below moe.min_latent_rows
     are skipped and reported. Each latent exports tb_regressor.onnx +
     metadata.json; manifest.json indexes the experts for the Rust router.
+    Every latent is fitted on the SHARED full base frame (barrier paths, the
+    train split and excursions span the global row timeline -- never the
+    latent's own subset), so fits are independent and run on a thread pool:
+    moe.tb_workers threads (default: min(latents, cpu_count, 4); 1 = serial).
 
     args:
     =================================
@@ -126,18 +132,42 @@ def run_tb(df: pd.DataFrame, gp_stage: GPStage, cfg: dict) -> tuple[pd.DataFrame
     """
     models_dir = models_dir_from_cfg(cfg)
     params = tb_params(cfg)
-    min_rows = int((cfg.get("moe") or {}).get("min_latent_rows", 200))
+    moe_cfg = cfg.get("moe") or {}
+    min_rows = int(moe_cfg.get("min_latent_rows", 200))
     base = build_tb_base_frame(df, gp_stage.feat_df, params)
+    latent_ids = gp_stage.latent_id.astype("object")  # once, not once per latent
+    latents = list(gp_stage.horizon_models)
 
-    rows, exported = [], []
-    for latent in gp_stage.horizon_models:
-        n_rows = int((gp_stage.latent_id.astype("object") == latent).sum())
+    def _fit_one(latent: str):
+        """Fit one latent on the shared frame; returns (row, fit|None)."""
+        n_rows = int((latent_ids == latent).sum())
         if n_rows < min_rows:
-            rows.append({"latent_id": latent, "status": f"skipped: {n_rows} rows < min_latent_rows={min_rows}"})
-            continue
+            return {"latent_id": latent,
+                    "status": f"skipped: {n_rows} rows < min_latent_rows={min_rows}"}, None
         try:
             fit = fit_latent_tb(base, gp_stage.predictions, gp_stage.targets,
                                 gp_stage.latent_id, latent, gp_stage.horizons, params)
+        except (ValueError, KeyError) as exc:
+            return {"latent_id": latent, "status": f"skipped: {exc}"}, None
+        return {"latent_id": latent, "status": "exported",
+                "n_rows": n_rows, "n_fit": fit.n_fit}, fit
+
+    workers = int(moe_cfg.get("tb_workers", 0) or 0)
+    if workers <= 0:
+        workers = min(len(latents) or 1, os.cpu_count() or 1, 4)
+    workers = max(1, min(workers, len(latents) or 1))
+    if workers > 1 and latents:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            fitted = list(pool.map(_fit_one, latents))
+    else:
+        fitted = [_fit_one(latent) for latent in latents]
+
+    rows, exported = [], []
+    for latent, (row, fit) in zip(latents, fitted):
+        if fit is None:
+            rows.append(row)
+            continue
+        try:
             export_latent(models_dir, latent, tp_model=fit.tp_model, sl_model=fit.sl_model,
                           tb_feature_order=fit.feature_order, horizons=gp_stage.horizons,
                           barrier=fit.barrier, err_rule=ERR_RULE, n_fit=fit.n_fit,
@@ -146,7 +176,7 @@ def run_tb(df: pd.DataFrame, gp_stage: GPStage, cfg: dict) -> tuple[pd.DataFrame
             rows.append({"latent_id": latent, "status": f"skipped: {exc}"})
             continue
         exported.append(latent)
-        rows.append({"latent_id": latent, "status": "exported", "n_rows": n_rows, "n_fit": fit.n_fit})
+        rows.append(row)
 
     manifest = export_manifest(models_dir, exported, {"horizons": gp_stage.horizons, "tb": params}) if exported else None
     return pd.DataFrame(rows), manifest

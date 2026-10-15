@@ -699,6 +699,52 @@ class TripleBarrierResult(NamedTuple):
     model: object
 
 
+_SIM_OUTCOME_FALLBACK_WARNED = False
+
+
+def _barrier_outcome(n: int, H: int, high, low, side, tp_level, sl_level) -> np.ndarray:
+    """Per-row TP/SL/timeout outcome: prange kernel fast path (early-exits per
+    row, O(n*H) worst case but parallel and typically O(n*avg_bars_held)),
+    with the original vectorized k-loop as a logged fallback.
+
+    The kernel mirrors the k-loop exactly (path bars e+1..min(e+H, n-1),
+    stop wins ties on the same bar, raw IEEE comparisons so NaN never hits
+    and +inf does).
+    """
+    global _SIM_OUTCOME_FALLBACK_WARNED
+    try:
+        from ..gp.jit_kernels import barrier_outcome_kernel as _k
+        return _k(np.ascontiguousarray(high, dtype=np.float64),
+                  np.ascontiguousarray(low, dtype=np.float64),
+                  np.ascontiguousarray(side, dtype=np.float64),
+                  np.ascontiguousarray(tp_level, dtype=np.float64),
+                  np.ascontiguousarray(sl_level, dtype=np.float64),
+                  int(H))
+    except Exception:
+        if not _SIM_OUTCOME_FALLBACK_WARNED:
+            _SIM_OUTCOME_FALLBACK_WARNED = True
+            import logging
+            logging.getLogger(__name__).warning(
+                "barrier_outcome_kernel unavailable; using vectorized O(n*H) k-loop",
+                exc_info=True)
+    outcome = np.zeros(n, dtype=int)
+    done = np.zeros(n, dtype=bool)
+    for k in range(1, H + 1):
+        m = n - k
+        if m <= 0:
+            break
+        hi, lo, side_k = high[k:], low[k:], side[:m]
+        hit_sl = np.where(side_k > 0, lo <= sl_level[:m], hi >= sl_level[:m])
+        hit_tp = np.where(side_k > 0, hi >= tp_level[:m], lo <= tp_level[:m])
+        live = ~done[:m]
+        sl_now = live & hit_sl
+        tp_now = live & ~hit_sl & hit_tp
+        outcome[:m][sl_now] = -1
+        outcome[:m][tp_now] = 1
+        done[:m] |= sl_now | tp_now
+    return outcome
+
+
 def simulate_barriers(d: BarrierData, tp_width: np.ndarray, sl_width: np.ndarray) -> pd.DataFrame:
     """Run TP/SL/timeout for every row. Widths are fractions of entry price.
 
@@ -711,21 +757,7 @@ def simulate_barriers(d: BarrierData, tp_width: np.ndarray, sl_width: np.ndarray
     with np.errstate(invalid="ignore", divide="ignore"):
         tp_level = p * (1.0 + s * tp_width)
         sl_level = p * (1.0 - s * sl_width)
-    outcome = np.zeros(n, dtype=int)
-    done = np.zeros(n, dtype=bool)
-    for k in range(1, H + 1):
-        m = n - k
-        if m <= 0:
-            break
-        hi, lo, side = d.high[k:], d.low[k:], s[:m]
-        hit_sl = np.where(side > 0, lo <= sl_level[:m], hi >= sl_level[:m])
-        hit_tp = np.where(side > 0, hi >= tp_level[:m], lo <= tp_level[:m])
-        live = ~done[:m]
-        sl_now = live & hit_sl
-        tp_now = live & ~hit_sl & hit_tp
-        outcome[:m][sl_now] = -1
-        outcome[:m][tp_now] = 1
-        done[:m] |= sl_now | tp_now
+    outcome = _barrier_outcome(n, H, d.high, d.low, s, tp_level, sl_level).astype(int, copy=False)
     timeout_price = np.full(n, np.nan)
     timeout_price[: n - H] = p[H:]
     timeout_ret = s * (timeout_price / p - 1.0)
