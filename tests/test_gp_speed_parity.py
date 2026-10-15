@@ -493,6 +493,137 @@ def test_entry_events_prefilter_validation():
                        rtol=0, atol=1e-9)
 
 
+def test_simulate_barriers_kernel_matches_vectorized():
+    """barrier_outcome_kernel (wired into simulate_barriers) must reproduce the
+    original vectorized O(n*H) k-loop exactly: same path window, stop-wins-ties,
+    NaN never hits, +inf hits, side-0/unscored rows stay outcome 0."""
+    from strategy_system.strategy.moe.outcome.triple_barrier import BarrierData, simulate_barriers
+    rng = np.random.default_rng(21)
+    n, H = 1500, 30
+    idx = pd.date_range("2025-01-01", periods=n, freq="1s", tz="UTC")
+    price = 100 + rng.normal(size=n).cumsum() * 0.1
+    high = price * (1.0 + np.abs(rng.normal(size=n)) * 0.002)
+    low = price * (1.0 - np.abs(rng.normal(size=n)) * 0.002)
+    high[::211] = np.nan          # NaN bar: never hits
+    low[::197] = np.nan
+    high[::503] = np.inf          # +inf bar: hits, exactly like numpy >=
+    side = rng.choice([-1.0, 0.0, 1.0], size=n).astype(float)
+    ev = side != 0
+    tp_width = np.full(n, np.nan)
+    sl_width = np.full(n, np.nan)
+    tp_width[ev] = 0.002          # widths finite only on event rows (as tb_regressor)
+    sl_width[ev] = 0.001
+    tp_width[ev & (rng.random(n) < 0.05)] = np.nan   # unscored: one-sided NaN too
+    sl_width[ev & (rng.random(n) < 0.03)] = np.nan
+    df = pd.DataFrame({"price_close": price}, index=idx)
+    d = BarrierData(df=df, X=np.zeros((n, 1)), kept_cols=["x"], price=price,
+                    high=high, low=low, side=side, horizon=H,
+                    path_ok=np.ones(n, bool), train=np.zeros(n, bool),
+                    test=ev.copy(), price_col="price_close")
+
+    # reference = the original vectorized k-loop, verbatim
+    p, s = d.price, d.side.astype(float)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        tp_level = p * (1.0 + s * tp_width)
+        sl_level = p * (1.0 - s * sl_width)
+    outcome = np.zeros(n, dtype=int)
+    done = np.zeros(n, dtype=bool)
+    for k in range(1, H + 1):
+        m = n - k
+        if m <= 0:
+            break
+        hi, lo, side_v = d.high[k:], d.low[k:], s[:m]
+        hit_sl = np.where(side_v > 0, lo <= sl_level[:m], hi >= sl_level[:m])
+        hit_tp = np.where(side_v > 0, hi >= tp_level[:m], lo <= tp_level[:m])
+        live = ~done[:m]
+        sl_now = live & hit_sl
+        tp_now = live & ~hit_sl & hit_tp
+        outcome[:m][sl_now] = -1
+        outcome[:m][tp_now] = 1
+        done[:m] |= sl_now | tp_now
+    timeout_price = np.full(n, np.nan)
+    timeout_price[: n - H] = p[H:]
+    timeout_ret = s * (timeout_price / p - 1.0)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        rr = tp_width / sl_width
+        r = np.where(outcome == 1, rr, np.where(outcome == -1, -1.0, timeout_ret / sl_width))
+    valid = (d.path_ok & np.isfinite(p) & (p > 0) & np.isfinite(tp_width) & (tp_width > 0)
+             & np.isfinite(sl_width) & (sl_width > 0) & np.isfinite(tp_level) & (tp_level > 0)
+             & np.isfinite(sl_level) & (sl_level > 0) & np.isfinite(r) & (d.side != 0))
+    ref = pd.DataFrame({"tp_width": tp_width, "sl_width": sl_width, "rr": rr,
+                        "outcome": outcome, "r": r, "valid": valid}, index=d.df.index)
+
+    got = simulate_barriers(d, tp_width, sl_width)
+    pd.testing.assert_frame_equal(got, ref, check_exact=True)
+
+
+def test_run_tb_serial_and_threaded_identical(tmp_path):
+    """moe.tb_workers=1 (serial) vs >1 (thread pool) must produce identical
+    reports and identical exported latent metadata."""
+    import json as _json
+    from strategy_system.strategy.moe.gp.gp_stage import GPStage
+    from strategy_system.strategy.moe.ops.export import (
+        GP_FEATURES_FILE, METADATA_FILE, REGIME_METADATA_FILE, REGIME_MODEL_FILE,
+        latent_dir_name,
+    )
+    from strategy_system.strategy.moe.strategy import run_tb
+
+    rng = np.random.default_rng(5)
+    n = 4000
+    idx = pd.date_range("2025-02-01", periods=n, freq="100ms", tz="UTC").as_unit("ns")
+    price = 100 + rng.normal(size=n).cumsum() * 0.05
+    feat = pd.DataFrame({"price_close": price,
+                         "high": price * 1.001,
+                         "low": price * 0.999}, index=idx)
+    horizons = ["1", "2"]
+    preds = pd.DataFrame({f"future_return__{h}": rng.normal(size=n) * 1e-3
+                          for h in horizons}, index=idx)
+    targets = pd.DataFrame(index=idx)
+    for h in horizons:
+        targets[f"future_return__{h}"] = rng.normal(size=n) * 1e-3
+        targets[f"future_timestamp__{h}"] = idx + pd.to_timedelta(int(h) * 100_000_000, unit="ns")
+    latent = pd.Series(np.where(np.arange(n) % 2 == 0, "1", "2"),
+                       index=idx, name="latent_id")
+    stage = GPStage(gp=None,
+                    horizon_models={"1": None, "2": None},
+                    horizon_report=pd.DataFrame(),
+                    predictions=preds, targets=targets,
+                    latent_id=latent, feat_df=feat,
+                    terminal_names=[], horizons=horizons)
+
+    def _run(workers: int):
+        out = tmp_path / f"models_{workers}"
+        (out / "regime").mkdir(parents=True, exist_ok=True)
+        (out / "regime" / REGIME_MODEL_FILE).write_bytes(b"dummy")
+        (out / "regime" / REGIME_METADATA_FILE).write_text("{}", encoding="utf-8")
+        for lat in ("1", "2"):
+            lat_dir = out / latent_dir_name(lat)
+            lat_dir.mkdir(parents=True, exist_ok=True)
+            (lat_dir / GP_FEATURES_FILE).write_text(
+                _json.dumps({"placeholder": True}), encoding="utf-8")
+        cfg = {"moe": {"models_dir": str(out), "tb_workers": workers},
+               "outcome": {"triple_barrier": {"horizon": 10, "rr_window": 20,
+                                              "high_col": "high", "low_col": "low"}}}
+        report, manifest = run_tb(feat, stage, cfg)
+        return out, report, manifest
+
+    out1, report1, manifest1 = _run(1)
+    out3, report3, manifest3 = _run(3)   # 2 latents -> 2 pool workers
+
+    pd.testing.assert_frame_equal(report1, report3)
+    assert report1["status"].tolist() == ["exported", "exported"]
+    assert manifest1 is not None and manifest3 is not None
+    for lat in ("1", "2"):
+        meta1 = _json.loads((out1 / latent_dir_name(lat) / METADATA_FILE).read_text())
+        meta3 = _json.loads((out3 / latent_dir_name(lat) / METADATA_FILE).read_text())
+        for key in ("n_fit_rows", "input_features", "horizons", "barrier", "model"):
+            assert meta1[key] == meta3[key], (lat, key)
+        # same ONNX bytes: the fit is deterministic and independent of workers
+        onnx1 = (out1 / latent_dir_name(lat) / "tb_regressor.onnx").read_bytes()
+        onnx3 = (out3 / latent_dir_name(lat) / "tb_regressor.onnx").read_bytes()
+        assert onnx1 == onnx3
+
+
 def test_repair_one_file_matches_pandas_reference():
     from strategy_system.exchange.loader import (
         BTCTICK, MAX_SPREAD, _book_columns, _repair_one_file, quantize_price)
