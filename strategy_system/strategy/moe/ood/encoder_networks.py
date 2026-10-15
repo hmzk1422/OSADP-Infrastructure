@@ -24,6 +24,7 @@ To add a model: write an ``nn.Module`` with ``encode`` and ``loss`` and add one
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 import torch
 import torch.nn.functional as F
 from torch import nn
@@ -289,7 +290,123 @@ class TransformerNet(nn.Module):
     def loss(self, x):
         return F.mse_loss(self.decode(self.encode(x)).view(-1, self.window, self.n_features), x)
 
-
+# ----------------------------------------------------------------------------
+# CUSTOM LOSS FUNCTIONS
+# ----------------------------------------------------------------------------
+class InfoNetLoss(nn.Module):
+    """Differentiable InfoNet objective: regimes are where the target is persistently predicted.
+ 
+    Call ``loss(q, features, target)`` on ONE time-ordered chunk of T consecutive rows:
+ 
+        q         (T, K)  soft regime assignment, rows sum to 1 (e.g. softmax of a head on an embedding)
+        features  (T, D)  causal features known at t (rank-gaussianise them: the proxy below is linear)
+        target    (T, H)  forward risk-reward outcomes per horizon (see ``metrics.infonet_target``)
+ 
+    Per block of ``block`` rows (every ``stride``), regime k's weighted Pearson rho between each
+    feature and each horizon gives the Gaussian information proxy ``-0.5 * log(1 - rho^2)`` (nats).
+    It is calibrated by the sampling null ``z^2 / (2 * n_eff)`` so a regime with too little mass in a
+    block cannot score. ``n_eff`` is the weights' effective sample size divided by ``serial`` and, per
+    horizon, by that horizon's bar count: an h-bar forward target overlaps its neighbours, so a block
+    holds about n / h independent outcomes, not n. Pass ``horizons`` matching the target columns
+    (e.g. ``(4, 16, 64)``); without it the target is treated as non-overlapping (h = 1), which makes the
+    null too low and over-credits long horizons. ``serial`` (>= 1) additionally discounts serial
+    dependence of the features; the metric's surrogates handle that automatically, this proxy cannot.
+ 
+    The top ``group_size`` features form the block's group evidence. Persistence across the blocks a
+    regime occupies blends the occupancy-weighted mean (``persistence=0``: average information) with the
+    occupancy-weighted soft-minimum (``persistence=1``: the weakest block decides); ``tau`` (nats) sets
+    the softness.
+ 
+        loss = -sum_k usage_k * persistent_info_k  +  dwell * TV(q)  -  balance * H(usage)
+ 
+    ``dwell`` (total variation of q over time) rewards regimes that last; ``balance`` (entropy of usage)
+    stops every row collapsing into one regime. Rows with non-finite features/target carry no weight.
+    Memory is O(blocks * K * D * block). This proxy only measures monotone-linear dependence, so it can
+    disagree with the metric; it consumes forward outcomes by design (ex-post objective).
+    """
+ 
+    def __init__(self, block: int = 64, stride: int | None = None, group_size: int = 1,
+                 persistence: float = 0.5, tau: float = 0.02, z: float = 1.96, smooth: float = 0.01,
+                 min_occupancy: float = 0.2, dwell: float = 0.1, balance: float = 0.01,
+                 horizons: Sequence[int] | None = None, serial: float = 1.0, eps: float = 1e-8):
+        super().__init__()
+        stride = block if stride is None else stride
+        if block < 8 or stride < 1 or group_size < 1:
+            raise ValueError("require block >= 8, stride >= 1 and group_size >= 1")
+        if not 0.0 <= persistence <= 1.0 or not 0.0 <= min_occupancy < 1.0:
+            raise ValueError("persistence must be in [0, 1] and min_occupancy in [0, 1)")
+        if min(tau, z, smooth) <= 0 or min(dwell, balance) < 0:
+            raise ValueError("tau, z, smooth must be positive; dwell, balance must be >= 0")
+        if serial < 1.0:
+            raise ValueError("serial must be >= 1")
+        if horizons is not None:
+            horizons = tuple(int(h) for h in horizons)
+            if not horizons or min(horizons) < 1:
+                raise ValueError("horizons must be positive integers")
+        self.block, self.stride, self.group_size = int(block), int(stride), int(group_size)
+        self.persistence, self.tau, self.z, self.smooth = float(persistence), float(tau), float(z), float(smooth)
+        self.min_occupancy, self.dwell, self.balance, self.eps = float(min_occupancy), float(dwell), float(balance), float(eps)
+        self.horizons, self.serial = horizons, float(serial)
+        self.last_stats: dict[str, float] = {}
+ 
+    def forward(self, q, features, target):
+        features = features[:, None] if features.ndim == 1 else features
+        target = target[:, None] if target.ndim == 1 else target
+        rows, k = q.shape
+        if features.shape[0] != rows or target.shape[0] != rows:
+            raise ValueError("q, features and target must have the same number of rows")
+        if rows < self.block:
+            raise ValueError(f"need at least block={self.block} rows, got {rows}")
+        if self.group_size > features.shape[1]:
+            raise ValueError("group_size exceeds the number of features")
+        if self.horizons is not None and len(self.horizons) != target.shape[1]:
+            raise ValueError(f"horizons has {len(self.horizons)} entries but target has {target.shape[1]} columns")
+        eps = self.eps
+        finite = torch.isfinite(features).all(-1) & torch.isfinite(target).all(-1)
+        q_all, q = q, q * finite.unsqueeze(-1).to(q.dtype)             # unusable rows carry no weight
+        x = torch.nan_to_num(features, nan=0.0, posinf=0.0, neginf=0.0)
+        y = torch.nan_to_num(target, nan=0.0, posinf=0.0, neginf=0.0)
+        w = q.unfold(0, self.block, self.stride)                       # (NB, K, L)
+        xs, ys = x.unfold(0, self.block, self.stride), y.unfold(0, self.block, self.stride)   # (NB, D|H, L)
+ 
+        mass = w.sum(-1)                                               # (NB, K)
+        sw = mass.clamp_min(eps)[..., None]
+        n_eff = mass * mass / (w * w).sum(-1).clamp_min(eps)           # (NB, K) effective weight count
+        mx, my = torch.einsum("nkl,ndl->nkd", w, xs) / sw, torch.einsum("nkl,nhl->nkh", w, ys) / sw
+        vx = (torch.einsum("nkl,ndl->nkd", w, xs * xs) / sw - mx * mx).clamp_min(eps)
+        vy = (torch.einsum("nkl,nhl->nkh", w, ys * ys) / sw - my * my).clamp_min(eps)
+        exy = torch.einsum("nkdl,nhl->nkdh", w[:, :, None, :] * xs[:, None, :, :], ys) / sw[..., None]
+        cov = exy - mx[..., :, None] * my[..., None, :]
+        rho2 = (cov * cov / (vx[..., :, None] * vy[..., None, :])).clamp(0.0, 1.0 - 1e-6)
+        info = -0.5 * torch.log1p(-rho2)                               # (NB, K, D, H) nats
+ 
+        # Sampling null per (block, regime, horizon): overlap of h-bar targets leaves ~ n_eff / h independent outcomes.
+        divisor = self.serial * (torch.as_tensor(self.horizons, dtype=info.dtype, device=info.device)
+                                 if self.horizons is not None
+                                 else torch.ones(target.shape[1], dtype=info.dtype, device=info.device))
+        n_independent = (n_eff[..., None] / divisor).clamp_min(1.0)    # (NB, K, H)
+        null = (self.z ** 2 / (2.0 * n_independent))[:, :, None, :]    # (NB, K, 1, H)
+        evidence = self.smooth * F.softplus((info - null) / self.smooth)   # smooth relu: keeps gradient below null
+        group = evidence.topk(self.group_size, dim=2).values.mean(2)  # (NB, K, H) top-m feature group
+ 
+        occupancy = mass / self.block
+        weight = (occupancy * (occupancy >= self.min_occupancy).to(occupancy.dtype))[..., None]   # (NB, K, 1)
+        total = weight.sum(0).clamp_min(eps)                           # (K, 1)
+        mean_info = (weight * group).sum(0) / total                    # (K, H)
+        soft_min = -self.tau * (torch.logsumexp(weight.clamp_min(1e-12).log() - group / self.tau, dim=0) - total.log())
+        persistent = torch.where(weight.sum(0) > 1e-6,
+                                 (1.0 - self.persistence) * mean_info + self.persistence * soft_min,
+                                 torch.zeros_like(mean_info))
+        score = persistent.mean(-1)                                    # (K,)
+ 
+        usage = q.sum(0) / finite.sum().clamp_min(1)
+        both = (finite[1:] & finite[:-1]).to(q.dtype)
+        tv = ((q_all[1:] - q_all[:-1]).abs().sum(-1) * both).sum() / both.sum().clamp_min(1.0)
+        entropy = -(usage * torch.log(usage + eps)).sum()
+        main = -(usage * score).sum()
+        self.last_stats = {"infonet": float(-main.detach()), "tv": float(tv.detach()), "usage_entropy": float(entropy.detach())}
+        return main + self.dwell * tv - self.balance * entropy
+ 
 # ----------------------------------------------------------------------------
 # The one place models are chosen
 # ----------------------------------------------------------------------------
