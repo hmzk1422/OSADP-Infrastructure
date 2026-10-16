@@ -1,0 +1,39 @@
+[package]
+name = "uets_db"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "uets_db"
+path = "src/lib.rs"
+crate-type = ["rlib"]
+
+[dependencies]
+# Embedded key-value store (RocksDB-compatible API, pure Rust)
+sled = "0.34"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+bincode = "1.3"
+
+# Time handling
+chrono = { version = "0.4", features = ["serde"] }
+
+# UUID for session/order ids
+uuid = { version = "1", features = ["v4"] }
+
+# Async support
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
+
+# Bounded channel for backpressure
+async-channel = "1"
+
+# Logging
+tracing = "0.1"
+
+# Error handling
+thiserror = "1"
+
+# Local uets_trades crate
+uets_trades = { path = "../../../uets_trades" }
