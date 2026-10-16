@@ -878,10 +878,10 @@ mod strategy_tests {
     fn the_executor_knows_both_strategies_on_disk_and_in_the_binary() {
         let switch = StrategySwitch::new();
         let available = switch.available();
-        assert!(available.contains(&"strategy1"));
+        assert!(available.contains(&"ofmr"));
         assert!(available.contains(&"strategy2"));
         let discovered = switch.discovered();
-        assert!(discovered.contains(&"strategy1".to_string()));
+        assert!(discovered.contains(&"ofmr".to_string()));
         assert!(discovered.contains(&"strategy2".to_string()));
         for dir in &discovered {
             assert!(
@@ -892,31 +892,44 @@ mod strategy_tests {
     }
 
     #[test]
-    fn selecting_strategy1_returns_strategy1s_builders() {
+    fn selecting_ofmr_returns_ofmrs_builders() {
         let mut switch = StrategySwitch::new();
         assert!(
             switch.state_builder().is_err(),
             "nothing selected yet is an error, not a default"
         );
 
-        switch.select("strategy1").unwrap();
-        assert_eq!(switch.active(), Some("strategy1"));
+        switch.select("ofmr").unwrap();
+        assert_eq!(switch.active(), Some("ofmr"));
 
-        // Its feature builder computes ma3...
+        // Its feature builder computes Column_0..Column_14...
         let outputs = {
             let features = switch.feature_builder_mut().unwrap();
             let computed = features.compute(&row(100.0)).unwrap();
-            assert_eq!(computed.get("ma3"), Some(100.0));
+            for i in 0..15 {
+                assert!(
+                    computed.contains(&format!("Column_{i}")),
+                    "missing Column_{i}"
+                );
+            }
             features.output_names()
         };
-        assert_eq!(outputs, vec!["ma3".to_string()]);
+        assert_eq!(outputs.len(), 15);
+        assert_eq!(outputs[0], "Column_0");
+        assert_eq!(outputs[14], "Column_14");
 
-        // ...and its state builder keys on the ma3 band.
+        // ...and its state builder holds when features are missing.
         let builder = switch.state_builder().unwrap();
-        assert_eq!(builder.decide(&state("ma3", 101.0)), Decision::EnterLong);
+        let empty = FeatureRow::new();
+        let st = MarketState {
+            features: empty,
+            position: Position::Flat,
+            sequence: 1,
+        };
+        assert_eq!(builder.decide(&st), Decision::Hold);
         // strategy2's rule would hold on this state: it reads `dz`.
         let other = live_strategy::load_strategy("strategy2").unwrap();
-        assert_eq!(other.builder.decide(&state("ma3", 101.0)), Decision::Hold);
+        assert_eq!(other.builder.decide(&state("dz", 2.0)), Decision::EnterLong);
     }
 
     #[test]
@@ -935,8 +948,8 @@ mod strategy_tests {
 
         let builder = switch.state_builder().unwrap();
         assert_eq!(builder.decide(&state("dz", 2.0)), Decision::EnterLong);
-        // strategy1's rule would hold: it reads `ma3`.
-        let other = live_strategy::load_strategy("strategy1").unwrap();
+        // ofmr's rule would hold: it needs all 15 columns and reads nothing but them.
+        let other = live_strategy::load_strategy("ofmr").unwrap();
         assert_eq!(other.builder.decide(&state("dz", 2.0)), Decision::Hold);
     }
 
@@ -944,33 +957,37 @@ mod strategy_tests {
     fn switching_back_and_forth_returns_the_right_builders_each_time() {
         let mut switch = StrategySwitch::new();
         for (name, feature) in [
-            ("strategy1", "ma3"),
+            ("ofmr", "Column_0"),
             ("strategy2", "dz"),
-            ("strategy1", "ma3"),
+            ("ofmr", "Column_0"),
         ] {
             switch.select(name).unwrap();
             assert_eq!(switch.active(), Some(name));
             let outputs = switch.feature_builder_mut().unwrap().output_names();
-            assert_eq!(outputs, vec![feature.to_string()], "after selecting {name}");
+            assert_eq!(
+                outputs.first(),
+                Some(&feature.to_string()),
+                "after selecting {name}"
+            );
         }
     }
 
     #[test]
     fn an_unknown_strategy_is_rejected_and_keeps_the_current_selection() {
         let mut switch = StrategySwitch::new();
-        switch.select("strategy1").unwrap();
+        switch.select("ofmr").unwrap();
         let error = switch.select("no_such_strategy").unwrap_err();
         assert!(error.contains("no_such_strategy"), "got: {error}");
         assert_eq!(
             switch.active(),
-            Some("strategy1"),
+            Some("ofmr"),
             "a failed switch changes nothing"
         );
         let outputs = switch.feature_builder_mut().unwrap().output_names();
         assert_eq!(
-            outputs,
-            vec!["ma3".to_string()],
-            "still strategy1's builder"
+            outputs.first(),
+            Some(&"Column_0".to_string()),
+            "still ofmr's builder"
         );
     }
 }
@@ -1256,7 +1273,7 @@ fn main() -> ExitCode {
             println!("discovered: {:?}", switch.discovered());
             let name = first();
             if name.is_empty() {
-                println!("selected:   (none); try: dev_test strategies strategy1");
+                println!("selected:   (none); try: dev_test strategies ofmr");
             } else {
                 if let Err(e) = switch.select(&name) {
                     eprintln!("{e}");
@@ -1268,6 +1285,26 @@ fn main() -> ExitCode {
                     "feature_builder present: {}",
                     switch.feature_builder_mut().is_ok()
                 );
+            }
+        }
+        "strategy" => {
+            // Run a strategy's Unix-domain socket consumer. Aggregator
+            // (aggregator.py) binds the exchange side at
+            // sockets/exchanges/<venue>.sock and fans out to
+            // sockets/strategies/<name>_<symbol>.sock so multiple instances
+            // can run side by side (ofmr->btc, ofmr->eth, ofmr->sol,
+            // ... 100 assets).
+            let name = first();
+            if name.is_empty() {
+                eprintln!("usage: dev_test strategy <name> <symbol>");
+                print_help();
+                return ExitCode::FAILURE;
+            }
+            let symbol = rest.get(1).cloned().unwrap_or_else(|| "btcusdt".into());
+            let socket_path = format!("sockets/strategies/{name}_{symbol}.sock");
+            if let Err(e) = uets::live_strategy::ofmr::socket::run(&socket_path) {
+                eprintln!("strategy socket failed: {e}");
+                return ExitCode::FAILURE;
             }
         }
         "user-stream" => {
