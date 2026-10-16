@@ -5,14 +5,14 @@
 //!   mod.rs        # this file: module wiring + loader
 //!   traits.rs     # ComputeFeatures + StateBuilder contracts
 //!   runner.rs     # StrategyRunner: per-(strategy x symbol) state
-//!   strategy1/    # YOUR strategy: mod.rs + compute_feature.rs + state_builder.rs
+//!   ofmr/         # OFMR strategy: LightGBM inference over Column_0..Column_14
 //!   strategy2/    # YOUR strategy: same shape, independent state
 //! ```
 //!
 //! Flow per row: `compute_feature` first, `state_builder` second, back to
 //! `executor.rs`. Unknown name is a hard error, never a silent hold.
 
-pub mod strategy1;
+pub mod ofmr;
 pub mod strategy2;
 pub mod traits;
 
@@ -23,13 +23,13 @@ pub use traits::{ComputeFeatures, LiveStrategy, StateBuilder};
 
 /// Strategies compiled into this binary.
 pub fn available_strategies() -> Vec<&'static str> {
-    vec!["strategy1", "strategy2"]
+    vec!["ofmr", "strategy2"]
 }
 
 /// Build a fresh bundle by name (independent state per call).
 pub fn load_strategy(name: &str) -> Result<LiveStrategy, String> {
     match name {
-        "strategy1" => strategy1::load(),
+        "ofmr" => ofmr::load(),
         "strategy2" => strategy2::load(),
         other => Err(format!(
             "unknown strategy '{other}' (available: {:?})",
@@ -64,19 +64,19 @@ mod tests {
     #[test]
     fn discovery_lists_strategy_folders() {
         let dirs = discover_strategy_dirs();
-        assert!(dirs.contains(&"strategy1".to_string()), "got {dirs:?}");
+        assert!(dirs.contains(&"ofmr".to_string()), "got {dirs:?}");
         assert!(dirs.contains(&"strategy2".to_string()), "got {dirs:?}");
     }
 
     #[test]
     fn step_is_isolated_per_strategy_and_symbol() {
         let mut runner = StrategyRunner::new();
-        runner.step("strategy1", "BTCUSDT", &row(100.0)).unwrap();
+        runner.step("ofmr", "BTCUSDT", &row(100.0)).unwrap();
         runner.step("strategy2", "BTCUSDT", &row(100.0)).unwrap();
         assert_eq!(runner.slot_count(), 2);
-        runner.step("strategy1", "BTCUSDT", &row(101.0)).unwrap();
+        runner.step("ofmr", "BTCUSDT", &row(101.0)).unwrap();
         assert_eq!(runner.slot_count(), 2, "same slot reused");
-        runner.step("strategy1", "ETHUSDT", &row(100.0)).unwrap();
+        runner.step("ofmr", "ETHUSDT", &row(100.0)).unwrap();
         assert_eq!(runner.slot_count(), 3);
     }
 }
