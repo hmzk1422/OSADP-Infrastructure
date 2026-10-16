@@ -1,0 +1,42 @@
+[package]
+name = "uets_trades"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "uets_trades"
+path = "src/lib.rs"
+crate-type = ["rlib"]
+
+[dependencies]
+# Re-use the existing uets crate for core trading types
+uets = { path = "../uets" }
+
+# Time handling
+chrono = { version = "0.4", features = ["serde"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# UUID for session/order ids
+uuid = { version = "1", features = ["v4"] }
+
+# Async support
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
+
+# Bounded channel for backpressure
+async-channel = "1"
+
+# Logging
+tracing = "0.1"
+
+# Error handling
+thiserror = "1"
+
+# Numeric
+rust_decimal = "1"
+
+[dev-dependencies]
+# Testing support
+approx = "0.5"
