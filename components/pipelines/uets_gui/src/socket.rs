@@ -7,6 +7,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 #[cfg(unix)]
 use crate::gui::InstanceSnapshot;
+#[cfg(unix)]
+use crate::gui::aggregate_instances;
 use crate::gui::{DashboardSnapshot, SnapshotSource};
 
 #[cfg(unix)]
@@ -39,6 +41,8 @@ const INSTANCE_STALE_AFTER: Duration = Duration::from_secs(3);
 pub struct SocketSnapshotSource {
     socket: std::os::unix::net::UnixDatagram,
     instances: BTreeMap<String, (InstanceSnapshot, Instant)>,
+    aggregate_equity_history: Vec<f64>,
+    aggregate_starting_equity: f64,
 }
 
 #[cfg(unix)]
@@ -71,7 +75,13 @@ impl SocketSnapshotSource {
         Ok(Self {
             socket,
             instances: BTreeMap::new(),
+            aggregate_equity_history: Vec::new(),
+            aggregate_starting_equity: 0.0,
         })
+    }
+
+    pub fn forget_instance(&mut self, identity: &str) {
+        self.instances.remove(identity);
     }
 }
 
@@ -104,7 +114,7 @@ impl SnapshotSource for SocketSnapshotSource {
         }
 
         let now = Instant::now();
-        let instances = self
+        let instances: Vec<_> = self
             .instances
             .values_mut()
             .map(|(instance, last_seen)| {
@@ -112,17 +122,25 @@ impl SnapshotSource for SocketSnapshotSource {
                     && now.duration_since(*last_seen) > INSTANCE_STALE_AFTER
                 {
                     instance.statistics.status = Some("error".to_string());
+                    instance.statistics.last_error =
+                        Some("No worker telemetry received for more than 3 seconds".to_string());
                 }
                 instance.clone()
             })
             .collect();
+        let aggregate = aggregate_instances(
+            &instances,
+            &mut self.aggregate_equity_history,
+            &mut self.aggregate_starting_equity,
+        );
         DashboardSnapshot {
             timestamp: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .ok()
                 .map(|elapsed| format!("{} ms UTC", elapsed.as_millis())),
             instances,
-            ..DashboardSnapshot::default()
+            aggregate,
+            aggregate_equity_history: self.aggregate_equity_history.clone(),
         }
     }
 }

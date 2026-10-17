@@ -7,6 +7,9 @@ pub enum Action {
     Down,
     Select,
     Clear,
+    Add,
+    Toggle,
+    Remove,
     None,
 }
 
@@ -17,6 +20,9 @@ pub fn action(key: KeyEvent) -> Action {
         KeyCode::Char('k') | KeyCode::Up => Action::Up,
         KeyCode::Enter => Action::Select,
         KeyCode::Esc => Action::Clear,
+        KeyCode::Char('a') => Action::Add,
+        KeyCode::Char('e') => Action::Toggle,
+        KeyCode::Char('x') => Action::Remove,
         _ => Action::None,
     }
 }
@@ -47,6 +53,18 @@ mod tests {
         assert_eq!(
             action(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE)),
             Action::Quit
+        );
+        assert_eq!(
+            action(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE)),
+            Action::Add
+        );
+        assert_eq!(
+            action(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE)),
+            Action::Toggle
+        );
+        assert_eq!(
+            action(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE)),
+            Action::Remove
         );
     }
 }

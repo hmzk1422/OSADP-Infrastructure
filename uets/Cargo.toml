@@ -29,6 +29,7 @@ pyo3 = "0.29"
 tungstenite = "0.21"
 serde_json = "1"
 uets_gui = { path = "../components/pipelines/uets_gui" }
+libc = "0.2"
 
 [[bin]]
 name = "dev_test"

@@ -189,59 +189,99 @@ impl Drop for LiveProcesses {
 
 #[cfg(unix)]
 fn run_live_system(requested: &[String]) -> Result<(), String> {
-    use std::time::{Duration, Instant};
-    use uets_gui::{
-        InstanceSnapshot, Monitor, SnapshotSource, SocketSnapshotSource, Statistics,
-        publish_instance,
-    };
-
-    if requested.is_empty() {
-        return Err("usage: dev_test run <strategy>@<asset> [strategy@asset ...]".into());
-    }
+    use uets_gui::{Monitor, SocketSnapshotSource};
 
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .ok_or_else(|| "cannot resolve repository root".to_string())?
         .to_path_buf();
     std::env::set_current_dir(&root).map_err(|error| error.to_string())?;
-
     let gui_socket = root.join("sockets").join("gui.sock");
-    let mut snapshots = SocketSnapshotSource::bind(&gui_socket)
+    let snapshots = SocketSnapshotSource::bind(&gui_socket)
         .map_err(|error| format!("bind UETS GUI socket: {error}"))?;
     let executable = std::env::current_exe().map_err(|error| error.to_string())?;
     let log_dir = root.join("logs").join("uets");
     std::fs::create_dir_all(&log_dir).map_err(|error| error.to_string())?;
-    let mut enabled = Vec::new();
-    let mut disabled = Vec::new();
-    let mut assets = std::collections::BTreeSet::new();
+    let mut dashboard = LiveDashboard {
+        snapshots,
+        gui_socket,
+        root,
+        executable,
+        log_dir,
+        instances: std::collections::BTreeMap::new(),
+    };
 
-    for value in requested {
-        let is_disabled = value.starts_with("disabled:");
-        let identity = value.strip_prefix("disabled:").unwrap_or(value);
+    for argument in requested {
+        let disabled = argument.starts_with("disabled:");
+        let identity = argument.strip_prefix("disabled:").unwrap_or(argument);
         let (strategy, asset) = parse_strategy_instance(identity)?;
-        if strategy != "ofmr" {
-            return Err(format!("'{strategy}' has no live UDS consumer yet"));
-        }
-        if !assets.insert(asset.clone()) {
-            return Err(format!(
-                "multiple strategies for asset '{asset}' are not supported by this feed adapter"
-            ));
-        }
-        let identity = format!("{strategy}@{asset}");
-        if is_disabled {
-            disabled.push(identity);
-        } else {
-            enabled.push((identity, asset));
+        let canonical_identity = format!("{strategy}@{asset}");
+        dashboard.add(canonical_identity.clone())?;
+        if !disabled {
+            dashboard.enable(&canonical_identity)?;
         }
     }
 
-    for identity in disabled {
-        let asset = identity.split_once('@').unwrap().1;
+    eprintln!("UETS monitor ready: j/k select, a add, e enable/disable, x delete, q quit");
+    Monitor::new(dashboard)
+        .run()
+        .map_err(|error| format!("UETS monitor failed: {error}"))
+}
+
+#[cfg(unix)]
+struct ManagedInstance {
+    strategy: String,
+    asset: String,
+    worker: Option<std::process::Child>,
+    feed: Option<std::process::Child>,
+    enabled: bool,
+}
+
+#[cfg(unix)]
+struct LiveDashboard {
+    snapshots: uets_gui::SocketSnapshotSource,
+    gui_socket: PathBuf,
+    root: PathBuf,
+    executable: PathBuf,
+    log_dir: PathBuf,
+    instances: std::collections::BTreeMap<String, ManagedInstance>,
+}
+
+#[cfg(unix)]
+impl LiveDashboard {
+    fn process_log(log_dir: &std::path::Path, file: &str) -> Result<std::fs::File, String> {
+        std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(log_dir.join(file))
+            .map_err(|error| format!("open logs/uets/{file}: {error}"))
+    }
+
+    fn add(&mut self, value: String) -> Result<(), String> {
+        use uets_gui::{InstanceSnapshot, Statistics, publish_instance};
+        let (strategy, asset) = parse_strategy_instance(&value)?;
+        if strategy != "ofmr" {
+            return Err(format!("'{strategy}' has no live UDS consumer yet"));
+        }
+        let identity = format!("{strategy}@{asset}");
+        if self.instances.contains_key(&identity) {
+            return Err(format!("{identity} already exists"));
+        }
+        if self
+            .instances
+            .values()
+            .any(|instance| instance.asset == asset)
+        {
+            return Err(format!(
+                "an instance for {asset} already exists; this feed adapter allows one strategy per asset"
+            ));
+        }
         publish_instance(
-            &gui_socket,
+            &self.gui_socket,
             &InstanceSnapshot {
-                strategy_id: "ofmr".to_string(),
-                asset_id: asset.to_string(),
+                strategy_id: strategy.clone(),
+                asset_id: asset.clone(),
                 statistics: Statistics {
                     status: Some("disabled".to_string()),
                     ..Statistics::default()
@@ -250,81 +290,230 @@ fn run_live_system(requested: &[String]) -> Result<(), String> {
             },
         )
         .map_err(|error| format!("publish disabled status for {identity}: {error}"))?;
+        self.instances.insert(
+            identity,
+            ManagedInstance {
+                strategy,
+                asset,
+                worker: None,
+                feed: None,
+                enabled: false,
+            },
+        );
+        Ok(())
     }
 
-    let mut processes = LiveProcesses(Vec::new());
-    for (identity, _) in &enabled {
-        let log = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(log_dir.join(format!("strategy_{}.log", identity.replace('@', "_"))))
-            .map_err(|error| error.to_string())?;
-        let mut command = std::process::Command::new(&executable);
-        command
-            .current_dir(&root)
-            .env("UETS_GUI_SOCKET", &gui_socket)
-            .arg("strategy")
-            .arg(identity)
-            .stdout(std::process::Stdio::from(
-                log.try_clone().map_err(|error| error.to_string())?,
-            ))
-            .stderr(std::process::Stdio::from(log));
-        let child = command
-            .spawn()
-            .map_err(|error| format!("start {identity}: {error}"))?;
-        processes.0.push(child);
-    }
-
-    let startup_deadline = Instant::now() + Duration::from_secs(10);
-    loop {
-        let current = snapshots.snapshot();
-        let ready = enabled.iter().all(|(identity, _)| {
-            current.instances.iter().any(|instance| {
-                instance.identity() == *identity
-                    && instance.statistics.status.as_deref() == Some("enabled")
-            })
-        });
-        if ready {
-            break;
+    fn enable(&mut self, identity: &str) -> Result<(), String> {
+        use std::time::{Duration, Instant};
+        use uets_gui::SnapshotSource;
+        use uets_gui::publish_instance;
+        let Some(instance) = self.instances.get_mut(identity) else {
+            return Err(format!("unknown strategy {identity}"));
+        };
+        if instance.enabled {
+            return Err(format!("{identity} is already enabled"));
         }
-        for child in &mut processes.0 {
-            if let Some(status) = child.try_wait().map_err(|error| error.to_string())? {
-                return Err(format!("strategy worker exited during startup: {status}"));
+        if instance
+            .worker
+            .as_mut()
+            .is_some_and(|child| child.try_wait().ok().flatten().is_some())
+        {
+            instance.worker = None;
+        }
+        let worker_was_running = instance.worker.is_some();
+        if instance.worker.is_none() {
+            let file = format!("strategy_{}_{}.log", instance.strategy, instance.asset);
+            let log = Self::process_log(&self.log_dir, &file)?;
+            let mut command = std::process::Command::new(&self.executable);
+            command
+                .current_dir(&self.root)
+                .env("UETS_GUI_SOCKET", &self.gui_socket)
+                .arg("strategy")
+                .arg(identity)
+                .stdout(std::process::Stdio::from(
+                    log.try_clone().map_err(|error| error.to_string())?,
+                ))
+                .stderr(std::process::Stdio::from(log));
+            instance.worker = Some(
+                command
+                    .spawn()
+                    .map_err(|error| format!("start {identity}: {error}"))?,
+            );
+        }
+        if !worker_was_running {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            loop {
+                let snapshot = self.snapshots.snapshot();
+                if snapshot.instances.iter().any(|item| {
+                    item.identity() == identity
+                        && item.statistics.status.as_deref() == Some("enabled")
+                }) {
+                    break;
+                }
+                if instance
+                    .worker
+                    .as_mut()
+                    .and_then(|child| child.try_wait().ok().flatten())
+                    .is_some()
+                {
+                    return Err(format!(
+                        "worker exited during startup; inspect logs/uets/strategy_{}_{}.log",
+                        instance.strategy, instance.asset
+                    ));
+                }
+                if Instant::now() >= deadline {
+                    return Err(format!(
+                        "worker telemetry timed out; inspect logs/uets/strategy_{}_{}.log",
+                        instance.strategy, instance.asset
+                    ));
+                }
+                std::thread::sleep(Duration::from_millis(50));
             }
         }
-        if Instant::now() >= startup_deadline {
-            return Err("timed out waiting for strategy worker UDS telemetry".into());
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    }
-
-    for (identity, asset) in &enabled {
-        let log = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(log_dir.join(format!("feed_{asset}.log")))
-            .map_err(|error| error.to_string())?;
-        let mut command = std::process::Command::new(&executable);
+        let file = format!("feed_{}.log", instance.asset);
+        let log = Self::process_log(&self.log_dir, &file)?;
+        let mut command = std::process::Command::new(&self.executable);
         command
-            .current_dir(&root)
-            .env("UETS_GUI_SOCKET", &gui_socket)
+            .current_dir(&self.root)
+            .env("UETS_GUI_SOCKET", &self.gui_socket)
             .arg("feed")
-            .arg(asset)
+            .arg(&instance.asset)
             .arg(identity)
             .stdout(std::process::Stdio::from(
                 log.try_clone().map_err(|error| error.to_string())?,
             ))
             .stderr(std::process::Stdio::from(log));
-        let child = command
-            .spawn()
-            .map_err(|error| format!("start feed for {identity}: {error}"))?;
-        processes.0.push(child);
+        instance.feed = Some(
+            command
+                .spawn()
+                .map_err(|error| format!("start feed for {identity}: {error}"))?,
+        );
+        instance.enabled = true;
+        let mut status_snapshot = self
+            .snapshots
+            .snapshot()
+            .instances
+            .into_iter()
+            .find(|snapshot| snapshot.identity() == identity)
+            .unwrap_or_default();
+        status_snapshot.strategy_id = instance.strategy.clone();
+        status_snapshot.asset_id = instance.asset.clone();
+        status_snapshot.statistics.status = Some("enabled".into());
+        let _ = publish_instance(&self.gui_socket, &status_snapshot);
+        Ok(())
     }
 
-    eprintln!("UETS live monitor started; press q to stop all workers");
-    Monitor::new(snapshots)
-        .run()
-        .map_err(|error| format!("UETS monitor failed: {error}"))
+    fn disable(&mut self, identity: &str) -> Result<(), String> {
+        use uets_gui::SnapshotSource;
+        use uets_gui::publish_instance;
+        let mut snapshot = self
+            .snapshots
+            .snapshot()
+            .instances
+            .into_iter()
+            .find(|snapshot| snapshot.identity() == identity)
+            .unwrap_or_default();
+        let Some(instance) = self.instances.get_mut(identity) else {
+            return Err(format!("unknown strategy {identity}"));
+        };
+        if !instance.enabled {
+            return Err(format!("{identity} is already disabled"));
+        }
+        if let Some(mut feed) = instance.feed.take() {
+            let _ = feed.kill();
+            let _ = feed.wait();
+        }
+        instance.enabled = false;
+        snapshot.strategy_id = instance.strategy.clone();
+        snapshot.asset_id = instance.asset.clone();
+        snapshot.statistics.status = Some("disabled".into());
+        publish_instance(&self.gui_socket, &snapshot)
+            .map_err(|error| format!("publish disabled status: {error}"))
+    }
+
+    fn remove(&mut self, identity: &str) -> Result<(), String> {
+        let Some(instance) = self.instances.get(identity) else {
+            return Err(format!("unknown strategy {identity}"));
+        };
+        if instance.enabled {
+            return Err("disable the strategy before deleting it".to_string());
+        }
+        if let Some(mut instance) = self.instances.remove(identity) {
+            if let Some(mut worker) = instance.worker.take() {
+                let _ = worker.kill();
+                let _ = worker.wait();
+            }
+        }
+        self.snapshots.forget_instance(identity);
+        Ok(())
+    }
+}
+
+#[cfg(unix)]
+impl uets_gui::SnapshotSource for LiveDashboard {
+    fn snapshot(&mut self) -> uets_gui::DashboardSnapshot {
+        let mut snapshot = self.snapshots.snapshot();
+        for instance in &mut snapshot.instances {
+            let identity = instance.identity();
+            if let Some(managed) = self.instances.get_mut(&identity) {
+                if let Some(feed) = managed.feed.as_mut() {
+                    if let Ok(Some(status)) = feed.try_wait() {
+                        if !status.success() {
+                            instance.statistics.status = Some("error".into());
+                            instance.statistics.last_error = Some(format!(
+                                "feed exited ({status}); see logs/uets/feed_{}.log",
+                                managed.asset
+                            ));
+                        }
+                    }
+                }
+                if let Some(worker) = managed.worker.as_mut() {
+                    if let Ok(Some(status)) = worker.try_wait() {
+                        instance.statistics.status = Some("error".into());
+                        instance.statistics.last_error = Some(format!(
+                            "strategy worker exited ({status}); see logs/uets/strategy_{}_{}.log",
+                            managed.strategy, managed.asset
+                        ));
+                    }
+                }
+            }
+        }
+        snapshot
+    }
+
+    fn control(&mut self, command: uets_gui::StrategyCommand) -> Result<(), String> {
+        match command {
+            uets_gui::StrategyCommand::Add(identity) => self.add(identity),
+            uets_gui::StrategyCommand::Toggle(identity) => {
+                if self
+                    .instances
+                    .get(&identity)
+                    .is_some_and(|instance| instance.enabled)
+                {
+                    self.disable(&identity)
+                } else {
+                    self.enable(&identity)
+                }
+            }
+            uets_gui::StrategyCommand::Remove(identity) => self.remove(&identity),
+        }
+    }
+}
+
+#[cfg(unix)]
+impl Drop for LiveDashboard {
+    fn drop(&mut self) {
+        for instance in self.instances.values_mut() {
+            if let Some(mut child) = instance.feed.take() {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+            if let Some(mut child) = instance.worker.take() {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+        }
+    }
 }
 
 #[cfg(not(unix))]

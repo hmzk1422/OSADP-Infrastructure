@@ -27,7 +27,8 @@
 //! historical pipeline. The partial `@depth20@100ms` stream is deliberately
 //! not used: its `lastUpdateId` identifies a different object.
 
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -94,15 +95,34 @@ struct Capture {
     csv: CsvRecorder,
     rows_written: u64,
     reseeds_pending: bool,
+    fanout_skipped_invalid_book: u64,
     fanout: Option<std::sync::mpsc::SyncSender<Vec<u8>>>,
     fanout_failed: Arc<AtomicBool>,
+    fanout_queue_depth: Arc<AtomicUsize>,
+    received_times: BTreeMap<(i64, u8, u64), u64>,
+    last_persistence_write_ms: f64,
+    persistence_errors: u64,
 }
 
 impl Capture {
     /// Merge one event and write whatever rows become emittable.
     fn offer(&mut self, event: MarketEvent) -> Result<u64, String> {
+        let received_ms = wall_time_ms();
+        self.offer_received(event, received_ms)
+    }
+
+    fn offer_received(&mut self, event: MarketEvent, received_ms: u64) -> Result<u64, String> {
+        let event_key = market_event_key(&event);
+        self.received_times.insert(event_key, received_ms);
+        if self.received_times.len() > 65_536 {
+            self.received_times.pop_first();
+        }
         let mut written = 0;
         for ready in self.reorder.push(event) {
+            let received_ms = self
+                .received_times
+                .remove(&market_event_key(&ready))
+                .unwrap_or(received_ms);
             let trade = match &ready {
                 MarketEvent::Trade(trade) => Some(*trade),
                 _ => None,
@@ -113,28 +133,46 @@ impl Capture {
                 // row's book_state__* block cannot be trusted.
                 self.reseeds_pending = true;
             }
-            self.csv
-                .write_row(&mut self.merger, &row)
-                .map_err(|e| e.to_string())?;
+            let write_started = std::time::Instant::now();
+            if let Err(error) = self.csv.write_row(&mut self.merger, &row) {
+                self.persistence_errors = self.persistence_errors.saturating_add(1);
+                return Err(error.to_string());
+            }
+            self.last_persistence_write_ms = write_started.elapsed().as_secs_f64() * 1_000.0;
             if let Some(fanout) = &self.fanout {
-                let frame = match strategy_frame(&self.merger, trade, row.timestamp_ns / 1_000_000)
-                {
-                    Ok(frame) => frame,
-                    Err(error) => {
+                if !self.merger.state().book_valid() {
+                    self.fanout_skipped_invalid_book =
+                        self.fanout_skipped_invalid_book.saturating_add(1);
+                } else {
+                    let frame =
+                        match strategy_frame(
+                            &self.merger,
+                            trade,
+                            row.timestamp_ns / 1_000_000,
+                            received_ms,
+                            self.last_persistence_write_ms,
+                            self.persistence_errors,
+                            self.fanout_queue_depth.load(Ordering::Relaxed),
+                        ) {
+                            Ok(frame) => frame,
+                            Err(error) => {
+                                self.fanout_failed.store(true, Ordering::Release);
+                                return Err(error);
+                            }
+                        };
+                    self.fanout_queue_depth.fetch_add(1, Ordering::Relaxed);
+                    if let Err(error) = fanout.try_send(frame) {
+                        self.fanout_queue_depth.fetch_sub(1, Ordering::Relaxed);
                         self.fanout_failed.store(true, Ordering::Release);
-                        return Err(error);
+                        return Err(match error {
+                            std::sync::mpsc::TrySendError::Full(_) => {
+                                "strategy socket queue saturated; stopping rather than dropping market data".to_string()
+                            }
+                            std::sync::mpsc::TrySendError::Disconnected(_) => {
+                                "strategy socket sender disconnected".to_string()
+                            }
+                        });
                     }
-                };
-                if let Err(error) = fanout.try_send(frame) {
-                    self.fanout_failed.store(true, Ordering::Release);
-                    return Err(match error {
-                        std::sync::mpsc::TrySendError::Full(_) => {
-                            "strategy socket queue saturated; stopping rather than dropping market data".to_string()
-                        }
-                        std::sync::mpsc::TrySendError::Disconnected(_) => {
-                            "strategy socket sender disconnected".to_string()
-                        }
-                    });
                 }
             }
             written += 1;
@@ -162,6 +200,10 @@ fn strategy_frame(
     merger: &Merger,
     trade: Option<Trade>,
     event_time_ms: i64,
+    received_time_ms: u64,
+    persistence_write_ms: f64,
+    persistence_errors: u64,
+    persistence_queue: usize,
 ) -> Result<Vec<u8>, String> {
     let state = merger.state();
     if !state.book_valid() {
@@ -176,7 +218,7 @@ fn strategy_frame(
         .best_ask()
         .ok_or_else(|| "best ask unavailable".to_string())?;
     let mut payload = format!(
-        "event_time_ms:{event_time_ms}\nbid_price:{}\nbid_qty:{bid_qty}\nask_price:{}\nask_qty:{ask_qty}\n",
+        "event_time_ms:{event_time_ms}\nreceived_time_ms:{received_time_ms}\npersistence_write_ms:{persistence_write_ms}\npersistence_errors:{persistence_errors}\npersistence_queue:{persistence_queue}\nbid_price:{}\nbid_qty:{bid_qty}\nask_price:{}\nask_qty:{ask_qty}\n",
         event_merger_live::tick_to_price(bid_tick),
         event_merger_live::tick_to_price(ask_tick),
     );
@@ -197,11 +239,27 @@ fn strategy_frame(
     Ok(frame)
 }
 
+fn market_event_key(event: &MarketEvent) -> (i64, u8, u64) {
+    (
+        event.event_time_ms(),
+        event.source() as u8,
+        event.source_sequence(),
+    )
+}
+
+fn wall_time_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
+
 #[cfg(unix)]
 fn start_strategy_fanout(
     instances: &[String],
     symbol: &str,
     failed: Arc<AtomicBool>,
+    queue_depth: Arc<AtomicUsize>,
 ) -> Result<std::sync::mpsc::SyncSender<Vec<u8>>, String> {
     use std::io::Write;
     use std::os::unix::net::UnixStream;
@@ -227,11 +285,13 @@ fn start_strategy_fanout(
         return Err("strategy fan-out requires at least one configured instance".into());
     }
     let (sender, receiver) = std::sync::mpsc::sync_channel::<Vec<u8>>(4096);
+    let queue_depth_worker = Arc::clone(&queue_depth);
     std::thread::Builder::new()
         .name(format!("uds-fanout-{symbol}"))
         .spawn(move || {
             let mut streams: Vec<Option<UnixStream>> = paths.iter().map(|_| None).collect();
             while let Ok(frame) = receiver.recv() {
+                queue_depth_worker.fetch_sub(1, Ordering::Relaxed);
                 for (path, stream) in paths.iter().zip(streams.iter_mut()) {
                     if stream.is_none() {
                         match UnixStream::connect(path) {
@@ -262,6 +322,7 @@ fn start_strategy_fanout(
     _instances: &[String],
     _symbol: &str,
     _failed: Arc<AtomicBool>,
+    _queue_depth: Arc<AtomicUsize>,
 ) -> Result<std::sync::mpsc::SyncSender<Vec<u8>>, String> {
     Err("live strategy fan-out requires Unix-domain sockets on a Unix host".into())
 }
@@ -434,6 +495,7 @@ pub fn run_capture(config: CaptureConfig) -> Result<(), String> {
     let keep_running = Arc::new(AtomicBool::new(true));
     let rows_seen = Arc::new(AtomicU64::new(0));
     let fanout_failed = Arc::new(AtomicBool::new(false));
+    let fanout_queue_depth = Arc::new(AtomicUsize::new(0));
     let fanout = if config.fanout_instances.is_empty() {
         None
     } else {
@@ -441,6 +503,7 @@ pub fn run_capture(config: CaptureConfig) -> Result<(), String> {
             &config.fanout_instances,
             &config.symbol.to_ascii_lowercase(),
             Arc::clone(&fanout_failed),
+            Arc::clone(&fanout_queue_depth),
         )?)
     };
 
@@ -464,6 +527,11 @@ pub fn run_capture(config: CaptureConfig) -> Result<(), String> {
         reseeds_pending: false,
         fanout,
         fanout_failed: Arc::clone(&fanout_failed),
+        fanout_skipped_invalid_book: 0,
+        fanout_queue_depth: Arc::clone(&fanout_queue_depth),
+        received_times: BTreeMap::new(),
+        last_persistence_write_ms: 0.0,
+        persistence_errors: 0,
     }));
 
     // Write the header immediately, before any data. Deferring it to the first
@@ -496,8 +564,9 @@ pub fn run_capture(config: CaptureConfig) -> Result<(), String> {
             let seen = Arc::clone(&rows_seen);
             let keep = Arc::clone(&keep_running);
             move |text| {
+                let received_ms = wall_time_ms();
                 if let Some(event) = parse_trade(text) {
-                    push(&shared, &seen, &keep, max_rows, event);
+                    push(&shared, &seen, &keep, max_rows, event, received_ms);
                 }
             }
         },
@@ -509,8 +578,9 @@ pub fn run_capture(config: CaptureConfig) -> Result<(), String> {
             let seen = Arc::clone(&rows_seen);
             let keep = Arc::clone(&keep_running);
             move |text| {
+                let received_ms = wall_time_ms();
                 if let Some(event) = parse_diff(text) {
-                    push(&shared, &seen, &keep, max_rows, event);
+                    push(&shared, &seen, &keep, max_rows, event, received_ms);
                 }
             }
         },
@@ -582,7 +652,7 @@ pub fn run_capture(config: CaptureConfig) -> Result<(), String> {
         // backed by evidence the feed is actually live.
         if started.elapsed().as_secs() > last_beat {
             last_beat = started.elapsed().as_secs();
-            let (book_ok, gaps, late, seeds) = {
+            let (book_ok, gaps, late, seeds, skipped) = {
                 let guard = capture.lock().expect("capture mutex poisoned");
                 let c = guard.merger.counters();
                 (
@@ -590,10 +660,11 @@ pub fn run_capture(config: CaptureConfig) -> Result<(), String> {
                     c.gaps,
                     c.late_dropped,
                     c.seeds_applied,
+                    guard.fanout_skipped_invalid_book,
                 )
             };
             eprintln!(
-                "[capture] rows={total} book={} gaps={gaps} late={late} seeds={seeds}",
+                "[capture] rows={total} book={} gaps={gaps} late={late} seeds={seeds} strategy_skipped_invalid_book={skipped}",
                 if book_ok { "valid" } else { "UNSEEDED/STALE" }
             );
         }
@@ -628,9 +699,10 @@ fn push(
     keep: &Arc<AtomicBool>,
     max_rows: Option<u64>,
     event: MarketEvent,
+    received_ms: u64,
 ) {
     let Ok(mut guard) = shared.lock() else { return };
-    match guard.offer(event) {
+    match guard.offer_received(event, received_ms) {
         Ok(written) => {
             let total = rows_seen.fetch_add(written, Ordering::Relaxed) + written;
             if max_rows.is_some_and(|limit| total >= limit) {
@@ -745,6 +817,11 @@ mod end_to_end {
             reseeds_pending: false,
             fanout: None,
             fanout_failed: Arc::new(AtomicBool::new(false)),
+            fanout_skipped_invalid_book: 0,
+            fanout_queue_depth: Arc::new(AtomicUsize::new(0)),
+            received_times: BTreeMap::new(),
+            last_persistence_write_ms: 0.0,
+            persistence_errors: 0,
         };
 
         // A REST seed, applied DIRECTLY to the merger. It must not go
@@ -934,7 +1011,7 @@ mod strategy_fanout_tests {
         };
         merger.merge_event(MarketEvent::Trade(trade));
 
-        let frame = strategy_frame(&merger, Some(trade), trade.event_time_ms).unwrap();
+        let frame = strategy_frame(&merger, Some(trade), trade.event_time_ms, 1_700_000_000_000, 0.2, 0, 0).unwrap();
         let payload_length = u32::from_le_bytes(frame[..4].try_into().unwrap()) as usize;
         assert_eq!(payload_length, frame.len() - 4);
         let payload = std::str::from_utf8(&frame[4..]).unwrap();
@@ -948,6 +1025,69 @@ mod strategy_fanout_tests {
     #[test]
     fn strategy_payload_refuses_unseeded_or_stale_books() {
         let merger = Merger::new(20);
-        assert!(strategy_frame(&merger, None, 1).is_err());
+        assert!(strategy_frame(&merger, None, 1, 1, 0.0, 0, 0).is_err());
+    }
+
+    #[test]
+    fn invalid_book_temporarily_pauses_fanout_without_failing_capture() {
+        let path = std::env::temp_dir().join(format!(
+            "uets_invalid_book_fanout_{}.csv",
+            std::process::id()
+        ));
+        let (sender, receiver) = std::sync::mpsc::sync_channel(8);
+        let failed = Arc::new(AtomicBool::new(false));
+        let mut capture = Capture {
+            merger: Merger::new(DEFAULT_LEVELS),
+            reorder: ReorderBuffer::new(0, 8),
+            csv: CsvRecorder::create(&path).unwrap(),
+            rows_written: 0,
+            reseeds_pending: false,
+            fanout_skipped_invalid_book: 0,
+            fanout: Some(sender),
+            fanout_failed: Arc::clone(&failed),
+            fanout_queue_depth: Arc::new(AtomicUsize::new(0)),
+            received_times: BTreeMap::new(),
+            last_persistence_write_ms: 0.0,
+            persistence_errors: 0,
+        };
+        capture.csv.write_header().unwrap();
+        let trade = Trade {
+            event_time_ms: 1_700_000_000_000,
+            transact_time_ms: 1_700_000_000_000,
+            agg_trade_id: 1,
+            first_trade_id: 1,
+            last_trade_id: 1,
+            price: 100.0,
+            quantity: 0.1,
+            is_buyer_maker: false,
+        };
+
+        capture
+            .offer(MarketEvent::Trade(trade))
+            .expect("invalid books should pause strategy fanout, not the feed");
+
+        assert_eq!(capture.fanout_skipped_invalid_book, 1);
+        assert!(!failed.load(Ordering::Acquire));
+        assert!(receiver.try_recv().is_err());
+
+        capture.merger.apply_seed(&BookSnapshot {
+            last_update_id: 2,
+            bids: vec![(99.0, 1.0)],
+            asks: vec![(101.0, 1.0)],
+        });
+        let resumed_trade = Trade {
+            event_time_ms: trade.event_time_ms + 1,
+            transact_time_ms: trade.transact_time_ms + 1,
+            agg_trade_id: 2,
+            first_trade_id: 2,
+            last_trade_id: 2,
+            ..trade
+        };
+        capture
+            .offer(MarketEvent::Trade(resumed_trade))
+            .expect("strategy fanout should resume after a valid book is reseeded");
+        assert!(receiver.try_recv().is_ok());
+        drop(capture);
+        let _ = std::fs::remove_file(path);
     }
 }

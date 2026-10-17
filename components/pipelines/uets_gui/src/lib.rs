@@ -7,5 +7,6 @@ pub mod socket;
 
 pub use gui::{
     DashboardSnapshot, InstanceSnapshot, Monitor, MonitorError, SnapshotSource, Statistics,
+    StrategyCommand,
 };
 pub use socket::{SocketSnapshotSource, publish_instance};
