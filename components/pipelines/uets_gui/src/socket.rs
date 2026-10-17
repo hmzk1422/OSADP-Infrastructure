@@ -73,6 +73,10 @@ impl SocketSnapshotSource {
             instances: BTreeMap::new(),
         })
     }
+
+    pub fn forget_instance(&mut self, identity: &str) {
+        self.instances.remove(identity);
+    }
 }
 
 #[cfg(not(unix))]
@@ -112,6 +116,8 @@ impl SnapshotSource for SocketSnapshotSource {
                     && now.duration_since(*last_seen) > INSTANCE_STALE_AFTER
                 {
                     instance.statistics.status = Some("error".to_string());
+                    instance.statistics.last_error =
+                        Some("No worker telemetry received for more than 3 seconds".to_string());
                 }
                 instance.clone()
             })

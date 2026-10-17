@@ -34,6 +34,7 @@ pub struct Statistics {
     pub win_rate: Option<f64>,
     pub exposure: Option<f64>,
     pub status: Option<String>,
+    pub last_error: Option<String>,
     pub latest_market_data: Option<String>,
     pub latest_decision: Option<String>,
     pub exchange_latency_ms: Option<f64>,
@@ -78,6 +79,17 @@ pub struct DashboardSnapshot {
 /// return quickly; the GUI polls it independently at the display cadence.
 pub trait SnapshotSource {
     fn snapshot(&mut self) -> DashboardSnapshot;
+
+    fn control(&mut self, _command: StrategyCommand) -> Result<(), String> {
+        Err("strategy management is unavailable for this snapshot source".to_string())
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum StrategyCommand {
+    Add(String),
+    Toggle(String),
+    Remove(String),
 }
 
 #[derive(Debug, Error)]
@@ -90,6 +102,8 @@ pub struct Monitor<S> {
     source: S,
     selected: Option<usize>,
     interval: Duration,
+    add_input: Option<String>,
+    message: Option<String>,
 }
 
 impl<S: SnapshotSource> Monitor<S> {
@@ -98,6 +112,8 @@ impl<S: SnapshotSource> Monitor<S> {
             source,
             selected: None,
             interval: Duration::from_millis(100),
+            add_input: None,
+            message: None,
         }
     }
     pub fn with_interval(mut self, interval: Duration) -> Self {
@@ -131,10 +147,34 @@ impl<S: SnapshotSource> Monitor<S> {
             {
                 self.selected = None;
             }
-            terminal.draw(|frame| render(frame, &snapshot, self.selected))?;
+            terminal.draw(|frame| {
+                render(
+                    frame,
+                    &snapshot,
+                    self.selected,
+                    self.add_input.as_deref(),
+                    self.message.as_deref(),
+                )
+            })?;
             let timeout = self.interval.saturating_sub(started.elapsed());
             if event::poll(timeout)? {
                 if let Event::Key(key) = event::read()? {
+                    if let Some(input) = &mut self.add_input {
+                        match key.code {
+                            crossterm::event::KeyCode::Esc => self.add_input = None,
+                            crossterm::event::KeyCode::Enter => {
+                                let identity = std::mem::take(input);
+                                self.add_input = None;
+                                self.control(StrategyCommand::Add(identity));
+                            }
+                            crossterm::event::KeyCode::Backspace => {
+                                input.pop();
+                            }
+                            crossterm::event::KeyCode::Char(character) => input.push(character),
+                            _ => {}
+                        }
+                        continue;
+                    }
                     match crate::controls::action(key) {
                         crate::controls::Action::Quit => return Ok(()),
                         crate::controls::Action::Up => self.move_selection(&snapshot, -1),
@@ -147,11 +187,43 @@ impl<S: SnapshotSource> Monitor<S> {
                             }
                         }
                         crate::controls::Action::Clear => self.selected = None,
+                        crate::controls::Action::Add => {
+                            self.add_input = Some(String::new());
+                            self.message = Some("Enter strategy@asset, e.g. ofmr@btcusdt".into());
+                        }
+                        crate::controls::Action::Toggle => {
+                            self.control_selected(&snapshot, StrategyCommand::Toggle);
+                        }
+                        crate::controls::Action::Remove => {
+                            self.control_selected(&snapshot, StrategyCommand::Remove);
+                        }
                         crate::controls::Action::None => {}
                     }
                 }
             }
         }
+    }
+
+    fn control(&mut self, command: StrategyCommand) {
+        self.message = Some(match self.source.control(command) {
+            Ok(()) => "Strategy configuration updated".to_string(),
+            Err(error) => format!("Control failed: {error}"),
+        });
+    }
+
+    fn control_selected(
+        &mut self,
+        snapshot: &DashboardSnapshot,
+        make: fn(String) -> StrategyCommand,
+    ) {
+        let Some(instance) = self
+            .selected
+            .and_then(|index| snapshot.instances.get(index))
+        else {
+            self.message = Some("Select a strategy first".to_string());
+            return;
+        };
+        self.control(make(instance.identity()));
     }
 
     fn move_selection(&mut self, snapshot: &DashboardSnapshot, delta: isize) {
@@ -165,7 +237,13 @@ impl<S: SnapshotSource> Monitor<S> {
     }
 }
 
-fn render(frame: &mut Frame<'_>, snapshot: &DashboardSnapshot, selected: Option<usize>) {
+fn render(
+    frame: &mut Frame<'_>,
+    snapshot: &DashboardSnapshot,
+    selected: Option<usize>,
+    add_input: Option<&str>,
+    message: Option<&str>,
+) {
     let areas = Layout::default()
         .direction(Direction::Vertical)
         .constraints(
@@ -202,6 +280,52 @@ fn render(frame: &mut Frame<'_>, snapshot: &DashboardSnapshot, selected: Option<
     );
     render_statistics(frame, areas[1], stats, &identity);
     render_instances(frame, areas[2], snapshot, selected);
+    if let Some(value) = add_input {
+        let popup = centered_rect(60, 20, frame.area());
+        frame.render_widget(ratatui::widgets::Clear, popup);
+        frame.render_widget(
+            Paragraph::new(format!(
+                "Add disabled strategy: {value}_\nEnter confirms · Esc cancels"
+            ))
+            .block(
+                Block::default()
+                    .title(" Add strategy ")
+                    .borders(Borders::ALL),
+            ),
+            popup,
+        );
+    } else if let Some(message) = message {
+        let area = frame.area();
+        let footer =
+            ratatui::layout::Rect::new(area.x, area.bottom().saturating_sub(1), area.width, 1);
+        frame.render_widget(
+            Paragraph::new(message).style(Style::default().fg(Color::Yellow)),
+            footer,
+        );
+    }
+}
+
+fn centered_rect(
+    width_percent: u16,
+    height_percent: u16,
+    area: ratatui::layout::Rect,
+) -> ratatui::layout::Rect {
+    let vertical = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage((100 - height_percent) / 2),
+            Constraint::Percentage(height_percent),
+            Constraint::Percentage((100 - height_percent) / 2),
+        ])
+        .split(area);
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage((100 - width_percent) / 2),
+            Constraint::Percentage(width_percent),
+            Constraint::Percentage((100 - width_percent) / 2),
+        ])
+        .split(vertical[1])[1]
 }
 
 fn render_chart(
@@ -249,6 +373,19 @@ fn render_chart(
             Line::from(format!("{:.2}", bounds.1)),
         ]));
     frame.render_widget(chart, area);
+    if equity.is_empty() {
+        let empty = ratatui::layout::Rect::new(
+            area.x.saturating_add(2),
+            area.y.saturating_add(area.height / 2),
+            area.width.saturating_sub(4),
+            1,
+        );
+        frame.render_widget(
+            Paragraph::new("No equity history received yet".to_string())
+                .style(Style::default().fg(Color::DarkGray)),
+            empty,
+        );
+    }
 }
 
 fn metric(name: &str, value: Option<String>) -> String {
@@ -286,6 +423,7 @@ fn render_statistics(
         ),
         metric("Win rate", number(stats.win_rate, true)),
         metric("Status", stats.status.clone()),
+        metric("Error", stats.last_error.clone()),
         metric("Market data", stats.latest_market_data.clone()),
         metric("Decision", stats.latest_decision.clone()),
         metric("Strategy ms", number(stats.processing_latency_ms, false)),
@@ -364,7 +502,7 @@ fn render_instances(
     let list = List::new(entries)
         .block(
             Block::default()
-                .title(" Strategies · j/k · Enter ")
+                .title(" Strategies · j/k move · Enter inspect · a add · e enable/disable · x delete · q quit ")
                 .borders(Borders::ALL),
         )
         .highlight_style(

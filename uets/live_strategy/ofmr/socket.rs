@@ -20,17 +20,19 @@ use crate::connectors::binance::BinanceFuturesTrade;
 use crate::core::order::{OrderRequest, Side};
 #[cfg(unix)]
 use crate::exchange::ExecutionConnector;
+#[cfg(unix)]
+use crate::live_strategy::ofmr::features::OfmrFeatures;
+#[cfg(unix)]
+use crate::live_strategy::ofmr::{ComputeFeatures, StateBuilder};
+#[cfg(unix)]
+use crate::live_strategy::ofmr::settings::Settings;
+#[cfg(unix)]
+use crate::live_strategy::ofmr::strategy::OfmrStrategy;
+#[cfg(unix)]
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[cfg(unix)]
 const MAX_FRAME: usize = 1_048_576;
-
-/// Outcome of claiming our socket path.
-#[derive(Debug, PartialEq, Eq)]
-#[cfg(unix)]
-enum Claim {
-    Free,
-    OwnedByLive(u32),
-}
 
 /// Decode one IPC frame into a `FeatureRow`. Frame body is expected to be a
 /// simple `name:value` line protocol, one feature per line.
@@ -100,7 +102,12 @@ impl ExecutionConfig {
             if line.is_empty() {
                 continue;
             }
-            if line.ends_with(':') && raw_line.starts_with(|character: char| !character.is_whitespace()) {
+            if line.ends_with(':')
+                && raw_line
+                    .chars()
+                    .next()
+                    .is_some_and(|character| !character.is_whitespace())
+            {
                 in_execution = line == "execution:";
                 continue;
             }
@@ -252,8 +259,8 @@ fn quantity_for_capital(max_position_usd: f64, price: f64, minimum: f64) -> Opti
 #[cfg(unix)]
 pub fn run(socket_path: &str, symbol: &str) -> Result<(), String> {
     use std::io::Read;
-    use std::os::unix::net::{UnixDatagram, UnixListener};
-    use std::time::{Instant, SystemTime, UNIX_EPOCH};
+    use std::os::unix::net::UnixListener;
+    use std::time::Instant;
 
     if let Some(parent) = Path::new(socket_path).parent() {
         std::fs::create_dir_all(parent)
@@ -264,10 +271,10 @@ pub fn run(socket_path: &str, symbol: &str) -> Result<(), String> {
     let claim = crate::aggregator::cleanup::claim(Path::new(socket_path))
         .map_err(|e| format!("claim socket {socket_path}: {e}"))?;
     match claim {
-        Claim::OwnedByLive(_pid) => {
+        crate::aggregator::cleanup::Claim::OwnedByLive(_pid) => {
             return Err(format!("socket {socket_path} is owned by a live process"));
         }
-        Claim::Free => {}
+        crate::aggregator::cleanup::Claim::Free => {}
     }
 
     let listener =
