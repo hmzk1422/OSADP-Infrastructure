@@ -1,6 +1,6 @@
 //! `uets_db` — persistence layer for the UETS trading system.
 //!
-//! Owns the embedded key-value store (sled, RocksDB-compatible), record
+//! Owns the embedded RocksDB key-value store, record
 //! schemas, serialization, CRUD operations, indexed queries, batched writes,
 //! session management, schema versioning, and recovery.
 //!

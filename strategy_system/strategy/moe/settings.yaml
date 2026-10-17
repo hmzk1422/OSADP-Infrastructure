@@ -21,7 +21,7 @@ data:
   # ohlcv:     CryptoL1 candles
   source: orderbook
   orderbook:
-    file_limit: 20        # one parquet file per hour
+    file_limit: 5        # one parquet file per hour
     start: 0
   ohlcv:
     symbol: BTC/USDT
@@ -93,7 +93,7 @@ ood:                       # causal temporal regime discovery
 gp:                        # bounded state-conditioned genetic programming
   enabled: false           # explicit offline retraining switch; never run per live observation
   feature_library_path: null # optional persisted, validated expression library
-  evaluation_models: [ridge, ols, tree, neural_network]
+  evaluation_models: [ridge] # [ridge, ols, tree, neural_network]
   target_columns:          # supervised objectives from outcome.forward_returns
     - future_return__1s
     - future_return__5s
@@ -113,8 +113,8 @@ gp:                        # bounded state-conditioned genetic programming
   train_fraction: 0.70     # chronological prefix; selected labels are purged at boundary
   purge_rows: 0            # fallback only when target timestamp columns are unavailable
   max_height: 5
-  population_size: 32
-  generations: 8
+  population_size: 16
+  generations: 3
   tournament_size: 4
   elite_count: 2
   mutation_rate: 0.30

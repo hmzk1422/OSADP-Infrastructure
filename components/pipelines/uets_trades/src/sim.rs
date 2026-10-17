@@ -146,7 +146,14 @@ impl Book {
     /// Why a *buy* of `qty` at `price` (opening portion) cannot execute, or
     /// `None` if it can. Sells always execute (they free cash or collect
     /// proceeds).
-    pub fn capacity_error(&self, strategy_id: &str, side: OrderSide, qty: f64, price: f64, fee: f64) -> Option<String> {
+    pub fn capacity_error(
+        &self,
+        strategy_id: &str,
+        side: OrderSide,
+        qty: f64,
+        price: f64,
+        fee: f64,
+    ) -> Option<String> {
         if side == OrderSide::Sell {
             return None;
         }
@@ -304,7 +311,11 @@ impl Book {
     pub fn mark_to_market(&mut self) {
         let mut per: BTreeMap<String, (f64, f64, f64)> = BTreeMap::new();
         for (key, pos) in &self.positions {
-            let mark = self.marks.get(&key.symbol).copied().unwrap_or(pos.avg_entry);
+            let mark = self
+                .marks
+                .get(&key.symbol)
+                .copied()
+                .unwrap_or(pos.avg_entry);
             let value = pos.qty * mark;
             let unreal = (mark - pos.avg_entry) * pos.qty;
             let slot = per
@@ -457,7 +468,10 @@ impl SimEngine {
         let Some(order) = self.orders.get(order_id) else {
             return FillOutcome::Idle;
         };
-        if !matches!(order.status, OrderStatus::Accepted | OrderStatus::PartiallyFilled) {
+        if !matches!(
+            order.status,
+            OrderStatus::Accepted | OrderStatus::PartiallyFilled
+        ) {
             return FillOutcome::Idle;
         }
         let request = order.request.clone();
@@ -580,7 +594,12 @@ impl SimEngine {
         let live_ids: Vec<OrderId> = self
             .orders
             .iter()
-            .filter(|(_, o)| matches!(o.status, OrderStatus::Accepted | OrderStatus::PartiallyFilled))
+            .filter(|(_, o)| {
+                matches!(
+                    o.status,
+                    OrderStatus::Accepted | OrderStatus::PartiallyFilled
+                )
+            })
             .map(|(id, _)| id.clone())
             .collect();
         for id in live_ids {
@@ -609,7 +628,11 @@ impl SimEngine {
                 self.barrier_seq,
                 UuidLike(&symbol)
             ));
-            let side = if is_long { OrderSide::Sell } else { OrderSide::Buy };
+            let side = if is_long {
+                OrderSide::Sell
+            } else {
+                OrderSide::Buy
+            };
             let asset_id = strategy_id.split('@').nth(1).unwrap_or(&symbol).to_string();
             let request = OrderRequest {
                 id: exit_id.clone(),
@@ -619,6 +642,7 @@ impl SimEngine {
                 qty: qty.abs(),
                 price: None,
                 time_in_force: crate::types::TimeInForce::Gtc,
+                reduce_only: true,
                 strategy_id: strategy_id.clone(),
                 asset_id,
                 barrier: None, // exits never carry a barrier (no recursion)
@@ -709,7 +733,3 @@ impl std::fmt::Display for UuidLike<'_> {
         Ok(())
     }
 }
-
-
-
-

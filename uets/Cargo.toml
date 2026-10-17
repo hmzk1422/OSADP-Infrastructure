@@ -28,6 +28,7 @@ pyo3 = "0.29"
 # native-tls by default and the binance crate uses the vendored variant.
 tungstenite = "0.21"
 serde_json = "1"
+uets_gui = { path = "../components/pipelines/uets_gui" }
 
 [[bin]]
 name = "dev_test"

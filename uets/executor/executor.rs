@@ -117,6 +117,9 @@ fn print_help() {
          \x20 all-tickers             all-symbols mini-ticker stream (!miniTicker@arr)\n\
          \x20 multi [SYMBOLS...]      multiple diff-depth streams on one connection\n\
          \x20 record SYM1 [SYM2 ...] [DIR] live capture -> one merged CSV per symbol under DIR\n\
+         \x20 feed SYMBOL INSTANCE...  capture live data and fan it out over Unix sockets\n\
+         \x20 run INSTANCE...         start the VIM monitor and isolated strategy/feed processes\n\
+         \x20                         prefix an instance with disabled: to omit its worker\n\
          \x20                         (default DIR: market_data/live_db)\n\
          \x20                         flags: --dir DIR  explicit output dir (removes ambiguity)\n\
          \x20                                --rows N   stop after N rows *per symbol*\n\
@@ -128,6 +131,7 @@ fn print_help() {
          \x20                         other stream's columns as NaN\n\
          \x20                         (default DIR: uets/out/live)\n\
          \x20 strategies               list compiled vs on-disk strategy bundles\n\
+         \x20 strategy <strategy>@<asset> run one strategy socket consumer\n\
          \x20 user-stream             REST listen-key lifecycle (needs API key)\n\
          \x20 user-stream-ws          account/order update stream (needs API key)\n\
          \x20 help                    show this message\n\
@@ -136,10 +140,196 @@ fn print_help() {
          \x20 dev_test market btcusdt aggTrade\n\
          \x20 dev_test depth btcusdt\n\
          \x20 dev_test multi ethbtc bnbusdt\n\
+         \x20 dev_test strategy ofmr@btcusdt\n\
+         \x20 dev_test feed btcusdt ofmr@btcusdt\n\
+         \x20 dev_test run ofmr@btcusdt ofmr@ethusdt\n\
          \x20 dev_test record btcusdt            # -> market_data/live_db\n\
          \n\
          All streams run until interrupted (Ctrl+C)."
     );
+}
+
+fn parse_strategy_instance(value: &str) -> Result<(String, String), String> {
+    let Some((strategy, asset)) = value.split_once('@') else {
+        return Err(format!(
+            "invalid strategy instance '{value}'; expected strategy@asset"
+        ));
+    };
+    if strategy.is_empty()
+        || asset.is_empty()
+        || asset.contains('@')
+        || !strategy
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_')
+        || !asset
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    {
+        return Err(format!(
+            "invalid strategy instance '{value}'; expected strategy@asset"
+        ));
+    }
+    Ok((strategy.to_ascii_lowercase(), asset.to_ascii_lowercase()))
+}
+
+#[cfg(unix)]
+struct LiveProcesses(Vec<std::process::Child>);
+
+#[cfg(unix)]
+impl Drop for LiveProcesses {
+    fn drop(&mut self) {
+        for child in &mut self.0 {
+            let _ = child.kill();
+        }
+        for child in &mut self.0 {
+            let _ = child.wait();
+        }
+    }
+}
+
+#[cfg(unix)]
+fn run_live_system(requested: &[String]) -> Result<(), String> {
+    use std::time::{Duration, Instant};
+    use uets_gui::{
+        InstanceSnapshot, Monitor, SnapshotSource, SocketSnapshotSource, Statistics,
+        publish_instance,
+    };
+
+    if requested.is_empty() {
+        return Err("usage: dev_test run <strategy>@<asset> [strategy@asset ...]".into());
+    }
+
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .ok_or_else(|| "cannot resolve repository root".to_string())?
+        .to_path_buf();
+    std::env::set_current_dir(&root).map_err(|error| error.to_string())?;
+
+    let gui_socket = root.join("sockets").join("gui.sock");
+    let mut snapshots = SocketSnapshotSource::bind(&gui_socket)
+        .map_err(|error| format!("bind UETS GUI socket: {error}"))?;
+    let executable = std::env::current_exe().map_err(|error| error.to_string())?;
+    let log_dir = root.join("logs").join("uets");
+    std::fs::create_dir_all(&log_dir).map_err(|error| error.to_string())?;
+    let mut enabled = Vec::new();
+    let mut disabled = Vec::new();
+    let mut assets = std::collections::BTreeSet::new();
+
+    for value in requested {
+        let is_disabled = value.starts_with("disabled:");
+        let identity = value.strip_prefix("disabled:").unwrap_or(value);
+        let (strategy, asset) = parse_strategy_instance(identity)?;
+        if strategy != "ofmr" {
+            return Err(format!("'{strategy}' has no live UDS consumer yet"));
+        }
+        if !assets.insert(asset.clone()) {
+            return Err(format!(
+                "multiple strategies for asset '{asset}' are not supported by this feed adapter"
+            ));
+        }
+        let identity = format!("{strategy}@{asset}");
+        if is_disabled {
+            disabled.push(identity);
+        } else {
+            enabled.push((identity, asset));
+        }
+    }
+
+    for identity in disabled {
+        let asset = identity.split_once('@').unwrap().1;
+        publish_instance(
+            &gui_socket,
+            &InstanceSnapshot {
+                strategy_id: "ofmr".to_string(),
+                asset_id: asset.to_string(),
+                statistics: Statistics {
+                    status: Some("disabled".to_string()),
+                    ..Statistics::default()
+                },
+                equity_history: Vec::new(),
+            },
+        )
+        .map_err(|error| format!("publish disabled status for {identity}: {error}"))?;
+    }
+
+    let mut processes = LiveProcesses(Vec::new());
+    for (identity, _) in &enabled {
+        let log = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(log_dir.join(format!("strategy_{}.log", identity.replace('@', "_"))))
+            .map_err(|error| error.to_string())?;
+        let mut command = std::process::Command::new(&executable);
+        command
+            .current_dir(&root)
+            .env("UETS_GUI_SOCKET", &gui_socket)
+            .arg("strategy")
+            .arg(identity)
+            .stdout(std::process::Stdio::from(
+                log.try_clone().map_err(|error| error.to_string())?,
+            ))
+            .stderr(std::process::Stdio::from(log));
+        let child = command
+            .spawn()
+            .map_err(|error| format!("start {identity}: {error}"))?;
+        processes.0.push(child);
+    }
+
+    let startup_deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let current = snapshots.snapshot();
+        let ready = enabled.iter().all(|(identity, _)| {
+            current.instances.iter().any(|instance| {
+                instance.identity() == *identity
+                    && instance.statistics.status.as_deref() == Some("enabled")
+            })
+        });
+        if ready {
+            break;
+        }
+        for child in &mut processes.0 {
+            if let Some(status) = child.try_wait().map_err(|error| error.to_string())? {
+                return Err(format!("strategy worker exited during startup: {status}"));
+            }
+        }
+        if Instant::now() >= startup_deadline {
+            return Err("timed out waiting for strategy worker UDS telemetry".into());
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+
+    for (identity, asset) in &enabled {
+        let log = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(log_dir.join(format!("feed_{asset}.log")))
+            .map_err(|error| error.to_string())?;
+        let mut command = std::process::Command::new(&executable);
+        command
+            .current_dir(&root)
+            .env("UETS_GUI_SOCKET", &gui_socket)
+            .arg("feed")
+            .arg(asset)
+            .arg(identity)
+            .stdout(std::process::Stdio::from(
+                log.try_clone().map_err(|error| error.to_string())?,
+            ))
+            .stderr(std::process::Stdio::from(log));
+        let child = command
+            .spawn()
+            .map_err(|error| format!("start feed for {identity}: {error}"))?;
+        processes.0.push(child);
+    }
+
+    eprintln!("UETS live monitor started; press q to stop all workers");
+    Monitor::new(snapshots)
+        .run()
+        .map_err(|error| format!("UETS monitor failed: {error}"))
+}
+
+#[cfg(not(unix))]
+fn run_live_system(_requested: &[String]) -> Result<(), String> {
+    Err("the live UETS runner requires Unix-domain sockets; run it on Linux or in Docker".into())
 }
 
 /// Live capture orchestration: websockets -> merge -> the 128-column CSV.
@@ -1238,6 +1428,30 @@ fn main() -> ExitCode {
         "record" => {
             return run_record(&rest);
         }
+        "run" => {
+            return match run_live_system(&rest) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(error) => {
+                    eprintln!("UETS runtime failed: {error}");
+                    ExitCode::FAILURE
+                }
+            };
+        }
+        "feed" => {
+            if rest.len() < 2 {
+                eprintln!("usage: dev_test feed <symbol> <strategy>@<asset> [...]");
+                return ExitCode::FAILURE;
+            }
+            let mut config = live::CaptureConfig::new(&rest[0], default_live_db_dir());
+            config.fanout_instances = rest.iter().skip(1).cloned().collect();
+            return match live::run_capture(config) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(error) => {
+                    eprintln!("live feed failed: {error}");
+                    ExitCode::FAILURE
+                }
+            };
+        }
         "monitor" => {
             let symbol = if first().is_empty() {
                 "btcusdt".into()
@@ -1294,15 +1508,38 @@ fn main() -> ExitCode {
             // sockets/strategies/<name>_<symbol>.sock so multiple instances
             // can run side by side (ofmr->btc, ofmr->eth, ofmr->sol,
             // ... 100 assets).
-            let name = first();
-            if name.is_empty() {
-                eprintln!("usage: dev_test strategy <name> <symbol>");
+            let identity = first();
+            if identity.is_empty() {
+                eprintln!("usage: dev_test strategy <strategy>@<asset> (or <strategy> <asset>)");
                 print_help();
                 return ExitCode::FAILURE;
             }
-            let symbol = rest.get(1).cloned().unwrap_or_else(|| "btcusdt".into());
+            let (name, symbol) = if identity.contains('@') {
+                match parse_strategy_instance(&identity) {
+                    Ok(instance) => instance,
+                    Err(error) => {
+                        eprintln!("{error}");
+                        return ExitCode::FAILURE;
+                    }
+                }
+            } else {
+                let symbol = rest.get(1).cloned().unwrap_or_else(|| "btcusdt".into());
+                match parse_strategy_instance(&format!("{identity}@{symbol}")) {
+                    Ok(instance) => instance,
+                    Err(error) => {
+                        eprintln!("{error}");
+                        return ExitCode::FAILURE;
+                    }
+                }
+            };
+            if name != "ofmr" {
+                eprintln!("strategy socket consumer is currently implemented only for 'ofmr'");
+                return ExitCode::FAILURE;
+            }
             let socket_path = format!("sockets/strategies/{name}_{symbol}.sock");
-            if let Err(e) = uets::live_strategy::ofmr::socket::run(&socket_path) {
+            println!("instance:   {name}@{symbol}");
+            println!("socket:     {socket_path}");
+            if let Err(e) = uets::live_strategy::ofmr::socket::run(&socket_path, &symbol) {
                 eprintln!("strategy socket failed: {e}");
                 return ExitCode::FAILURE;
             }
@@ -1324,4 +1561,24 @@ fn main() -> ExitCode {
     }
 
     ExitCode::SUCCESS
+}
+
+#[cfg(test)]
+mod strategy_instance_tests {
+    use super::parse_strategy_instance;
+
+    #[test]
+    fn parses_canonical_identity_case_insensitively() {
+        assert_eq!(
+            parse_strategy_instance("OFMR@BTCUSDT").unwrap(),
+            ("ofmr".to_string(), "btcusdt".to_string())
+        );
+    }
+
+    #[test]
+    fn rejects_incomplete_or_unsafe_identity() {
+        assert!(parse_strategy_instance("ofmr").is_err());
+        assert!(parse_strategy_instance("@btcusdt").is_err());
+        assert!(parse_strategy_instance("ofmr@../../tmp").is_err());
+    }
 }

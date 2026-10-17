@@ -1,7 +1,7 @@
 //! 100 ms reporting cadence — a report update must not block strategy
 //! execution or order reporting.
 
-use crate::calc::metrics::PerformanceSnapshot;
+use crate::calc::metrics::{PerformanceSnapshot, aggregate_capital};
 use crate::types::Capital;
 use chrono::{DateTime, Utc};
 
@@ -45,9 +45,7 @@ impl Reporter {
     pub fn should_report(&self, now: DateTime<Utc>) -> bool {
         match self.last_report {
             None => true,
-            Some(last) => {
-                (now - last).num_milliseconds() >= self.config.interval_ms as i64
-            }
+            Some(last) => (now - last).num_milliseconds() >= self.config.interval_ms as i64,
         }
     }
 
@@ -82,6 +80,29 @@ impl Reporter {
         ))
     }
 
+    /// Produce one portfolio-level report from all active instance books.
+    /// The aggregate equity sample is used for portfolio Sortino and drawdown.
+    pub fn maybe_report_aggregate(
+        &mut self,
+        now: DateTime<Utc>,
+        capitals: &[Capital],
+    ) -> Option<PerformanceSnapshot> {
+        if !self.should_report(now) {
+            return None;
+        }
+        let capital = aggregate_capital(capitals)?;
+        self.push_equity(capital.equity);
+        self.last_report = Some(now);
+        Some(PerformanceSnapshot::from_capital(
+            "portfolio",
+            "all",
+            now,
+            &capital,
+            &self.equity_curve,
+            self.config.periods_per_year,
+        ))
+    }
+
     /// Force a report immediately (e.g. on session end).
     pub fn force_report(
         &mut self,
@@ -104,6 +125,31 @@ impl Reporter {
             &self.equity_curve,
             self.config.periods_per_year,
         )
+    }
+
+    pub fn force_report_aggregate(
+        &mut self,
+        now: DateTime<Utc>,
+        capitals: &[Capital],
+    ) -> Option<PerformanceSnapshot> {
+        let capital = aggregate_capital(capitals)?;
+        self.push_equity(capital.equity);
+        self.last_report = Some(now);
+        Some(PerformanceSnapshot::from_capital(
+            "portfolio",
+            "all",
+            now,
+            &capital,
+            &self.equity_curve,
+            self.config.periods_per_year,
+        ))
+    }
+
+    fn push_equity(&mut self, equity: f64) {
+        self.equity_curve.push(equity);
+        if self.equity_curve.len() > 10_000 {
+            self.equity_curve.drain(..self.equity_curve.len() - 10_000);
+        }
     }
 
     pub fn equity_curve(&self) -> &[f64] {

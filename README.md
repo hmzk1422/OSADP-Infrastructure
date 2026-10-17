@@ -99,6 +99,24 @@ python unified_runner.py db --clean-ticker btcusdt --yes
 python unified_runner.py doctor --require-native
 ```
 
+### UETS live monitor (Rust)
+
+The UETS websocket/UDS runtime is started by its Rust executor, not a Bash
+launcher or `unified_runner.py`:
+
+```bash
+cargo run --release --manifest-path uets/Cargo.toml --bin dev_test -- run ofmr@btcusdt ofmr@ethusdt
+```
+
+On Windows, launch it in the Linux Docker development container:
+
+```powershell
+docker compose -f docker-compose.dev.yml --profile live run --rm uets-live run ofmr@btcusdt ofmr@ethusdt
+```
+
+This currently runs the monitor/data-feed slice; it is not an order-enabled
+production trading command.
+
 ---
 
 ## 4. Run — VIM Dashboard

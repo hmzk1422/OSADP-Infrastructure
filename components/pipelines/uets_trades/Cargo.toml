@@ -10,7 +10,7 @@ crate-type = ["rlib"]
 
 [dependencies]
 # Re-use the existing uets crate for core trading types
-uets = { path = "../uets" }
+uets = { path = "../../../uets" }
 
 # Time handling
 chrono = { version = "0.4", features = ["serde"] }

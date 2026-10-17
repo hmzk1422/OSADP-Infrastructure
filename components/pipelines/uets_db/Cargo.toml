@@ -9,8 +9,8 @@ path = "src/lib.rs"
 crate-type = ["rlib"]
 
 [dependencies]
-# Embedded key-value store (RocksDB-compatible API, pure Rust)
-sled = "0.34"
+# Durable embedded key-value store
+rocksdb = { version = "0.22", default-features = false, features = ["lz4"] }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
@@ -36,4 +36,4 @@ tracing = "0.1"
 thiserror = "1"
 
 # Local uets_trades crate
-uets_trades = { path = "../../../uets_trades" }
+uets_trades = { path = "../uets_trades" }

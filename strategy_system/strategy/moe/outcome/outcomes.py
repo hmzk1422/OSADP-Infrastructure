@@ -362,6 +362,17 @@ def fit_state_linregs(
         raise ValueError("linreg targets must all be future_return__* columns")
     if not isinstance(purge_rows, int) or purge_rows < 0:
         raise ValueError("purge_rows must be an integer >= 0")
+    # _fit_linreg reads the targets out of ``frame``. Callers that pass a
+    # features-only frame (e.g. gp_stage.fit_latent_gp) would otherwise hit a
+    # KeyError, so attach any missing target columns here (row-aligned).
+    missing_targets = [c for c in targets.columns if c not in frame.columns]
+    if missing_targets:
+        if len(targets) != len(frame):
+            raise ValueError("targets must have the same number of rows as frame")
+        extra = targets.loc[:, missing_targets]
+        if not extra.index.equals(frame.index):
+            extra = extra.set_axis(frame.index)  # positional; avoids reindex on duplicate timestamps
+        frame = pd.concat([frame, extra], axis=1)
     if feature_columns is None:
         excluded = ("future_", "predicted_", "raw__", "__outcome_")
         flags = ("similarity", "trade_allowed", "state_mature", "model_ready", "latent_id")
@@ -904,7 +915,3 @@ def run_outcomes(
         events=events,
         report=report,
     )
-
-
-
-

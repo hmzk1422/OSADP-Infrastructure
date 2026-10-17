@@ -283,3 +283,108 @@ tests match.
   (`build/live_test_feed_<sym>.replay`, `T`/`B` event lines). Implemented via
   `load_state_space_from_replay()` in `ml_state_builder.py`; feeds without orderbook lines
   get a degenerate bid==ask==price book so feature construction still runs.
+
+# UETS component paths and strategy instances
+
+The trading/execution library now lives at
+`components/pipelines/uets_trades/`. Its sibling components are
+`components/pipelines/uets_manager/`, `components/pipelines/uets_db/`, and
+`components/pipelines/uets_gui/`. Keep `uets_trades` a library; CLI/process
+orchestration belongs in the UETS executable or a separate launcher.
+
+## Instance identity
+
+Use `strategy@asset` as the stable instance identity, with the strategy first:
+
+```text
+ofmr@btcusdt
+ofmr@ethusdt
+moe@btcusdt
+```
+
+To add an instance, ensure the strategy is compiled and registered under
+`uets/live_strategy/`, then add its `strategy@asset` entry to the runtime's
+instance configuration. Keep strategy ID and asset ID as separate fields in
+records/configuration; the composite identity is for display and routing. Each
+instance must receive its own process, strategy state, and socket endpoint. Do
+not use `ticker@strategy`; that reverses the canonical convention.
+
+The single-instance development consumer can be launched on a Unix host with:
+
+```sh
+cargo run --manifest-path uets/Cargo.toml --bin dev_test -- strategy ofmr@btcusdt
+```
+
+For the current monitor/data-feed slice, launch several OFMR instances and the
+TUI in one terminal with the Rust executor (no shell launcher):
+
+```sh
+cargo run --release --manifest-path uets/Cargo.toml --bin dev_test -- run ofmr@btcusdt ofmr@ethusdt
+```
+
+The Rust executor starts the TUI, one worker process per enabled instance, and
+one exchange-feed process per asset. Each feed sends length-prefixed
+latest-book/trade frames over AF_UNIX sockets. `j`/`k` and Enter select an
+instance; Escape returns to the aggregate view and `q` exits. A worker that
+stops publishing becomes `error` after three seconds. An instance can be
+started disabled by prefixing it with `disabled:`, for example:
+
+```sh
+cargo run --release --manifest-path uets/Cargo.toml --bin dev_test -- run disabled:ofmr@btcusdt ofmr@ethusdt
+```
+
+This is startup configuration, not a live operator toggle. This monitor path
+is **decision/telemetry only**; it does not submit or simulate trades, so
+return, Sortino, expectancy, capital allocation, and equity history remain
+unavailable rather than fabricated.
+
+On Windows, use the included Linux Docker development image because this UETS
+runtime currently requires Unix-domain sockets. From PowerShell:
+
+```powershell
+docker compose -f docker-compose.dev.yml --profile live run --rm uets-live run ofmr@btcusdt ofmr@ethusdt
+```
+
+The service builds from source and keeps the VIM terminal attached. It is a
+development/staging path, not a production trading image.
+
+The canonical form is `strategy <strategy>@<asset>`; the legacy form is
+`strategy <strategy> <asset>`. Its socket path is
+`sockets/strategies/<strategy>_<asset>.sock`. Only `ofmr` is currently wired to
+this socket consumer; another identity is rejected rather than silently running
+OFMR. The exchange-side fan-out must connect to and stream length-prefixed
+frames there. The OFMR consumer computes decisions and can submit USD-M
+Futures market orders under the mode in `uets/config/execution.yaml`. The Rust `run`
+command above remains a development launcher, not a production supervisor.
+
+## Current integration boundary
+
+The monitor executable and UDS market-feed fan-out exist, but the end-to-end
+trading stack is not production ready. The feed adapter currently supports one
+OFMR process per asset. The launcher can configure an instance as enabled or
+disabled at startup, and the GUI marks a worker `error` when its heartbeat
+stales; it does not provide live operator control or a restart/backoff policy.
+`uets_manager` now has a `BinanceFuturesTrade` connector matching the USD-M
+market feed. It defaults to Futures testnet, requires the explicit production
+constructor for mainnet, carries internal client IDs through the adapter, and
+preserves `reduce_only` on exits. The OFMR worker now submits orders directly
+through that USD-M Futures connector, sizes entries beneath configured notional
+limits, and fails closed on execution errors. `uets_db` persistence is still
+not wired into the live worker. There is no authoritative portfolio PnL stream
+and therefore no meaningful portfolio chart or return/Sortino/capital metrics
+yet. `uets_db` now uses RocksDB with
+logical `trades`, `portfolio`, and `metadata` namespaces. Memory is
+reported on Linux, while CPU and persistence/order latencies are not populated
+by this runtime. Exchange-to-local age and clock offset compare the local wall
+clock against the venue event timestamp, so they are skew-sensitive; there is
+no global-clock synchronization or calibrated one-way latency measurement.
+Processing percentiles use monotonic elapsed time. The app must be exercised
+on its target Unix host and benchmarked under representative load before
+production claims or trading deployment.
+
+Do not connect this worker to mainnet orders until durable accounting,
+position reconciliation, persistence integration, and operational safeguards
+are implemented. The OFMR worker submits through the USD-M Futures connector,
+but does not reconcile asynchronous order updates and has not been exercised
+against Binance testnet. Exchange instrument filters, account reconciliation,
+persistence, and process recovery must be validated before live execution.

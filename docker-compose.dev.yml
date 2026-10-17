@@ -6,8 +6,8 @@
 # Explorer and from the Python tooling without a `docker cp`.
 #
 #   docker compose -f docker-compose.dev.yml run --rm uets-dev
-#   docker compose -f docker-compose.dev.yml run --rm uets-dev \
-#       bash -c "cd uets && cargo run --quiet --bin dev_test -- record btcusdt market_data/live_db --rows 200"
+#   docker compose -f docker-compose.dev.yml --profile live run --rm uets-live
+#   docker compose -f docker-compose.dev.yml --profile live run --rm uets-live run ofmr@btcusdt ofmr@ethusdt
 # =============================================================================
 services:
   uets-dev:
@@ -48,6 +48,39 @@ services:
 
     # No ports: nothing in this image serves anything. The websocket client is
     # an outbound connection, which needs no published port.
+
+  uets-live:
+    profiles: ["live"]
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    image: osadp-core-dev:latest
+    working_dir: /workspace
+    entrypoint:
+      - cargo
+      - run
+      - --release
+      - --manifest-path
+      - uets/Cargo.toml
+      - --bin
+      - dev_test
+      - --
+    command: ["run", "ofmr@btcusdt"]
+    stdin_open: true
+    tty: true
+    init: true
+    volumes:
+      - ./uets:/workspace/uets
+      - ./components:/workspace/components
+      - ./market_data:/workspace/market_data
+      - ./logs:/workspace/logs
+      - cargo-registry:/usr/local/cargo/registry
+    environment:
+      TZ: UTC
+      UETS_RUNTIME: docker-linux
+      BINANCE_API_KEY: ${BINANCE_API_KEY:-}
+      BINANCE_API_SECRET: ${BINANCE_API_SECRET:-}
+    stop_grace_period: 15s
 
 volumes:
   cargo-registry:
