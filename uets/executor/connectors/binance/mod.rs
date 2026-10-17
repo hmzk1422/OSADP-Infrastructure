@@ -16,10 +16,12 @@
 //! from the venue. Nothing here assumes 0.1% is what any given account pays.
 
 pub mod account;
+pub mod futures_trade;
 pub mod trade;
 pub mod websocket;
 
 pub use account::BinanceAccount;
+pub use futures_trade::BinanceFuturesTrade;
 pub use trade::BinanceTrade;
 
 use crate::exchange::VenueSpec;

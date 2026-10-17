@@ -5,7 +5,8 @@ use crate::schema::{
     IntegrityReport, PortfolioRecord, QueryFilter, SessionMeta, SessionSummary, TradeRecord,
 };
 use chrono::Utc;
-use sled::{Db, Tree};
+use rocksdb::{Direction, IteratorMode, WriteBatch, DB};
+use std::sync::Arc;
 use std::path::Path;
 use thiserror::Error;
 
@@ -14,8 +15,8 @@ use crate::schema::SchemaVersion;
 /// Database errors.
 #[derive(Debug, Error)]
 pub enum DbError {
-    #[error("sled error: {0}")]
-    Sled(#[from] sled::Error),
+    #[error("RocksDB error: {0}")]
+    RocksDb(#[from] rocksdb::Error),
     #[error("serialization error: {0}")]
     Serialization(String),
     #[error("record not found: {key}")]
@@ -34,25 +35,87 @@ pub enum DbError {
     Injected,
 }
 
-/// The database store. Wraps a single sled instance with multiple logical
-/// trees (trades, portfolio, metadata).
+/// The database store. Wraps a single RocksDB instance with logical namespaces.
 pub struct UetsDb {
-    db: Db,
-    trades: Tree,
-    portfolio: Tree,
-    metadata: Tree,
+    db: Arc<DB>,
+    trades: DbTree,
+    portfolio: DbTree,
+    metadata: DbTree,
     /// Test-only: simulate storage failures for failure-handling tests.
     #[cfg(test)]
     fail_writes: std::sync::atomic::AtomicBool,
 }
 
+#[derive(Clone)]
+struct DbTree {
+    db: Arc<DB>,
+    namespace: &'static str,
+}
+
+impl DbTree {
+    fn key(&self, key: impl AsRef<[u8]>) -> Vec<u8> {
+        let mut result = self.namespace.as_bytes().to_vec();
+        result.push(b'/');
+        result.extend_from_slice(key.as_ref());
+        result
+    }
+
+    fn get(&self, key: impl AsRef<[u8]>) -> Result<Option<Vec<u8>>, rocksdb::Error> {
+        self.db.get(self.key(key))
+    }
+
+    fn insert(&self, key: impl AsRef<[u8]>, value: impl AsRef<[u8]>) -> Result<(), rocksdb::Error> {
+        self.db.put(self.key(key), value)
+    }
+
+    fn apply_batch(&self, batch: DbBatch) -> Result<(), rocksdb::Error> {
+        let mut writes = WriteBatch::default();
+        for (key, value) in batch.0 {
+            writes.put(self.key(key), value);
+        }
+        self.db.write(writes)
+    }
+
+    fn iter(&self) -> impl Iterator<Item = Result<(Vec<u8>, Vec<u8>), rocksdb::Error>> + '_ {
+        self.range(Vec::<u8>::new()..)
+    }
+
+    fn range<K: AsRef<[u8]>>(
+        &self,
+        start: std::ops::RangeFrom<K>,
+    ) -> impl Iterator<Item = Result<(Vec<u8>, Vec<u8>), rocksdb::Error>> + '_ {
+        let start = self.key(start.start);
+        let prefix = format!("{}/", self.namespace).into_bytes();
+        let prefix_len = prefix.len();
+        let range_prefix = prefix.clone();
+        self.db
+            .iterator(IteratorMode::From(&start, Direction::Forward))
+            .take_while(move |entry| match entry {
+                Ok((key, _)) => key.starts_with(&range_prefix),
+                Err(_) => true,
+            })
+            .map(move |entry| {
+                entry.map(|(key, value)| (key[prefix_len..].to_vec(), value.to_vec()))
+            })
+    }
+}
+
+#[derive(Default)]
+struct DbBatch(Vec<(Vec<u8>, Vec<u8>)>);
+
+impl DbBatch {
+    fn insert(&mut self, key: impl AsRef<[u8]>, value: impl AsRef<[u8]>) {
+        self.0.push((key.as_ref().to_vec(), value.as_ref().to_vec()));
+    }
+}
+
 impl UetsDb {
     /// Open or create the database at `path`.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, DbError> {
-        let db = sled::open(path)?;
-        let trades = db.open_tree(b"trades")?;
-        let portfolio = db.open_tree(b"portfolio")?;
-        let metadata = db.open_tree(b"metadata")?;
+        let db = Arc::new(DB::open_default(path)?);
+        let trades = DbTree { db: db.clone(), namespace: "trades" };
+        let portfolio = DbTree { db: db.clone(), namespace: "portfolio" };
+        let metadata = DbTree { db: db.clone(), namespace: "metadata" };
 
         // Write schema version if not present; validate it if present.
         if let Some(raw) = metadata.get(b"schema_version")? {
@@ -90,7 +153,7 @@ impl UetsDb {
 
     /// Shut down the database cleanly.
     pub fn shutdown(self) -> Result<(), DbError> {
-        // sled handles cleanup on drop, but we can explicitly flush.
+        // Flush before dropping the database handle.
         self.db.flush()?;
         Ok(())
     }
@@ -105,7 +168,7 @@ impl UetsDb {
             .map_err(|e| DbError::Serialization(e.to_string()))?;
         let ikey = Self::trade_index_key(record);
 
-        let mut batch = sled::Batch::default();
+        let mut batch = DbBatch::default();
         batch.insert(key.clone(), encoded);
         batch.insert(ikey, key);
         self.trades.apply_batch(batch)?;
@@ -162,7 +225,7 @@ impl UetsDb {
             .map_err(|e| DbError::Serialization(e.to_string()))?;
         let ikey = Self::portfolio_index_key(record);
 
-        let mut batch = sled::Batch::default();
+        let mut batch = DbBatch::default();
         batch.insert(key.clone(), encoded);
         batch.insert(ikey, key);
         self.portfolio.apply_batch(batch)?;
@@ -222,7 +285,7 @@ impl UetsDb {
         }
 
         if !trades.is_empty() {
-            let mut batch = sled::Batch::default();
+            let mut batch = DbBatch::default();
             for record in trades {
                 let key = Self::trade_key(record);
                 let encoded = bincode::serialize(record)
@@ -235,7 +298,7 @@ impl UetsDb {
         }
 
         if !portfolios.is_empty() {
-            let mut batch = sled::Batch::default();
+            let mut batch = DbBatch::default();
             for record in portfolios {
                 let key = Self::portfolio_key(record);
                 let encoded = bincode::serialize(record)
@@ -321,7 +384,7 @@ impl UetsDb {
         meta.active = false;
         meta.ended_at = Some(summary.finalized_at);
 
-        let mut batch = sled::Batch::default();
+        let mut batch = DbBatch::default();
         let meta_encoded = bincode::serialize(&meta)
             .map_err(|e| DbError::Serialization(e.to_string()))?;
         let sum_encoded = bincode::serialize(summary)

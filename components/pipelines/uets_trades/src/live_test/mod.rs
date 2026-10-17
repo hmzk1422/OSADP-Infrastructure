@@ -7,9 +7,7 @@
 
 use crate::backend::{BackendError, ExecutionBackend};
 use crate::sim::{SimConfig, SimEngine};
-use crate::types::{
-    Capital, ExecutionEvent, FillEvent, Order, OrderId, OrderRequest, TradeIntent,
-};
+use crate::types::{Capital, ExecutionEvent, FillEvent, Order, OrderId, OrderRequest, TradeIntent};
 use chrono::{DateTime, Utc};
 use std::collections::BTreeMap;
 
@@ -127,7 +125,6 @@ impl ExecutionBackend for LiveTestBackend {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -174,9 +171,11 @@ mod tests {
         assert!(capital.gross_exposure > 0.0);
 
         let events = backend.drain_events();
-        assert!(events
-            .iter()
-            .any(|e| matches!(e, ExecutionEvent::OrderFilled { .. })));
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, ExecutionEvent::OrderFilled { .. }))
+        );
         assert!(events.iter().any(|e| matches!(e, ExecutionEvent::Fill(_))));
     }
 
@@ -191,12 +190,17 @@ mod tests {
 
         assert_eq!(backend.order_state(&id).unwrap().filled_qty, 0.5);
         let events = backend.drain_events();
-        assert!(events
-            .iter()
-            .any(|e| matches!(e, ExecutionEvent::OrderPartiallyFilled { .. })));
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, ExecutionEvent::OrderPartiallyFilled { .. }))
+        );
 
         backend.on_market_update(&marks(100.0), Utc::now());
-        assert_eq!(backend.order_state(&id).unwrap().status, OrderStatus::Filled);
+        assert_eq!(
+            backend.order_state(&id).unwrap().status,
+            OrderStatus::Filled
+        );
     }
 
     #[test]
@@ -206,7 +210,10 @@ mod tests {
         // No mark yet: order waits.
         let id = backend.long(&ctx).unwrap();
         backend.cancel_order(&id).unwrap();
-        assert_eq!(backend.order_state(&id).unwrap().status, OrderStatus::Cancelled);
+        assert_eq!(
+            backend.order_state(&id).unwrap().status,
+            OrderStatus::Cancelled
+        );
 
         // A later mark must not fill the cancelled order.
         backend.on_market_update(&marks(100.0), Utc::now());
@@ -220,12 +227,17 @@ mod tests {
         let mut backend = LiveTestBackend::with_capital("ofmr@btcusdt", 50.0);
         backend.on_market_update(&marks(100.0), Utc::now());
         let ctx = ActionContext::new("ofmr@btcusdt", "btcusdt", "BTCUSDT", 1.0);
-        assert!(backend.long(&ctx).is_err(), "1 BTC at ~100 must exceed 50 cash");
+        assert!(
+            backend.long(&ctx).is_err(),
+            "1 BTC at ~100 must exceed 50 cash"
+        );
 
         let events = backend.drain_events();
-        assert!(events
-            .iter()
-            .any(|e| matches!(e, ExecutionEvent::OrderRejected { .. })));
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, ExecutionEvent::OrderRejected { .. }))
+        );
         let order = backend.orders();
         assert_eq!(order[0].status, OrderStatus::Rejected);
     }
@@ -236,10 +248,7 @@ mod tests {
         backend.on_market_update(&marks(100.0), Utc::now());
         let ctx = ActionContext::new("ofmr@btcusdt", "btcusdt", "BTCUSDT", 1.0);
         backend.long(&ctx).unwrap();
-        assert_eq!(
-            backend.position_qty("ofmr@btcusdt", "BTCUSDT"),
-            Some(1.0)
-        );
+        assert_eq!(backend.position_qty("ofmr@btcusdt", "BTCUSDT"), Some(1.0));
 
         let exit_ctx = ActionContext::new("ofmr@btcusdt", "btcusdt", "BTCUSDT", 1.0);
         backend.exit(&exit_ctx).unwrap();
@@ -251,5 +260,55 @@ mod tests {
         let capital = backend.capital("ofmr@btcusdt").unwrap();
         assert_eq!(capital.trade_count, 1, "round trip counts as one trade");
     }
-}
 
+    #[test]
+    fn paper_and_playback_share_identical_accounting() {
+        use crate::playback::PlaybackBackend;
+
+        let config = SimConfig::default();
+        let mut paper =
+            LiveTestBackend::with_config_capital(config.clone(), "ofmr@btcusdt", 10_000.0);
+        let mut playback =
+            PlaybackBackend::with_config_capital(config, "ofmr@btcusdt", 10_000.0, 1.0);
+        let start = Utc::now();
+        let initial_marks = marks(100.0);
+        paper.on_market_update(&initial_marks, start);
+        playback.on_market_update(&initial_marks, start);
+        let entry = OrderRequest::new(
+            "entry",
+            "BTCUSDT",
+            OrderSide::Buy,
+            1.0,
+            "ofmr@btcusdt",
+            "btcusdt",
+        );
+        paper.submit_order(entry.clone()).unwrap();
+        playback.submit_order(entry).unwrap();
+        let exit_marks = marks(101.0);
+        paper.on_market_update(&exit_marks, start + chrono::Duration::seconds(1));
+        playback.on_market_update(&exit_marks, start + chrono::Duration::seconds(1));
+        let exit = OrderRequest::new(
+            "exit",
+            "BTCUSDT",
+            OrderSide::Sell,
+            1.0,
+            "ofmr@btcusdt",
+            "btcusdt",
+        );
+        paper.submit_order(exit.clone()).unwrap();
+        playback.submit_order(exit).unwrap();
+
+        let paper_capital = paper.capital("ofmr@btcusdt").unwrap();
+        let playback_capital = playback.capital("ofmr@btcusdt").unwrap();
+        assert_eq!(paper_capital.trade_count, playback_capital.trade_count);
+        assert_eq!(paper_capital.win_count, playback_capital.win_count);
+        assert!((paper_capital.cash - playback_capital.cash).abs() < 1e-9);
+        assert!((paper_capital.equity - playback_capital.equity).abs() < 1e-9);
+        assert!((paper_capital.realized_pnl - playback_capital.realized_pnl).abs() < 1e-9);
+        assert!((paper_capital.fees_paid - playback_capital.fees_paid).abs() < 1e-9);
+        assert_eq!(
+            paper.position_qty("ofmr@btcusdt", "BTCUSDT"),
+            playback.position_qty("ofmr@btcusdt", "BTCUSDT")
+        );
+    }
+}

@@ -1,0 +1,13 @@
+[package]
+name = "uets_manager"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+chrono = { version = "0.4", features = ["serde"] }
+thiserror = "1"
+uets = { path = "../../../uets" }
+uets_trades = { path = "../uets_trades" }

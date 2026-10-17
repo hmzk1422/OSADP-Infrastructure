@@ -1,0 +1,699 @@
+# 7. Copy-paste production acceptance checklist
+
+Below is the version I would put in a repository as `PRODUCTION_READINESS.md`. It is intentionally implementation-oriented: each item should become a test, an automated assertion, or a documented operational verification.
+
+Rule: `[x]` means evidence exists and the test passes. It does not mean the feature was merely implemented. Any critical test that has not been executed is `[ ]`.
+
+The checks below are designed to exclude strategy expectancy and returns. Because the attached code appears to include a Rust-based Binance execution/data pipeline, I have included specific market-data, order-management, and persistence checks relevant to that architecture.
+
+## 0. Process startup and configuration
+
+```
+[ ] Application refuses to start if a required configuration value is missing.
+[ ] Application refuses to start if a numeric configuration value is NaN, infinite, or outside its allowed range.
+[ ] Application refuses to start if a required risk limit is zero, negative, or unintentionally unlimited.
+[ ] Application validates all instrument symbols against the configured venue before trading.
+[ ] Application validates tick size, quantity step, minimum quantity, and minimum notional before enabling an instrument.
+[ ] Application validates that configured order types and time-in-force values are supported by the selected venue.
+[ ] Application validates that strategy, feature engine, risk engine, and execution adapter versions are compatible.
+[ ] Application refuses to start when its persistent state schema is incompatible with the running binary.
+[ ] Application refuses to start if its persistent state cannot be read or verified.
+[ ] Application does not silently create an empty account state when a previously existing state file is missing.
+[ ] Application distinguishes a first-ever initialization from an unexpected loss of existing state.
+[ ] Application validates that the selected environment is explicitly production, testnet, or simulation.
+[ ] Application requires an explicit production-mode configuration rather than inferring production from missing test settings.
+[ ] Application verifies the exchange endpoint, account identity, and permitted trading environment before enabling live orders.
+[ ] Application verifies that API credentials are present and valid before enabling authenticated operations.
+[ ] Application refuses to start if credentials have unintended withdrawal permissions, where those permissions can be checked.
+[ ] Application verifies required filesystem paths, permissions, available disk space, and writable log/state directories.
+[ ] Application verifies database connectivity and schema compatibility before enabling components that depend on them.
+[ ] Application validates all timeout, retry, queue-capacity, and retention settings.
+[ ] Application refuses configurations where retry intervals, deadlines, or resource limits contradict each other.
+[ ] Application logs the effective non-secret configuration and a configuration hash at startup.
+[ ] Application never logs API secrets, authentication headers, or full signed request URLs.
+[ ] Application starts in a non-trading state until all mandatory startup checks pass.
+[ ] Application does not submit an order during module initialization or before startup validation completes.
+[ ] Application exits with a nonzero status when a mandatory startup check fails.
+```
+
+## 1. Process lifecycle and supervision
+
+```
+[ ] A clean shutdown stops the generation of new strategy intents before tearing down execution components.
+[ ] A clean shutdown prevents new risk-increasing orders from being submitted.
+[ ] A clean shutdown applies the configured policy to existing working orders.
+[ ] A clean shutdown waits for in-flight persistence operations up to a bounded deadline.
+[ ] A clean shutdown records whether unresolved orders or fills remain.
+[ ] A shutdown timeout produces an explicit failure record and alert.
+[ ] SIGTERM triggers the defined graceful-shutdown sequence.
+[ ] SIGINT triggers the defined graceful-shutdown sequence.
+[ ] SIGKILL recovery is tested separately because graceful cleanup cannot be assumed.
+[ ] A panic in a critical task cannot leave the supervisor reporting the entire system as healthy.
+[ ] A crashed worker is detected independently of its process existence.
+[ ] A worker that is alive but no longer processing events is detected.
+[ ] A worker restart uses bounded exponential backoff.
+[ ] Restart backoff includes jitter where synchronized restarts could overload dependencies.
+[ ] Repeated worker crashes eventually trigger a circuit breaker or operator alert.
+[ ] A restart storm cannot create unbounded child processes, threads, or sockets.
+[ ] The supervisor reaps terminated child processes.
+[ ] The supervisor verifies worker health after restart before restoring normal operation.
+[ ] A restarted worker cannot unintentionally acquire a second active execution lease.
+[ ] Two instances cannot concurrently own the same strategy/account/instrument unless explicitly supported.
+[ ] A stale ownership lease cannot permanently prevent recovery.
+[ ] An expired lease cannot allow two owners to submit orders simultaneously.
+[ ] A machine reboot restores the expected services in the correct dependency order.
+[ ] The application does not automatically re-enable trading merely because the process restarted.
+[ ] A deployment restart preserves unresolved-order information and outstanding risk state.
+```
+
+## 2. Market-data connection and transport
+
+```
+[ ] A WebSocket connection failure is detected within a configured deadline.
+[ ] A connected but silent WebSocket is detected independently of TCP connection status.
+[ ] A heartbeat timeout triggers the configured reconnect or halt behavior.
+[ ] A half-open TCP connection cannot leave the application indefinitely waiting without detection.
+[ ] A network interruption during message reception does not silently discard a partially parsed message.
+[ ] A malformed JSON frame is rejected and counted without corrupting parser state.
+[ ] An unexpectedly large frame is rejected or bounded before excessive allocation.
+[ ] An unexpected binary, control, or unsupported message type is handled explicitly.
+[ ] A WebSocket close frame triggers the correct reconnect or shutdown behavior.
+[ ] An unexpected server disconnect triggers bounded reconnection attempts.
+[ ] Reconnection uses backoff rather than a tight retry loop.
+[ ] A successful TCP/WebSocket reconnect does not immediately mark the market data valid.
+[ ] The application waits for required subscription acknowledgments before declaring a feed healthy.
+[ ] The application verifies that every required symbol and stream is subscribed.
+[ ] A subscription acknowledgment for the wrong stream is rejected.
+[ ] A subscription that silently stops delivering one symbol is detected.
+[ ] A reconnect does not create duplicate active consumers for the same stream.
+[ ] Repeated reconnects do not leak sockets, file descriptors, threads, or memory.
+[ ] Reconnect behavior respects venue connection and subscription limits.
+[ ] A fallback feed is activated only after the configured failure condition is met.
+[ ] Fallback activation is observable through metrics and alerts.
+[ ] The fallback feed's data semantics are verified to match the primary feed where required.
+[ ] Switching feeds does not mix incompatible identifiers, timestamps, or price conventions.
+[ ] Switching feeds does not duplicate trade events across sources.
+[ ] Switching feeds cannot silently combine inconsistent order books.
+[ ] Recovery from a network partition includes sequence and state reconciliation.
+[ ] The application never treats transport connectivity alone as proof of feed correctness.
+```
+
+## 3. Market-data correctness and book integrity
+
+```
+[ ] Every market event passes structural validation before entering the state machine.
+[ ] Every price is finite and within the supported numeric range.
+[ ] Every quantity is finite and within the supported numeric range.
+[ ] Negative quantities are rejected.
+[ ] Zero-quantity book updates remove the corresponding price level.
+[ ] Invalid prices cannot overflow during fixed-point price conversion.
+[ ] Price conversion and tick rounding are tested at numeric boundaries.
+[ ] Price normalization respects the instrument's actual tick size.
+[ ] Quantity normalization respects the instrument's actual quantity step.
+[ ] Prices and quantities cannot silently lose precision during serialization.
+[ ] Duplicate market events are detected according to the source's documented identity semantics.
+[ ] Out-of-order events are reordered or rejected according to a documented policy.
+[ ] Events older than the accepted watermark are counted and exposed in telemetry.
+[ ] Reorder-buffer capacity is strictly bounded.
+[ ] Reorder-buffer overflow cannot silently masquerade as a complete feed.
+[ ] Every dropped event increments a source-specific counter.
+[ ] Event-drop thresholds trigger a warning or trading restriction appropriate to the strategy.
+[ ] A market-data gap invalidates every dependent state that can no longer be trusted.
+[ ] An invalid order book cannot be used to authorize a new risk-increasing order.
+[ ] A full snapshot is validated before replacing a previously valid book.
+[ ] Snapshot initialization follows the exchange's documented sequence-bridging procedure.
+[ ] Buffered incremental updates are reconciled with the snapshot's update identifier before application.
+[ ] A missing depth update is detected through sequence continuity checks.
+[ ] A duplicate depth update cannot be applied twice if doing so would change state incorrectly.
+[ ] A depth update with an invalid update-ID range is rejected.
+[ ] A snapshot arriving during an active resynchronization cannot race with stale updates.
+[ ] The book remains invalid until a complete, correctly synchronized snapshot/update sequence is established.
+[ ] A failed snapshot request leaves the book invalid.
+[ ] Repeated snapshot failures trigger bounded backoff and an observable degraded state.
+[ ] A crossed or otherwise invalid book triggers validation and the configured recovery policy.
+[ ] A one-sided book is handled explicitly rather than assumed valid.
+[ ] The best bid is always selected from the highest valid bid price.
+[ ] The best ask is always selected from the lowest valid ask price.
+[ ] Book quantities remain nonnegative and finite.
+[ ] No price level appears on both sides unless the source data is being quarantined for investigation.
+[ ] Book depth and memory usage remain bounded under abnormal input.
+[ ] Book state after event replay matches the expected reference state.
+[ ] Every resynchronization records the triggering gap, snapshot identifier, and recovery result.
+```
+
+## 4. Event ordering, merging, and canonical data
+
+```
+[ ] Events from independent streams are ordered using an explicitly documented ordering key.
+[ ] Equal timestamps are resolved deterministically.
+[ ] Equal timestamps and equal source sequence numbers are resolved deterministically.
+[ ] Arrival order does not accidentally determine output when a different event order is required.
+[ ] Exchange event time is not confused with local receive time.
+[ ] Exchange transaction time is not confused with processing time.
+[ ] Every emitted event has the correct source identity.
+[ ] Every emitted event has a monotonically increasing local sequence number, within the documented sequence scope.
+[ ] Sequence-number overflow is handled explicitly rather than silently corrupting ordering.
+[ ] Millisecond-to-nanosecond conversion is checked for overflow.
+[ ] Snapshot identifiers are never misinterpreted as exchange timestamps.
+[ ] The ordering watermark advances only according to the documented algorithm.
+[ ] Watermark arithmetic is safe at numeric boundaries.
+[ ] Shutdown flushing emits buffered events in the defined deterministic order.
+[ ] Shutdown flushing does not silently lose events remaining in the reorder buffer.
+[ ] Event drops during normal operation and shutdown are separately observable.
+[ ] A bounded reorder buffer has a tested overflow policy.
+[ ] Every emitted row has exactly the required number of fields.
+[ ] Every column is emitted in the declared schema order.
+[ ] Schema names are unique.
+[ ] Schema version changes are explicit and backward compatibility is tested.
+[ ] Missing values remain distinguishable from numeric zero.
+[ ] Fields unsupported by a live data source are explicitly absent, not fabricated.
+[ ] Sparse event types cannot inherit unrelated payload fields from the previous event.
+[ ] Trade fields are populated only for the intended trade event.
+[ ] Book fields reflect the correct as-of book state.
+[ ] Canonical timestamps and source identifiers match the historical pipeline's defined semantics.
+[ ] Live and historical processing agree on the same recorded event stream wherever parity is claimed.
+[ ] Schema and serialization parity tests compare actual output, not just column counts.
+[ ] A live-data capture with dropped events cannot be labeled complete without qualification.
+```
+
+## 5. Order construction and exchange execution
+
+```
+[ ] Every order is validated against the current instrument specification immediately before submission.
+[ ] Order quantity is rounded using the exchange's permitted quantity increment.
+[ ] Order price is rounded using the exchange's permitted price increment.
+[ ] Rounding cannot increase order size beyond the approved risk budget.
+[ ] Orders below minimum quantity or notional are rejected locally.
+[ ] Orders exceeding maximum quantity or notional are rejected locally.
+[ ] Unsupported order types are rejected before reaching the connector.
+[ ] Unsupported time-in-force settings are never silently substituted.
+[ ] A reduce-only request is not silently treated as reduce-only when the venue does not support that guarantee.
+[ ] Spot exit logic cannot sell more base asset than the policy permits.
+[ ] A sell order cannot accidentally reverse a position unless reversal is explicitly authorized.
+[ ] A buy order cannot unintentionally create an unauthorized short position.
+[ ] The actual submitted order matches the validated order request.
+[ ] The execution adapter preserves side, symbol, quantity, price, and applicable flags.
+[x] Venue-specific status strings are mapped into the correct internal order states. (`uets::connectors::binance::futures_trade::tests::open_order_mapping_preserves_usdm_state_and_reduce_only` and `unknown_usdm_status_is_a_decode_error_not_a_guessed_state` pass.)
+[ ] Venue-specific rejection codes remain available for diagnostics.
+[ ] Each order has a unique, persistent internal identity.
+[ ] Client order IDs follow the venue's length, character, and uniqueness rules.
+[ ] The mapping between internal order IDs, client IDs, and venue order IDs survives restarts.
+[ ] Client order IDs are not assumed to be exchange-generated or caller-controlled unless verified for that adapter.
+[ ] A request timeout is treated as an unknown outcome until the venue state is resolved.
+[ ] An ambiguous submission is reconciled before any retry that could create a duplicate order.
+[ ] A retry uses the same idempotency mechanism where the venue supports it.
+[ ] A retry cannot bypass the original order's risk reservation.
+[ ] A successful HTTP response is not treated as proof of a fill.
+[ ] An accepted order is not treated as proof that the order remains open.
+[ ] A cancellation request is not treated as proof of cancellation.
+[ ] An order replacement is not treated as atomic unless the venue guarantees atomic replacement.
+[ ] Partial fills update executed quantity and remaining quantity correctly.
+[ ] Filled quantity never exceeds the accepted order quantity without an explicitly modeled venue adjustment.
+[ ] Duplicate fill messages do not duplicate position changes.
+[ ] Fill IDs are deduplicated within their documented uniqueness scope.
+[ ] A late fill after cancellation is processed correctly.
+[ ] A fill received after a reconnect is incorporated before dependent exposure decisions resume.
+[ ] An order rejection releases its unused risk reservation.
+[ ] A partial fill retains the correct reservation for its remaining executable quantity.
+[ ] Cancellation failure preserves the possibility of future fills.
+[ ] Unknown order states trigger reconciliation rather than a guessed terminal status.
+[ ] Order-history pagination is complete and does not silently omit records.
+[ ] Exchange rate-limit responses trigger bounded backoff.
+[ ] Repeated order failures trip a configured circuit breaker.
+[ ] The circuit breaker does not prevent required account reconciliation.
+[ ] Every submission, acknowledgment, rejection, fill, cancellation, and replacement is auditable.
+```
+
+## 6. Risk engine and account safety
+
+```
+[ ] Every order passes through the mandatory risk gate before submission.
+[ ] No strategy module can submit directly to a venue while bypassing that gate.
+[ ] No recovery job or retry worker can bypass the same risk controls.
+[ ] No alternate execution connector can bypass account-level risk limits.
+[ ] Per-order notional limits are enforced.
+[ ] Per-instrument position limits are enforced.
+[ ] Portfolio gross exposure limits are enforced.
+[ ] Portfolio net exposure limits are enforced where applicable.
+[ ] Maximum leverage is enforced against the configured account model.
+[ ] Margin limits are enforced using current, valid account information.
+[ ] Open-order exposure is included when calculating potential exposure.
+[ ] Concurrent orders cannot independently pass checks and jointly breach a shared limit.
+[ ] Risk checks and exposure reservations are atomic with respect to competing order requests.
+[ ] Pending orders retain reservations until their remaining exposure is resolved.
+[ ] Canceling an order releases the reservation only when the order's actual state justifies it.
+[ ] A partial fill transfers the appropriate amount from pending exposure into actual exposure.
+[ ] A rejected order does not leave a permanent phantom reservation.
+[ ] A disconnected account cannot continue increasing exposure without an explicitly approved policy.
+[ ] Unknown positions or unresolved orders block affected risk-increasing operations.
+[ ] Stale prices cannot be used for risk checks without an explicit, tested fallback policy.
+[ ] Invalid instrument metadata blocks orders for that instrument.
+[ ] Invalid account balances block orders that depend on those balances.
+[ ] Free balance and reserved balance are not conflated.
+[ ] Fees and applicable fee-asset conversion costs are accounted for where required.
+[ ] Unknown fees are not silently represented as known zero fees.
+[ ] Account-level restrictions override strategy-level permissions.
+[ ] The risk engine tests exact threshold boundaries and numeric overflow.
+[ ] Risk counters and limits survive restarts where persistence is required.
+[ ] A kill switch blocks new submissions across all strategy instances.
+[ ] Kill-switch activation is idempotent.
+[ ] Kill-switch status cannot be reset by an ordinary worker restart.
+[ ] Kill-switch activation is confirmed and reported to the operator.
+[ ] The kill switch's handling of working orders is tested separately from position liquidation.
+[ ] Emergency actions have bounded retries, explicit escalation, and a defined failure state.
+[ ] Risk-limit changes are authenticated, validated, audited, and versioned.
+[ ] A configuration reload cannot temporarily disable mandatory limits.
+```
+
+## 7. Position, balance, and accounting reconciliation
+
+```
+[ ] Internal positions are reconciled against venue-reported positions or balances.
+[ ] Reconciliation covers every configured instrument and relevant account asset.
+[ ] Open orders are reconciled independently of filled positions.
+[ ] Account balances are reconciled independently of the internal portfolio.
+[ ] Reconciliation distinguishes free, locked, borrowed, and other venue-specific balance categories where applicable.
+[ ] Internal state is not overwritten by an incomplete account snapshot.
+[ ] Every discrepancy has a classification, timestamp, magnitude, and recovery action.
+[ ] A material unexplained discrepancy blocks affected risk-increasing orders.
+[ ] A transient timing difference is distinguished from a persistent accounting error.
+[ ] Reconciliation handles pagination and partial responses correctly.
+[ ] Reconciliation handles a fill occurring while an account snapshot is being retrieved.
+[ ] Reconciliation does not double-apply an execution already processed from a stream.
+[ ] Reconciliation handles external/manual trades.
+[ ] Reconciliation handles exchange liquidations or forced position changes.
+[ ] Reconciliation handles fees deducted in a separate asset.
+[ ] Reconciliation handles funding, interest, deposits, withdrawals, or corporate actions when applicable.
+[ ] Reconciliation uses the correct venue-specific position and balance semantics.
+[ ] Average entry price is recomputed correctly after partial additions and reductions.
+[ ] Realized P&L is consistent with the defined accounting method.
+[ ] Unrealized P&L uses the intended valuation price.
+[ ] Fees are attributed to the correct execution and asset.
+[ ] No execution is silently discarded because it arrived after a session boundary.
+[ ] Reconciliation records the last confirmed watermark or event identifier.
+[ ] A restart performs reconciliation before resuming risk-increasing trading.
+[ ] A reconciliation timeout leaves the account in an explicitly degraded state.
+[ ] The system can resume after reconciliation without duplicating positions or orders.
+```
+
+## 8. Persistence, database, and data recording
+
+```
+[ ] Every record required for execution recovery is persisted before the system relies on it.
+[ ] A strategy decision cannot be mistaken for a submitted or filled order.
+[ ] Order intent, submission attempt, acknowledgment, and fill are separate recordable events.
+[ ] Database writes are bounded by explicit timeouts.
+[ ] Database connection failures are detected promptly.
+[ ] Database reconnects do not create duplicate consumers or connections.
+[ ] Database retry logic cannot duplicate non-idempotent writes.
+[ ] Transactions enforce the required consistency boundaries.
+[ ] Unique constraints prevent duplicate application of execution events.
+[ ] Database schema migrations are tested against realistic existing data.
+[ ] Failed migrations prevent deployment from enabling trading.
+[ ] Database connection pool exhaustion is detected and bounded.
+[ ] Slow queries cannot cause unbounded queues or unbounded memory growth.
+[ ] Disk-space exhaustion triggers an alert before the system becomes unable to persist critical state.
+[ ] Database unavailability triggers a documented mode transition.
+[ ] Optional analytics writes can be disabled without disabling mandatory execution-state persistence.
+[ ] Mandatory execution records are not silently dropped to preserve strategy throughput.
+[ ] A recovery journal or equivalent mechanism can resolve ambiguous remote order submissions.
+[ ] A database process crash does not corrupt the execution ledger beyond the documented recovery model.
+[ ] Power-loss durability matches the explicitly stated persistence guarantees.
+[ ] Flush success is not confused with guaranteed physical-media durability.
+[ ] CSV output contains exactly the declared number of fields per row.
+[ ] CSV output correctly escapes values containing delimiters, quotes, or newlines.
+[ ] CSV header and column order are validated when opening an existing file for append.
+[ ] Appending to a malformed or incompatible file is refused.
+[ ] A crash during the final row cannot silently make a partial row appear complete.
+[ ] Buffered-write loss on crash is measured and bounded by the declared policy.
+[ ] Disk rotation or file rollover cannot overwrite required historical records.
+[ ] File permissions prevent unauthorized modification of execution records.
+[ ] Backup and restore procedures are tested against a real recovery copy.
+[ ] Recovery verifies record integrity before replaying persisted events.
+[ ] Retention jobs cannot delete records still required for recovery or audit.
+[ ] Disk and database maintenance cannot block critical execution processing indefinitely.
+```
+
+## 9. Memory pressure, CPU pressure, and overload
+
+This section matters especially for a Rust/Python system where a feed handler, feature engine, model, database writer, and GUI may share a machine.
+
+```
+[ ] Memory usage is measured separately for the trading process, child processes, database, and model workers.
+[ ] The system has a defined memory budget for each major subsystem.
+[ ] Memory growth is tested under sustained normal market-data load.
+[ ] Memory growth is tested under sustained peak market-data load.
+[ ] Memory growth is tested with a deliberately stalled downstream consumer.
+[ ] Every in-memory queue has a documented maximum capacity.
+[ ] Every queue has a documented overflow policy.
+[ ] Queue overflow produces a metric and an alert.
+[ ] Queue overflow cannot silently corrupt the market-data or execution state.
+[ ] Critical execution events are not silently discarded because an optional consumer is slow.
+[ ] Optional analytics, dashboard, and historical-capture consumers can be throttled or disabled independently.
+[ ] Nonessential model training and retraining can be disabled without affecting live inference safety.
+[ ] A model worker cannot consume the memory reserved for critical execution and risk components without triggering protection.
+[ ] Memory pressure triggers a predefined degraded operating mode before the operating system reaches OOM conditions.
+[ ] Degraded mode disables explicitly designated noncritical workloads.
+[ ] Degraded mode does not disable mandatory risk checks or execution-state persistence.
+[ ] Degraded mode does not switch network transports without a tested, compatible alternative.
+[ ] Any fallback transport preserves message framing, authentication, ordering requirements, and reconnect semantics.
+[ ] The fallback transport has its own bounded queues and resource limits.
+[ ] A transport change cannot silently duplicate or omit execution commands.
+[ ] The system records the reason, time, and actions taken when entering degraded mode.
+[ ] The system does not repeatedly oscillate between normal and degraded modes around one threshold.
+[ ] Recovery from degraded mode requires measured resource headroom and healthy dependencies.
+[ ] Memory allocations caused by unexpectedly large input messages are bounded.
+[ ] A large order-book snapshot cannot trigger an unbounded allocation.
+[ ] A malformed event cannot trigger a pathological allocation or repeated expensive parsing.
+[ ] Event backlog is bounded by both item count and, where necessary, total bytes.
+[ ] CPU saturation does not starve the heartbeat, risk engine, or execution supervisor.
+[ ] CPU saturation does not cause unbounded latency in critical event processing.
+[ ] Thread-pool saturation is observable.
+[ ] Blocking operations cannot indefinitely block critical asynchronous tasks.
+[ ] A deadlocked worker is detected by progress monitoring.
+[ ] Repeated task creation cannot exhaust threads or file descriptors.
+[ ] Long-running tests show no unexplained memory leak or monotonically growing backlog.
+[ ] Resource exhaustion produces a controlled failure state rather than an uncontrolled restart loop.
+[ ] OOM termination and restart are tested in a disposable environment.
+```
+
+Important: do not assume that Rust eliminates OOM risk. Bounded queues, bounded message sizes, explicit allocation policies, and load testing are still necessary.
+
+## 10. Concurrency and race conditions
+
+```
+[ ] Simultaneous strategy signals cannot create conflicting orders without explicit conflict resolution.
+[ ] Concurrent risk checks cannot approve orders against the same unreserved balance or exposure.
+[ ] A cancellation racing with a fill produces a valid final order state.
+[ ] A fill racing with a position close cannot create an unintended reverse position.
+[ ] Reconnect callbacks cannot race with shutdown and resurrect a disabled worker.
+[ ] Snapshot refresh cannot overwrite newer book updates with stale data.
+[ ] State recovery cannot race with new submissions.
+[ ] A kill switch cannot be bypassed by an already queued order intent.
+[ ] A kill switch cannot be bypassed by a retry already waiting in a queue.
+[ ] A stale asynchronous task cannot overwrite newer account or position state.
+[ ] Shared mutable state is protected by appropriate synchronization.
+[ ] Locks are not held across unbounded network or database operations.
+[ ] Lock contention and deadlocks are tested under realistic concurrency.
+[ ] Concurrent writes preserve event ordering where ordering is required.
+[ ] Multiple workers cannot process the same non-idempotent event twice.
+[ ] Multiple processes cannot accidentally share a mutable state file without coordination.
+[ ] Shutdown cannot destroy shared state while a worker is still using it.
+[ ] Race-condition tests run repeatedly with randomized scheduling or equivalent instrumentation.
+[ ] Thread and task counts remain bounded under repeated reconnects and failures.
+```
+
+## 11. Time, timestamps, and clock synchronization
+
+```
+[ ] Wall-clock time and monotonic elapsed time are used for their appropriate purposes.
+[ ] Retry timers and deadlines are not based on a wall clock that can jump backward.
+[ ] Clock drift relative to the exchange is measured.
+[ ] Excessive clock skew prevents time-sensitive signed requests or trading operations as appropriate.
+[ ] Timestamp units are explicit at every API boundary.
+[ ] Seconds, milliseconds, microseconds, and nanoseconds cannot be silently interchanged.
+[ ] Timestamp conversion is tested at zero, negative, and maximum supported values where relevant.
+[ ] Timezone and daylight-saving transitions do not corrupt session scheduling.
+[ ] Exchange session boundaries are handled correctly for the relevant instrument.
+[ ] A clock correction cannot cause timers to fire repeatedly or skip required actions.
+[ ] Event time, local receive time, processing time, and persistence time are distinguishable.
+[ ] Latency metrics use compatible clocks and do not subtract unrelated timestamps.
+[ ] Clock synchronization failure generates an alert.
+[ ] Trading resumes after a clock problem only when the relevant time-integrity checks pass.
+```
+
+## 12. Performance and latency acceptance
+
+Define these budgets before testing. Do not invent a universal latency threshold; derive it from the strategy's decision horizon, exchange limits, and operating environment.
+
+```
+[ ] Market-data receive-to-parse latency is measured.
+[ ] Parse-to-feature-update latency is measured.
+[ ] Feature-update-to-signal latency is measured.
+[ ] Signal-to-risk-decision latency is measured.
+[ ] Risk-decision-to-order-submission latency is measured.
+[ ] Order-submission-to-acknowledgment latency is measured.
+[ ] Fill-receive-to-position-update latency is measured.
+[ ] Fill-receive-to-risk-state-update latency is measured.
+[ ] Reconciliation duration is measured.
+[ ] Startup and recovery duration are measured.
+[ ] p50, p95, p99, and p99.9 latency are collected where sample volume supports them.
+[ ] Latency budgets are tested at normal load.
+[ ] Latency budgets are tested at sustained peak load.
+[ ] Latency budgets are tested during burst traffic.
+[ ] Latency budgets are tested while persistence is slow.
+[ ] Latency budgets are tested during a reconnect and recovery.
+[ ] Latency budgets are tested during CPU and memory pressure.
+[ ] Event-processing throughput exceeds the expected sustained input rate with defined headroom.
+[ ] Burst capacity is sufficient for the specified worst-case event burst.
+[ ] Queue age is measured in addition to queue depth.
+[ ] Backlog recovery time after a burst is measured.
+[ ] No queue grows indefinitely under the specified workload.
+[ ] Rate limiting does not create an uncontrolled backlog of stale trading decisions.
+[ ] Stale queued signals are discarded or revalidated according to the strategy's documented policy.
+[ ] Slow observability or GUI consumers cannot block execution-critical tasks.
+[ ] Performance degrades in a controlled, observable way when a limit is exceeded.
+```
+
+## 13. Observability, alerting, and incident response
+
+```
+[ ] The system exposes an explicit overall health state.
+[ ] Process liveness and operational readiness are monitored separately.
+[ ] A healthy process with a dead market-data feed is reported as degraded, not healthy.
+[ ] A healthy process with an unresolved broker connection is reported as degraded.
+[ ] Market-data age is exposed per stream and instrument.
+[ ] Sequence gaps, late drops, and buffer overflows have separate counters.
+[ ] Reconnect count and reconnect duration are recorded.
+[ ] Order submission failures are counted by failure category.
+[ ] Unknown order outcomes are tracked separately from known rejections.
+[ ] Duplicate-event detection is measurable.
+[ ] Internal-versus-broker reconciliation discrepancies are measurable.
+[ ] Risk rejections are counted with structured reason codes.
+[ ] Memory, CPU, disk, file-descriptor, thread, and queue utilization are monitored.
+[ ] Critical persistence failures trigger alerts.
+[ ] Critical task stalls trigger alerts even if the process remains alive.
+[ ] Alert delivery is tested end to end.
+[ ] Alert failure has a secondary notification or escalation policy.
+[ ] Repeated identical alerts are deduplicated without suppressing worsening incidents.
+[ ] Every critical alert identifies the affected account, instrument, subsystem, and current operating mode.
+[ ] Logs contain enough identifiers to trace a signal through submission, acknowledgment, and fill.
+[ ] Logs avoid secrets and unnecessary sensitive account data.
+[ ] Metrics survive ordinary application restarts where required.
+[ ] Clock skew does not silently invalidate latency dashboards.
+[ ] The operator can determine whether the system is trading, degraded, halted, recovering, or awaiting reconciliation.
+[ ] The operator can identify the exact reason trading was halted.
+[ ] A documented runbook exists for every critical alert.
+[ ] Recovery procedures are rehearsed rather than merely documented.
+[ ] Incident records preserve relevant logs, metrics, configuration versions, and order history.
+```
+
+## 14. Security and access control
+
+```
+[ ] API keys are stored outside source code and version control.
+[ ] Secrets are not embedded in binaries, Docker images, test fixtures, or logs.
+[ ] Production credentials are isolated from testnet and development credentials.
+[ ] Production credentials cannot accidentally be loaded by a test environment.
+[ ] API credentials use the minimum permissions required.
+[ ] Withdrawal permissions are disabled unless specifically required by the system's approved design.
+[ ] Secret rotation is tested without exposing credentials or leaving the application indefinitely disconnected.
+[ ] Expired or revoked credentials trigger an alert and controlled trading restrictions.
+[ ] Authentication failures cannot trigger infinite retries.
+[ ] Outbound connections are restricted to approved destinations where practical.
+[ ] TLS certificate validation is enabled and cannot be silently disabled in production.
+[ ] Dependency and package versions are pinned and reviewed.
+[ ] Dependency vulnerability scans run before release.
+[ ] Production deployment artifacts are traceable to a specific source revision.
+[ ] Unauthorized users cannot change risk limits or execution settings.
+[ ] GUI controls that change execution behavior require appropriate authorization.
+[ ] Operator actions are audited.
+[ ] Logs and backups are protected against unauthorized access.
+[ ] Debug endpoints and test controls are disabled or protected in production.
+[ ] A compromised optional dashboard cannot directly bypass the risk engine.
+[ ] API credentials and sensitive account state are excluded from crash dumps where feasible.
+```
+
+## 15. Testing, reproducibility, and release quality
+
+```
+[ ] All critical unit tests pass in the release build.
+[ ] All critical integration tests pass against the actual production code paths.
+[ ] All required architecture-boundary tests pass.
+[ ] All critical state-machine transitions have explicit test cases.
+[ ] Every critical bug fix includes a regression test.
+[ ] Boundary tests cover minimum, maximum, zero, negative, and invalid numeric values where applicable.
+[ ] Property-based tests generate unexpected but valid sequences of events.
+[ ] Property-based tests include malformed and invalid inputs.
+[ ] Fault-injection tests cover every critical external dependency.
+[ ] Crash tests cover failure before and after durable writes.
+[ ] Crash tests cover failure before and after external order submission.
+[ ] Replay tests are deterministic when deterministic output is required.
+[ ] The same captured event stream produces the same canonical output for a fixed version and configuration.
+[ ] Tests verify that live and historical feature inputs have the expected schema and semantics.
+[ ] Serialization tests compare exact field values, nulls, ordering, and types.
+[ ] Performance tests run against the release build, not only debug builds.
+[ ] Dependency upgrades rerun the relevant execution, networking, persistence, and recovery tests.
+[ ] Tests are isolated from production accounts and production order endpoints.
+[ ] The test harness cannot accidentally submit live orders.
+[ ] Test failures cannot be silently ignored in the deployment pipeline.
+[ ] Flaky critical tests block release until their cause is resolved.
+[ ] Static analysis and formatting checks run automatically.
+[ ] Unsafe Rust usage, if any, receives focused review and tests.
+[ ] The final executable is built from the reviewed source revision.
+[ ] The final executable's configuration and dependency manifest are recorded.
+[ ] The production startup command is tested on a clean deployment environment.
+[ ] The application has been restarted and recovered successfully using the actual production deployment procedure.
+```
+
+## 16. Deployment, rollback, and recovery
+
+```
+[ ] A release cannot deploy automatically if a mandatory readiness gate fails.
+[ ] Deployment does not unintentionally start multiple trading instances.
+[ ] A new instance cannot trade until ownership, account state, and open orders are reconciled.
+[ ] Old and new versions cannot concurrently submit conflicting orders during a rollout.
+[ ] Persistent state remains readable after an approved upgrade.
+[ ] An incompatible schema migration blocks rollout or uses a tested migration procedure.
+[ ] Rollback is tested with realistic persistent state.
+[ ] Rollback does not erase orders or fills generated by the newer version.
+[ ] Rollback does not reset risk counters or bypass existing risk restrictions.
+[ ] Rollback handles orders that remain live at the venue.
+[ ] The previous known-good executable and configuration are available.
+[ ] The release can be halted without deleting its diagnostic evidence.
+[ ] A failed deployment does not leave the application in an ambiguous trading mode.
+[ ] Deployment status distinguishes service availability from trading readiness.
+[ ] A production restart cannot silently switch the account, venue, symbol set, or trading mode.
+[ ] A configuration change affecting execution or risk requires explicit validation.
+[ ] The system records the deployed binary version and effective configuration.
+[ ] Recovery procedures have been exercised on the intended hosting infrastructure.
+[ ] Backup restoration has been tested, not just backup creation.
+[ ] Recovery-time objectives and acceptable state-loss bounds are documented and measured.
+[ ] Disaster recovery includes the credentials, network access, configuration, and state needed to resume safely.
+[ ] Recovery from a complete machine or disk loss has been rehearsed.
+```
+
+## 17. Simulation, paper trading, and live-mode isolation
+
+```
+[x] Simulation mode cannot submit orders to a live venue. (`uets_trades::live_test::tests::paper_backend_never_sends_real_orders` passes.)
+[x] Playback mode cannot submit orders to a live venue. (`uets_trades::playback::tests::playback_never_sends_real_orders` passes.)
+[ ] Testnet mode cannot silently fall back to production endpoints.
+[ ] Live mode cannot silently fall back to a simulated execution backend.
+[ ] The selected backend is logged and verified before trading is enabled.
+[ ] Every backend implements the same documented execution contract.
+[ ] Backend-specific limitations are explicitly represented in capabilities or errors.
+[ ] A simulated fill cannot be mistaken for a venue-confirmed fill.
+[ ] Simulated account balances cannot be mistaken for actual account balances.
+[ ] A test fixture cannot inject fake fills into a production execution ledger without explicit authorization.
+[ ] Mode changes require shutdown or a tested transition procedure.
+[ ] Switching from simulation to live requires fresh account and order reconciliation.
+[ ] Switching from live to simulation cannot leave live workers submitting orders in the background.
+[ ] The actual production execution adapter is exercised in a non-production environment before release.
+[ ] Paper-trading success is not accepted as proof of correct live order lifecycle handling.
+[ ] Testnet differences from production are documented and separately validated.
+```
+
+## 18. Specific checks for the attached Rust / Binance architecture
+
+These are additional checks based on the components visible in your uploaded project. They are not claims that the code currently fails these tests.
+
+```
+[ ] The Binance REST execution adapter preserves a stable mapping between internal client order IDs and venue order IDs.
+[ ] The Binance order library's client-ID generation behavior is verified against the recovery requirements.
+[ ] A timeout after Binance accepts an order can be reconciled without blindly submitting another order.
+[ ] Binance order status and execution reports are normalized correctly into the shared OrderStatus model.
+[ ] The Binance account snapshot and the internal Portfolio are reconciled rather than conflated.
+[ ] Account snapshots that omit zero-balance assets do not erase relevant internal accounting state.
+[ ] Maker and taker fee fallbacks cannot silently conceal unavailable fee information.
+[ ] Fees charged in a different asset, such as BNB, are either correctly valued or explicitly marked unresolved.
+[ ] Spot execution never assumes that the venue supports a reduce-only flag.
+[ ] The spot exit path cannot oversell the available asset or reverse a position unintentionally.
+[ ] GTC-only limit-order behavior is explicitly rejected when the strategy requires IOC or FOK semantics.
+[ ] The full-depth order book is seeded using the correct REST snapshot and incremental depth stream.
+[ ] The book is invalidated whenever the documented update-ID continuity rule detects a gap.
+[ ] A failed reseed keeps the book invalid until successful recovery.
+[ ] Buffered WebSocket events received before the snapshot are reconciled against the snapshot update ID.
+[ ] The staging buffer has a tested overflow response that prevents use of an incomplete book.
+[ ] The depth-feed fallback does not silently substitute an incompatible stream or market.
+[ ] Switching between spot and futures trade feeds cannot silently mix their event semantics.
+[ ] Trade-feed ownership changes cannot cause duplicate trade rows or unintended gaps in captured data.
+[ ] The fallback activates only after its documented silence threshold and produces observable state transitions.
+[ ] The reorder buffer's lateness threshold and capacity are tested against the expected feed rate and burst distribution.
+[ ] Late-event drops and capacity-overflow drops are separately monitored.
+[ ] A capture with any dropped events is marked incomplete or otherwise explicitly qualified.
+[ ] The 128-column canonical schema is checked against the actual historical schema, including names, order, and data types.
+[ ] CSV append mode rejects an existing file with an incompatible header.
+[ ] CSV recovery after a process crash detects an incomplete trailing record.
+[ ] A successful CSV flush is not incorrectly treated as a guarantee of power-loss durability.
+[ ] A full disk or failed write halts or degrades capture explicitly instead of silently continuing as if recording were complete.
+[ ] The event merger's live and historical paths produce matching results for shared replay fixtures.
+[ ] The live capture integration test is run in a controlled environment with its network requirements satisfied.
+[ ] A missing trade stream, stale book, sequence gap, and failed REST reseed each have an end-to-end regression test.
+[ ] The supervisor detects a connected-but-silent child rather than relying only on process existence.
+[ ] The full Rust workspace builds and tests with the exact production feature flags.
+[ ] The Python extension build and standalone executable build are tested independently where both are deployed.
+```
+
+## 19. Final go/no-go release gate
+
+This is the checklist I would use at the actual production approval meeting.
+
+```
+[ ] All critical requirements have an explicit test ID and recorded test result.
+[ ] Every critical requirement has passed against the release candidate.
+[ ] No unresolved critical or high-severity infrastructure defect remains.
+[ ] No known order-duplication path remains untested.
+[ ] No known position-reconciliation path remains untested.
+[ ] No critical risk control depends exclusively on strategy code behaving correctly.
+[ ] No critical execution path silently assumes that a timeout means failure.
+[ ] All mandatory dependencies have tested timeout, failure, and recovery behavior.
+[ ] All critical queues and memory-consuming structures have defined bounds.
+[ ] Resource exhaustion cannot silently bypass risk controls or corrupt execution state.
+[ ] A process crash with outstanding orders has been simulated and recovered successfully.
+[ ] A network interruption after remote order acceptance has been simulated and recovered successfully.
+[ ] A kill switch has been tested against active orders, queued intents, retries, and concurrent workers.
+[ ] Account state and open orders reconcile correctly after restart.
+[ ] The complete system has passed its declared sustained-load and burst-load tests.
+[ ] All mandatory alert routes have been verified end to end.
+[ ] The rollback procedure has been tested.
+[ ] The production configuration has been reviewed and its hash recorded.
+[ ] Production credentials and endpoints have been independently verified.
+[ ] A clean deployment has been performed using the exact documented launch procedure.
+[ ] The application has demonstrated the required healthy, degraded, halted, and recovering states.
+[ ] Every critical failure mode has a documented safe response.
+[ ] The on-call operator can identify the failure, halt trading, inspect the account, and recover safely.
+[ ] The release is initially deployed with an explicitly limited exposure budget.
+[ ] The release has a defined automatic shutdown policy for unexpected execution or reconciliation behavior.
+[ ] The production approval is recorded against the exact binary, configuration, and test evidence.
+```
+
+# 20. How I would actually deem it production-grade
+
+I would use three approval states, rather than a single percentage-complete score.
+
+NO-GO — Unsafe
+
+Any unexplained position discrepancy, risk-limit bypass, duplicate-order path, unbounded critical queue, unresolved crash-recovery defect, or failed mandatory test blocks live deployment.
+
+CONDITIONAL — Shadow or testnet only
+
+Core functionality works, but fault injection, recovery, performance limits, operational controls, or live-environment validation remain incomplete.
+
+GO — Approved for controlled production
+
+All critical tests pass, failure behavior is demonstrated, the release is reproducible, operational controls work, and initial exposure is explicitly limited.
+
+One final point: no checklist can prove that a trading system will run correctly 100% of the time. You can, however, require evidence that specified failure modes have been tested, critical invariants are enforced, uncertainty is handled explicitly, and the system fails in a controlled manner when assumptions break.
+
+The goal is not to prove that nothing can fail. It is to ensure that failures are detected, contained, recoverable, and never silently converted into unintended trading exposure.
+
+If I had to prioritize just five areas before deploying any meaningful capital, they would be:
+
+1. Order submission ambiguity and duplicate prevention.
+2. Position and order reconciliation after crashes and reconnects.
+3. Independent risk enforcement under concurrency and failure.
+4. Market-data validity and order-book recovery.
+5. Memory/queue exhaustion, kill-switch behavior, and safe restart.
+
+Those five deserve considerably more scrutiny than whether the process stays alive for a month.

@@ -134,6 +134,7 @@ impl From<String> for OrderId {
 /// What the executor hands a venue to open or close exposure.
 #[derive(Clone, Debug, PartialEq)]
 pub struct OrderRequest {
+    pub client_order_id: Option<String>,
     pub symbol: String,
     pub side: Side,
     pub qty: f64,
@@ -149,6 +150,7 @@ impl OrderRequest {
     /// A market order — what enter/exit use.
     pub fn market(symbol: impl Into<String>, side: Side, qty: f64) -> Self {
         Self {
+            client_order_id: None,
             symbol: symbol.into(),
             side,
             qty,
@@ -180,6 +182,7 @@ impl OrderRequest {
                 price
             };
         Self {
+            client_order_id: None,
             symbol: symbol.into(),
             side,
             qty,
@@ -199,6 +202,11 @@ impl OrderRequest {
     /// Mark the request as an exit: the venue must not flip the position.
     pub fn reducing(mut self) -> Self {
         self.reduce_only = true;
+        self
+    }
+
+    pub fn with_client_order_id(mut self, id: impl Into<String>) -> Self {
+        self.client_order_id = Some(id.into());
         self
     }
 

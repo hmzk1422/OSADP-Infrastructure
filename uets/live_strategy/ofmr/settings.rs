@@ -37,6 +37,7 @@ pub struct TradeConfig {
     pub min_order_size: f64,
     pub stop_loss_bps: f64,
     pub take_profit_bps: f64,
+    pub max_hold_seconds: u64,
     pub lockout_seconds: f64,
     pub max_trades_per_hour: u32,
 }
@@ -77,6 +78,7 @@ impl Settings {
                 min_order_size: 0.001,
                 stop_loss_bps: 5.0,
                 take_profit_bps: 5.0,
+                max_hold_seconds: 300,
                 lockout_seconds: 1000.0,
                 max_trades_per_hour: 300,
             },
@@ -88,6 +90,18 @@ impl Settings {
     /// hand-rolled parser in a future pass). For now this returns defaults.
     pub fn load() -> Self {
         Self::defaults()
+    }
+}
+
+impl TradeConfig {
+    /// Return the configured TP/SL widths and maximum holding duration for
+    /// constructing an execution barrier at the actual entry fill.
+    pub fn barrier_parameters(&self) -> (f64, f64, u64) {
+        (
+            self.take_profit_bps,
+            self.stop_loss_bps,
+            self.max_hold_seconds,
+        )
     }
 }
 

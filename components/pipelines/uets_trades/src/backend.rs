@@ -131,7 +131,8 @@ pub trait ExecutionBackend: Send + Sync {
             qty.abs(),
             ctx.strategy_id.clone(),
             ctx.asset_id.clone(),
-        );
+        )
+        .reducing();
         self.submit_order(request)
     }
 }

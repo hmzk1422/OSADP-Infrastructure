@@ -13,5 +13,32 @@ cargo run --bin dev_test -- monitor [symbol]     : symbol
 cargo run --bin dev_test -- diag [symbol] [dir]     : symbol, output dir
 cargo run --bin dev_test -- strategies [name]     : strategy name (optional)
 cargo run --bin dev_test -- strategy <name> <symbol>     : strategy name, symbol (ofmr btc, ofmr eth, ...)
+cargo run --release --bin dev_test -- run <strategy>@<asset> [...] : launch the TUI and isolated workers
 cargo run --bin dev_test -- user-stream     : none (needs API key)
 cargo run --bin dev_test -- user-stream-ws     : none (needs API key)
+
+From the repository root, start multiple live market-data/OFMR monitor
+instances with:
+
+```sh
+cargo run --release --manifest-path uets/Cargo.toml --bin dev_test -- run ofmr@btcusdt ofmr@ethusdt
+```
+
+Use `disabled:ofmr@btcusdt` to list an instance without starting its worker.
+The Rust executor owns process lifecycle and uses Unix-domain sockets; the
+terminal monitor stays attached until `q` is pressed. On Windows, use the
+Linux Docker profile documented in `docs/system_design/uets.md`.
+# Live order modes
+
+The OFMR socket worker now submits USD-M Futures market orders after a strategy
+decision. Choose `paper`, `testnet`, or `live` in
+`uets/config/execution.yaml`; the checked-in default is `paper`. Testnet/live
+require `BINANCE_API_KEY` and `BINANCE_API_SECRET`. Live also requires
+`allow_live_trading: true` in that config file. Provide only the credentials
+through environment variables or Docker Compose secrets.
+
+The worker limits entry notional using `trade.max_position_usd` and exits with
+`reduce_only`. Order/transport failures terminate that worker rather than
+silently converting to paper mode. Live routing is not yet production-ready:
+fill/account reconciliation, authoritative portfolio persistence, and the
+RocksDB session writer are not yet connected to this process.

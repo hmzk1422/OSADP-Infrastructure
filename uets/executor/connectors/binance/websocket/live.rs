@@ -58,6 +58,8 @@ pub struct CaptureConfig {
     pub max_rows: Option<u64>,
     /// Append to an existing capture instead of truncating it.
     pub append: bool,
+    /// Strategy instances that should receive framed feature-input rows.
+    pub fanout_instances: Vec<String>,
 }
 
 impl CaptureConfig {
@@ -77,6 +79,7 @@ impl CaptureConfig {
             lateness_ms: DEFAULT_LATENESS_MS,
             max_rows: None,
             append: false,
+            fanout_instances: Vec::new(),
         }
     }
 }
@@ -91,6 +94,8 @@ struct Capture {
     csv: CsvRecorder,
     rows_written: u64,
     reseeds_pending: bool,
+    fanout: Option<std::sync::mpsc::SyncSender<Vec<u8>>>,
+    fanout_failed: Arc<AtomicBool>,
 }
 
 impl Capture {
@@ -98,6 +103,10 @@ impl Capture {
     fn offer(&mut self, event: MarketEvent) -> Result<u64, String> {
         let mut written = 0;
         for ready in self.reorder.push(event) {
+            let trade = match &ready {
+                MarketEvent::Trade(trade) => Some(*trade),
+                _ => None,
+            };
             let (row, outcome) = self.merger.merge_event(ready);
             if outcome.needs_reseed {
                 // Visible, not silent: the book is now wrong, so the next
@@ -107,6 +116,27 @@ impl Capture {
             self.csv
                 .write_row(&mut self.merger, &row)
                 .map_err(|e| e.to_string())?;
+            if let Some(fanout) = &self.fanout {
+                let frame = match strategy_frame(&self.merger, trade, row.timestamp_ns / 1_000_000)
+                {
+                    Ok(frame) => frame,
+                    Err(error) => {
+                        self.fanout_failed.store(true, Ordering::Release);
+                        return Err(error);
+                    }
+                };
+                if let Err(error) = fanout.try_send(frame) {
+                    self.fanout_failed.store(true, Ordering::Release);
+                    return Err(match error {
+                        std::sync::mpsc::TrySendError::Full(_) => {
+                            "strategy socket queue saturated; stopping rather than dropping market data".to_string()
+                        }
+                        std::sync::mpsc::TrySendError::Disconnected(_) => {
+                            "strategy socket sender disconnected".to_string()
+                        }
+                    });
+                }
+            }
             written += 1;
         }
         self.rows_written += written;
@@ -126,6 +156,114 @@ impl Capture {
         self.rows_written += written;
         Ok(written)
     }
+}
+
+fn strategy_frame(
+    merger: &Merger,
+    trade: Option<Trade>,
+    event_time_ms: i64,
+) -> Result<Vec<u8>, String> {
+    let state = merger.state();
+    if !state.book_valid() {
+        return Err("refusing to fan out a strategy row with an invalid order book".into());
+    }
+    let (bid_tick, bid_qty) = state
+        .book
+        .best_bid()
+        .ok_or_else(|| "best bid unavailable".to_string())?;
+    let (ask_tick, ask_qty) = state
+        .book
+        .best_ask()
+        .ok_or_else(|| "best ask unavailable".to_string())?;
+    let mut payload = format!(
+        "event_time_ms:{event_time_ms}\nbid_price:{}\nbid_qty:{bid_qty}\nask_price:{}\nask_qty:{ask_qty}\n",
+        event_merger_live::tick_to_price(bid_tick),
+        event_merger_live::tick_to_price(ask_tick),
+    );
+    if let Some(trade) = trade {
+        payload.push_str(&format!(
+            "price:{}\namount:{}\nis_buyer_maker:{}\n",
+            trade.price,
+            trade.quantity,
+            u8::from(trade.is_buyer_maker),
+        ));
+    } else {
+        payload.push_str("amount:0\nis_buyer_maker:0\n");
+    }
+    let payload = payload.into_bytes();
+    let mut frame = Vec::with_capacity(4 + payload.len());
+    frame.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+    frame.extend_from_slice(&payload);
+    Ok(frame)
+}
+
+#[cfg(unix)]
+fn start_strategy_fanout(
+    instances: &[String],
+    symbol: &str,
+    failed: Arc<AtomicBool>,
+) -> Result<std::sync::mpsc::SyncSender<Vec<u8>>, String> {
+    use std::io::Write;
+    use std::os::unix::net::UnixStream;
+    use std::path::PathBuf;
+
+    let mut paths = Vec::new();
+    for instance in instances {
+        let Some((strategy, asset)) = instance.split_once('@') else {
+            return Err(format!(
+                "invalid strategy instance '{instance}'; expected strategy@asset"
+            ));
+        };
+        if !strategy.eq_ignore_ascii_case("ofmr") || !asset.eq_ignore_ascii_case(symbol) {
+            return Err(format!(
+                "feed for {symbol} only supports ofmr@{symbol}, got '{instance}'"
+            ));
+        }
+        paths.push(PathBuf::from(format!(
+            "sockets/strategies/ofmr_{symbol}.sock"
+        )));
+    }
+    if paths.is_empty() {
+        return Err("strategy fan-out requires at least one configured instance".into());
+    }
+    let (sender, receiver) = std::sync::mpsc::sync_channel::<Vec<u8>>(4096);
+    std::thread::Builder::new()
+        .name(format!("uds-fanout-{symbol}"))
+        .spawn(move || {
+            let mut streams: Vec<Option<UnixStream>> = paths.iter().map(|_| None).collect();
+            while let Ok(frame) = receiver.recv() {
+                for (path, stream) in paths.iter().zip(streams.iter_mut()) {
+                    if stream.is_none() {
+                        match UnixStream::connect(path) {
+                            Ok(connection) => *stream = Some(connection),
+                            Err(error) => {
+                                eprintln!("[fanout] connect {} failed: {error}", path.display());
+                                failed.store(true, Ordering::Release);
+                                return;
+                            }
+                        }
+                    }
+                    if let Some(connection) = stream {
+                        if let Err(error) = connection.write_all(&frame) {
+                            eprintln!("[fanout] write {} failed: {error}", path.display());
+                            failed.store(true, Ordering::Release);
+                            return;
+                        }
+                    }
+                }
+            }
+        })
+        .map_err(|error| format!("start strategy fan-out: {error}"))?;
+    Ok(sender)
+}
+
+#[cfg(not(unix))]
+fn start_strategy_fanout(
+    _instances: &[String],
+    _symbol: &str,
+    _failed: Arc<AtomicBool>,
+) -> Result<std::sync::mpsc::SyncSender<Vec<u8>>, String> {
+    Err("live strategy fan-out requires Unix-domain sockets on a Unix host".into())
 }
 
 /// UTC timestamp as `YYYYMMDD_HHMMSS`, from the Unix epoch.
@@ -295,6 +433,16 @@ pub fn run_capture(config: CaptureConfig) -> Result<(), String> {
     let symbol = config.symbol.to_lowercase();
     let keep_running = Arc::new(AtomicBool::new(true));
     let rows_seen = Arc::new(AtomicU64::new(0));
+    let fanout_failed = Arc::new(AtomicBool::new(false));
+    let fanout = if config.fanout_instances.is_empty() {
+        None
+    } else {
+        Some(start_strategy_fanout(
+            &config.fanout_instances,
+            &config.symbol.to_ascii_lowercase(),
+            Arc::clone(&fanout_failed),
+        )?)
+    };
 
     let csv = if config.append {
         CsvRecorder::append(&config.output)
@@ -314,6 +462,8 @@ pub fn run_capture(config: CaptureConfig) -> Result<(), String> {
         csv,
         rows_written: 0,
         reseeds_pending: false,
+        fanout,
+        fanout_failed: Arc::clone(&fanout_failed),
     }));
 
     // Write the header immediately, before any data. Deferring it to the first
@@ -405,6 +555,10 @@ pub fn run_capture(config: CaptureConfig) -> Result<(), String> {
             if total >= limit {
                 break;
             }
+        }
+        if fanout_failed.load(Ordering::Acquire) {
+            keep_running.store(false, Ordering::Release);
+            return Err("strategy socket disconnected; feed process stopping".into());
         }
         if !keep_running.load(Ordering::Relaxed) {
             break;
@@ -589,6 +743,8 @@ mod end_to_end {
             csv: CsvRecorder::create(path).expect("create"),
             rows_written: 0,
             reseeds_pending: false,
+            fanout: None,
+            fanout_failed: Arc::new(AtomicBool::new(false)),
         };
 
         // A REST seed, applied DIRECTLY to the merger. It must not go
@@ -751,5 +907,47 @@ mod end_to_end {
         let top = CanonicalTop::from_values(&values);
         assert_eq!(top.mid(), Some((108_663.2 + 108_666.0) / 2.0));
         assert_eq!(top.spread(), Some(2.8000000000029104));
+    }
+}
+
+#[cfg(test)]
+mod strategy_fanout_tests {
+    use super::*;
+
+    #[test]
+    fn strategy_payload_is_length_framed_and_contains_canonical_market_inputs() {
+        let mut merger = Merger::new(20);
+        merger.apply_seed(&BookSnapshot {
+            last_update_id: 1,
+            bids: vec![(99.0, 2.0)],
+            asks: vec![(101.0, 3.0)],
+        });
+        let trade = Trade {
+            event_time_ms: 1_700_000_000_000,
+            transact_time_ms: 1_700_000_000_000,
+            agg_trade_id: 10,
+            first_trade_id: 10,
+            last_trade_id: 10,
+            price: 100.0,
+            quantity: 0.25,
+            is_buyer_maker: true,
+        };
+        merger.merge_event(MarketEvent::Trade(trade));
+
+        let frame = strategy_frame(&merger, Some(trade), trade.event_time_ms).unwrap();
+        let payload_length = u32::from_le_bytes(frame[..4].try_into().unwrap()) as usize;
+        assert_eq!(payload_length, frame.len() - 4);
+        let payload = std::str::from_utf8(&frame[4..]).unwrap();
+        assert!(payload.contains("bid_price:99"));
+        assert!(payload.contains("ask_price:101"));
+        assert!(payload.contains("price:100"));
+        assert!(payload.contains("amount:0.25"));
+        assert!(payload.contains("is_buyer_maker:1"));
+    }
+
+    #[test]
+    fn strategy_payload_refuses_unseeded_or_stale_books() {
+        let merger = Merger::new(20);
+        assert!(strategy_frame(&merger, None, 1).is_err());
     }
 }

@@ -38,6 +38,8 @@ pub struct PerformanceSnapshot {
     pub sortino: f64,
     /// Winning trades / all trades, in [0, 1].
     pub win_rate: f64,
+    /// Mean realized R multiple over trades whose initial risk was recorded.
+    pub expectancy_rr: f64,
     /// Total trade count.
     pub trades: usize,
     /// Winning trade count.
@@ -54,6 +56,39 @@ pub struct PerformanceSnapshot {
     pub available_margin: f64,
     /// Effective leverage.
     pub effective_leverage: f64,
+}
+
+/// Combine strategy-instance accounting for portfolio-level reporting.
+/// Ratios that depend on a time series (Sortino and drawdown) are calculated
+/// from the caller's aggregated equity curve, not averaged from instances.
+pub fn aggregate_capital(capitals: &[Capital]) -> Option<Capital> {
+    if capitals.is_empty() {
+        return None;
+    }
+    let mut aggregate = Capital::new(0.0);
+    for capital in capitals {
+        aggregate.starting += capital.starting;
+        aggregate.cash += capital.cash;
+        aggregate.equity += capital.equity;
+        aggregate.unrealized_pnl += capital.unrealized_pnl;
+        aggregate.realized_pnl += capital.realized_pnl;
+        aggregate.fees_paid += capital.fees_paid;
+        aggregate.gross_exposure += capital.gross_exposure;
+        aggregate.net_exposure += capital.net_exposure;
+        aggregate.margin_used += capital.margin_used;
+        aggregate.available_margin += capital.available_margin;
+        aggregate.trade_count += capital.trade_count;
+        aggregate.win_count += capital.win_count;
+        aggregate.loss_count += capital.loss_count;
+        aggregate.r_multiple_sum += capital.r_multiple_sum;
+        aggregate.r_trades += capital.r_trades;
+    }
+    aggregate.effective_leverage = if aggregate.equity > 0.0 {
+        aggregate.gross_exposure / aggregate.equity
+    } else {
+        0.0
+    };
+    Some(aggregate)
 }
 
 impl PerformanceSnapshot {
@@ -103,6 +138,7 @@ impl PerformanceSnapshot {
             current_drawdown: current_dd,
             sortino,
             win_rate,
+            expectancy_rr: capital.expectancy_rr(),
             trades: capital.trades(),
             wins: capital.wins(),
             losses: capital.losses() as f64,
@@ -252,5 +288,24 @@ mod tests {
     fn win_rate_zero_when_no_trades() {
         assert_eq!(win_rate(0, 0), 0.0);
         assert!((win_rate(1, 3) - 1.0 / 3.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn aggregate_capital_sums_portfolio_values_and_rr_denominators() {
+        let mut first = Capital::new(1_000.0);
+        first.cash = 950.0;
+        first.equity = 1_050.0;
+        first.r_multiple_sum = 2.0;
+        first.r_trades = 2;
+        let mut second = Capital::new(2_000.0);
+        second.cash = 1_900.0;
+        second.equity = 2_100.0;
+        second.r_multiple_sum = 3.0;
+        second.r_trades = 1;
+        let total = aggregate_capital(&[first, second]).unwrap();
+        assert_eq!(total.starting, 3_000.0);
+        assert_eq!(total.cash, 2_850.0);
+        assert_eq!(total.equity, 3_150.0);
+        assert!((total.expectancy_rr() - 5.0 / 3.0).abs() < 1e-12);
     }
 }

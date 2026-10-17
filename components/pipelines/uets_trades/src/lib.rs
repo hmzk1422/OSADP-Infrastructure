@@ -28,8 +28,8 @@ pub mod types;
 pub use backend::ExecutionBackend;
 pub use calc::metrics::PerformanceSnapshot;
 pub use calc::reporter::Reporter;
+pub use triple_barrier::{BarrierExit, BarrierReason, TripleBarrier};
 pub use types::{
     Capital, DecisionIntent, ExecutionEvent, FillEvent, Order, OrderRequest, OrderSide,
     OrderStatus, TradeIntent,
 };
-pub use triple_barrier::{BarrierExit, BarrierReason, TripleBarrier};

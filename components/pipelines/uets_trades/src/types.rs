@@ -97,13 +97,18 @@ pub enum OrderStatus {
     Filled,
     Rejected,
     Cancelled,
+    /// Request may have reached the venue, but its response was lost.
+    Uncertain,
 }
 
 impl OrderStatus {
     pub fn is_live(self) -> bool {
         matches!(
             self,
-            OrderStatus::Submitted | OrderStatus::Accepted | OrderStatus::PartiallyFilled
+            OrderStatus::Submitted
+                | OrderStatus::Accepted
+                | OrderStatus::PartiallyFilled
+                | OrderStatus::Uncertain
         )
     }
 
@@ -154,6 +159,8 @@ pub struct OrderRequest {
     pub qty: f64,
     pub price: Option<f64>,
     pub time_in_force: TimeInForce,
+    /// Refuse to increase exposure when this is an exit order.
+    pub reduce_only: bool,
     /// Strategy instance identity, e.g. `ofmr@btcusdt`.
     pub strategy_id: String,
     pub asset_id: String,
@@ -178,6 +185,7 @@ impl OrderRequest {
             qty,
             price: None,
             time_in_force: TimeInForce::Gtc,
+            reduce_only: false,
             strategy_id: strategy_id.into(),
             asset_id: asset_id.into(),
             barrier: None,
@@ -186,6 +194,11 @@ impl OrderRequest {
 
     pub fn with_barrier(mut self, barrier: crate::triple_barrier::TripleBarrier) -> Self {
         self.barrier = Some(barrier);
+        self
+    }
+
+    pub fn reducing(mut self) -> Self {
+        self.reduce_only = true;
         self
     }
 }
@@ -280,6 +293,11 @@ pub enum ExecutionEvent {
     },
     OrderCancelled {
         order_id: OrderId,
+        at: DateTime<Utc>,
+    },
+    OrderUncertain {
+        order_id: OrderId,
+        reason: String,
         at: DateTime<Utc>,
     },
     Fill(FillEvent),

@@ -427,6 +427,7 @@ mod tests {
         // Off-tick limit (built raw, bypassing the snapping constructor)
         // fails locally, not as a venue INVALID_TICK_SIZE.
         let bad = OrderRequest {
+            client_order_id: None,
             symbol: "BTCUSDT".to_string(),
             side: Side::Buy,
             qty: 0.001,

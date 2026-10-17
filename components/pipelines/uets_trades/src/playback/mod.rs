@@ -6,11 +6,17 @@
 
 use crate::backend::{BackendError, ExecutionBackend};
 use crate::sim::{SimConfig, SimEngine};
-use crate::types::{
-    Capital, ExecutionEvent, FillEvent, Order, OrderId, OrderRequest, TradeIntent,
-};
+use crate::types::{Capital, ExecutionEvent, FillEvent, Order, OrderId, OrderRequest, TradeIntent};
 use chrono::{DateTime, Utc};
 use std::collections::BTreeMap;
+use std::time::{Duration, Instant};
+
+/// One ordered item in a deterministic market-data replay.
+#[derive(Clone, Debug)]
+pub struct MarketEvent {
+    pub timestamp: DateTime<Utc>,
+    pub marks: BTreeMap<String, f64>,
+}
 
 /// Playback backend — simulated execution against replayed events.
 pub struct PlaybackBackend {
@@ -53,6 +59,51 @@ impl PlaybackBackend {
     /// Shared read access to the accounting engine (reporting integration).
     pub fn engine(&self) -> &SimEngine {
         &self.engine
+    }
+
+    /// Replay every input event in order, applying its marks before invoking
+    /// strategy processing. Events are paced by the configured acceleration;
+    /// no event is skipped to meet a speed target.
+    pub fn replay_events<F>(
+        &mut self,
+        events: impl IntoIterator<Item = MarketEvent>,
+        mut process: F,
+    ) -> Result<usize, BackendError>
+    where
+        F: FnMut(&mut Self, &MarketEvent) -> Result<(), BackendError>,
+    {
+        if !self.acceleration.is_finite() || self.acceleration <= 0.0 {
+            return Err(BackendError::Internal(
+                "playback acceleration must be finite and positive".into(),
+            ));
+        }
+        let mut count = 0usize;
+        let mut first_timestamp = None;
+        let mut previous_timestamp = None;
+        let wall_start = Instant::now();
+        for event in events {
+            if previous_timestamp.is_some_and(|previous| event.timestamp < previous) {
+                return Err(BackendError::Internal(
+                    "playback events must be timestamp ordered".into(),
+                ));
+            }
+            let first = *first_timestamp.get_or_insert(event.timestamp);
+            let elapsed_ms = event
+                .timestamp
+                .signed_duration_since(first)
+                .num_milliseconds()
+                .max(0) as u64;
+            let target_ms = (elapsed_ms as f64 / self.acceleration).min(u64::MAX as f64) as u64;
+            let wait = Duration::from_millis(target_ms).saturating_sub(wall_start.elapsed());
+            if !wait.is_zero() {
+                std::thread::sleep(wait);
+            }
+            self.on_market_update(&event.marks, event.timestamp);
+            process(self, &event)?;
+            previous_timestamp = Some(event.timestamp);
+            count += 1;
+        }
+        Ok(count)
     }
 }
 
@@ -133,7 +184,6 @@ impl ExecutionBackend for PlaybackBackend {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -181,8 +231,8 @@ mod tests {
 
         // Entry with a 5 bps TP / 5 bps SL / 300 s vertical barrier.
         let barrier = TripleBarrier::long(100.0, base, 5.0, 5.0, 300);
-        let ctx = ActionContext::new("ofmr@btcusdt", "btcusdt", "BTCUSDT", 1.0)
-            .with_barrier(barrier);
+        let ctx =
+            ActionContext::new("ofmr@btcusdt", "btcusdt", "BTCUSDT", 1.0).with_barrier(barrier);
         backend.on_market_update(&marks(100.0), base);
         backend.long(&ctx).unwrap();
         assert_eq!(backend.position_qty("ofmr@btcusdt", "BTCUSDT"), Some(1.0));
@@ -209,7 +259,9 @@ mod tests {
         let events = backend.drain_events();
         let exit_fills = events
             .iter()
-            .filter(|e| matches!(e, ExecutionEvent::Fill(f) if f.order_id.0.starts_with("barrier-")))
+            .filter(
+                |e| matches!(e, ExecutionEvent::Fill(f) if f.order_id.0.starts_with("barrier-")),
+            )
             .count();
         assert_eq!(exit_fills, 1, "barrier exit emits exactly one fill");
     }
@@ -219,8 +271,8 @@ mod tests {
         let mut backend = PlaybackBackend::new(10.0);
         let base = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
         let barrier = TripleBarrier::long(100.0, base, 5.0, 5.0, 10);
-        let ctx = ActionContext::new("ofmr@btcusdt", "btcusdt", "BTCUSDT", 1.0)
-            .with_barrier(barrier);
+        let ctx =
+            ActionContext::new("ofmr@btcusdt", "btcusdt", "BTCUSDT", 1.0).with_barrier(barrier);
         backend.on_market_update(&marks(100.0), base);
         backend.long(&ctx).unwrap();
 
@@ -229,8 +281,40 @@ mod tests {
         backend.on_market_update(&marks(100.0), late);
         assert_eq!(backend.position_qty("ofmr@btcusdt", "BTCUSDT"), None);
         let orders = backend.orders();
-        let exit = orders.iter().find(|o| o.id.0.starts_with("barrier-")).unwrap();
+        let exit = orders
+            .iter()
+            .find(|o| o.id.0.starts_with("barrier-"))
+            .unwrap();
         assert_eq!(exit.status, OrderStatus::Filled);
     }
-}
 
+    #[test]
+    fn accelerated_replay_preserves_every_event_and_rejects_time_reversal() {
+        use super::MarketEvent;
+        let start = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
+        let events = [0, 1, 2].map(|second| MarketEvent {
+            timestamp: start + chrono::Duration::seconds(second),
+            marks: marks(100.0 + second as f64),
+        });
+        let mut backend = PlaybackBackend::new(100.0);
+        let mut seen = Vec::new();
+        let count = backend
+            .replay_events(events.clone(), |_, event| {
+                seen.push(event.timestamp);
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(count, 3);
+        assert_eq!(
+            seen,
+            events
+                .iter()
+                .map(|event| event.timestamp)
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(backend.engine().book.mark("BTCUSDT"), Some(102.0));
+
+        let reversed = [events[1].clone(), events[0].clone()];
+        assert!(backend.replay_events(reversed, |_, _| Ok(())).is_err());
+    }
+}

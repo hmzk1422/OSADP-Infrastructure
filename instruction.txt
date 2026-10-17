@@ -19,12 +19,12 @@
 
 ## 1.1 Responsibilities
 
-Create or update the Rust library at the existing `uets_trades` location.
+Create or update the Rust library at `components/pipelines/uets_trades/`.
 
 Structure:
 
 ```text
-uets_trades/
+components/pipelines/uets_trades/
 ├── live_test/
 ├── live_trade/
 ├── playback/
