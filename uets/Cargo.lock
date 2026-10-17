@@ -1749,6 +1749,7 @@ version = "0.1.0"
 dependencies = [
  "binance",
  "event_merger_live",
+ "libc",
  "pyo3",
  "serde_json",
  "tungstenite",

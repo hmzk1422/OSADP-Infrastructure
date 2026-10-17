@@ -389,23 +389,30 @@ impl LiveDashboard {
                 .map_err(|error| format!("start feed for {identity}: {error}"))?,
         );
         instance.enabled = true;
-        let _ = publish_instance(
-            &self.gui_socket,
-            &uets_gui::InstanceSnapshot {
-                strategy_id: instance.strategy.clone(),
-                asset_id: instance.asset.clone(),
-                statistics: uets_gui::Statistics {
-                    status: Some("enabled".into()),
-                    ..Default::default()
-                },
-                equity_history: Vec::new(),
-            },
-        );
+        let mut status_snapshot = self
+            .snapshots
+            .snapshot()
+            .instances
+            .into_iter()
+            .find(|snapshot| snapshot.identity() == identity)
+            .unwrap_or_default();
+        status_snapshot.strategy_id = instance.strategy.clone();
+        status_snapshot.asset_id = instance.asset.clone();
+        status_snapshot.statistics.status = Some("enabled".into());
+        let _ = publish_instance(&self.gui_socket, &status_snapshot);
         Ok(())
     }
 
     fn disable(&mut self, identity: &str) -> Result<(), String> {
+        use uets_gui::SnapshotSource;
         use uets_gui::publish_instance;
+        let mut snapshot = self
+            .snapshots
+            .snapshot()
+            .instances
+            .into_iter()
+            .find(|snapshot| snapshot.identity() == identity)
+            .unwrap_or_default();
         let Some(instance) = self.instances.get_mut(identity) else {
             return Err(format!("unknown strategy {identity}"));
         };
@@ -417,19 +424,11 @@ impl LiveDashboard {
             let _ = feed.wait();
         }
         instance.enabled = false;
-        publish_instance(
-            &self.gui_socket,
-            &uets_gui::InstanceSnapshot {
-                strategy_id: instance.strategy.clone(),
-                asset_id: instance.asset.clone(),
-                statistics: uets_gui::Statistics {
-                    status: Some("disabled".into()),
-                    ..Default::default()
-                },
-                equity_history: Vec::new(),
-            },
-        )
-        .map_err(|error| format!("publish disabled status: {error}"))
+        snapshot.strategy_id = instance.strategy.clone();
+        snapshot.asset_id = instance.asset.clone();
+        snapshot.statistics.status = Some("disabled".into());
+        publish_instance(&self.gui_socket, &snapshot)
+            .map_err(|error| format!("publish disabled status: {error}"))
     }
 
     fn remove(&mut self, identity: &str) -> Result<(), String> {

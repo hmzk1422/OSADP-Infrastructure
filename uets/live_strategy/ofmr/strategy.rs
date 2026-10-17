@@ -12,6 +12,24 @@ use crate::live_strategy::ofmr::settings::Settings;
 use crate::live_strategy::StateBuilder;
 
 const N_FEATURES: usize = 15;
+const HIGHER_TIMEFRAME_MINUTES: f64 = 5.0;
+const BARRIER_MULTIPLIER: f64 = 0.3;
+const REWARD_RISK_RATIO: f64 = 10.0;
+/// Matches the training label fallback when rolling bar volatility is zero
+/// or not yet warmed up (0.001 * barrier multiplier).
+const MIN_VOLATILITY_FRACTION: f64 = 0.001;
+
+/// Convert one-minute close-return volatility to the trained five-minute
+/// barrier scale, then return (stop fraction, target fraction).
+pub fn barrier_fractions(volatility_1m: Option<f64>) -> (f64, f64) {
+    let volatility_5m = volatility_1m
+        .filter(|value| value.is_finite() && *value >= 0.0)
+        .map(|value| value * HIGHER_TIMEFRAME_MINUTES.sqrt())
+        .unwrap_or(MIN_VOLATILITY_FRACTION)
+        .max(MIN_VOLATILITY_FRACTION);
+    let stop = volatility_5m * BARRIER_MULTIPLIER;
+    (stop, stop * REWARD_RISK_RATIO)
+}
 
 /// A parsed LightGBM tree node.
 #[derive(Clone, Debug)]
@@ -298,5 +316,20 @@ mod tests {
         let state = make_state(&values, Position::Flat);
         let _ = s.decide(&state);
         // Just verify it doesn't panic; the actual decision depends on model.
+    }
+
+    #[test]
+    fn barriers_scale_one_minute_volatility_to_five_minutes_and_ten_to_one_rr() {
+        let (stop, target) = barrier_fractions(Some(0.002));
+        let expected_stop = 0.002 * 5.0_f64.sqrt() * 0.3;
+        assert!((stop - expected_stop).abs() < 1e-12);
+        assert!((target / stop - 10.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn barriers_use_the_training_minimum_when_volatility_is_unavailable() {
+        let (stop, target) = barrier_fractions(None);
+        assert!((stop - 0.001 * 0.3).abs() < 1e-12);
+        assert!((target - stop * 10.0).abs() < 1e-12);
     }
 }

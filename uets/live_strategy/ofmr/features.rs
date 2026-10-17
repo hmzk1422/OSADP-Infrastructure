@@ -126,6 +126,9 @@ pub struct OfmrFeatures {
     abs_ratio_window: VecDeque<f64>,
     delta_divergence_window: VecDeque<f64>,
     sequence: u64,
+    minute_bucket: Option<u64>,
+    minute_close: Option<f64>,
+    minute_returns: VecDeque<f64>,
 }
 
 impl OfmrFeatures {
@@ -161,6 +164,9 @@ impl OfmrFeatures {
             abs_ratio_window: VecDeque::with_capacity(60),
             delta_divergence_window: VecDeque::with_capacity(60),
             sequence: 0,
+            minute_bucket: None,
+            minute_close: None,
+            minute_returns: VecDeque::with_capacity(100),
         }
     }
 }
@@ -183,6 +189,32 @@ impl ComputeFeatures for OfmrFeatures {
             (Some(b), Some(a)) if b > 0.0 && a > 0.0 => (b + a) / 2.0,
             _ => trade_price.unwrap_or(0.0),
         };
+        let event_time_ms = row.get("event_time_ms").unwrap_or_default().max(0.0) as u64;
+        let minute_bucket = event_time_ms / 60_000;
+        if mid.is_finite() && mid > 0.0 {
+            match self.minute_bucket {
+                None => {
+                    self.minute_bucket = Some(minute_bucket);
+                    self.minute_close = Some(mid);
+                }
+                Some(previous_bucket) if minute_bucket == previous_bucket => {
+                    self.minute_close = Some(mid);
+                }
+                Some(previous_bucket) if minute_bucket > previous_bucket => {
+                    if minute_bucket == previous_bucket + 1 {
+                        if let (Some(previous), Some(close)) = (self.minute_close, Some(mid)) {
+                            let ret = (close - previous) / previous;
+                            if ret.is_finite() {
+                                push_window(&mut self.minute_returns, 100, ret);
+                            }
+                        }
+                    }
+                    self.minute_bucket = Some(minute_bucket);
+                    self.minute_close = Some(mid);
+                }
+                _ => {}
+            }
+        }
         push_window(&mut self.mid_prices, 200, if mid > 0.0 { mid } else { 0.0 });
         let rsi_2_val = if mid > 0.0 { self.rsi_2.next(mid) } else { None };
         let rsi_14_val = if mid > 0.0 { self.rsi_14.next(mid) } else { None };
@@ -305,6 +337,16 @@ impl ComputeFeatures for OfmrFeatures {
         out.insert("Column_12", inst_ratio);
         out.insert("Column_13", delta_divergence_z.unwrap_or(0.0));
         out.insert("Column_14", depth_imbalance_z.unwrap_or(0.0));
+        if self.minute_returns.len() >= 2 {
+            let mean = self.minute_returns.iter().sum::<f64>() / self.minute_returns.len() as f64;
+            let variance = self
+                .minute_returns
+                .iter()
+                .map(|ret| (ret - mean).powi(2))
+                .sum::<f64>()
+                / self.minute_returns.len() as f64;
+            out.insert("bar_volatility_1m", variance.sqrt());
+        }
         Ok(out)
     }
 

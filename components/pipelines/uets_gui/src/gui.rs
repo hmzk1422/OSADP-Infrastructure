@@ -20,8 +20,10 @@ use thiserror::Error;
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct Statistics {
+    pub starting_equity: Option<f64>,
     pub sortino: Option<f64>,
     pub expectancy_rr: Option<f64>,
+    pub expectancy_trades: Option<usize>,
     pub max_drawdown: Option<f64>,
     pub cumulative_return: Option<f64>,
     pub absolute_return: Option<f64>,
@@ -46,6 +48,7 @@ pub struct Statistics {
     pub clock_skew_max_ms: Option<f64>,
     pub decision_to_order_ms: Option<f64>,
     pub order_to_fill_ms: Option<f64>,
+    pub tick_to_trade_ms: Option<f64>,
     pub memory_mb: Option<f64>,
     pub cpu_percent: Option<f64>,
     pub persistence_queue: Option<usize>,
@@ -73,6 +76,185 @@ pub struct DashboardSnapshot {
     pub aggregate: Statistics,
     pub aggregate_equity_history: Vec<f64>,
     pub instances: Vec<InstanceSnapshot>,
+}
+
+pub fn aggregate_instances(
+    instances: &[InstanceSnapshot],
+    equity_history: &mut Vec<f64>,
+    aggregate_starting_equity: &mut f64,
+) -> Statistics {
+    let mut aggregate = Statistics::default();
+    if instances.is_empty() {
+        equity_history.clear();
+        *aggregate_starting_equity = 0.0;
+        return aggregate;
+    }
+    let eligible = instances
+        .iter()
+        .filter(|instance| {
+            instance.statistics.starting_equity.is_some() && instance.statistics.equity.is_some()
+        })
+        .collect::<Vec<_>>();
+    if eligible.is_empty() {
+        equity_history.clear();
+        *aggregate_starting_equity = 0.0;
+        return aggregate;
+    }
+    let mut starting_equity = 0.0;
+    let mut equity = 0.0;
+    let mut cash = 0.0;
+    let mut realized_pnl = 0.0;
+    let mut unrealized_pnl = 0.0;
+    let mut exposure = 0.0;
+    let mut open_positions = 0usize;
+    let mut trades = 0usize;
+    let mut wins = 0.0;
+    let mut expectancy_sum = 0.0;
+    let mut expectancy_trades = 0usize;
+    let mut active = false;
+    let mut errored = false;
+    for instance in &eligible {
+        let stats = &instance.statistics;
+        starting_equity += stats.starting_equity.unwrap_or_default();
+        equity += stats.equity.unwrap_or_default();
+        cash += stats.cash.unwrap_or_default();
+        realized_pnl += stats.realized_pnl.unwrap_or_default();
+        unrealized_pnl += stats.unrealized_pnl.unwrap_or_default();
+        exposure += stats.exposure.unwrap_or_default();
+        open_positions += stats.open_positions.unwrap_or_default();
+        let instance_trades = stats.trades.unwrap_or_default();
+        trades += instance_trades;
+        wins += stats.win_rate.unwrap_or_default() * instance_trades as f64;
+        let rr_trades = stats.expectancy_trades.unwrap_or(instance_trades);
+        expectancy_sum += stats.expectancy_rr.unwrap_or_default() * rr_trades as f64;
+        expectancy_trades += rr_trades;
+        active |= stats.status.as_deref() == Some("enabled");
+        errored |= stats.status.as_deref() == Some("error");
+    }
+    let starting_delta = starting_equity - *aggregate_starting_equity;
+    if starting_delta != 0.0 {
+        for previous_equity in equity_history.iter_mut() {
+            *previous_equity += starting_delta;
+        }
+        *aggregate_starting_equity = starting_equity;
+    }
+    equity_history.push(equity);
+    if equity_history.len() > 10_000 {
+        equity_history.drain(..equity_history.len() - 10_000);
+    }
+    aggregate.starting_equity = Some(starting_equity);
+    aggregate.equity = Some(equity);
+    aggregate.cash = Some(cash);
+    aggregate.realized_pnl = Some(realized_pnl);
+    aggregate.unrealized_pnl = Some(unrealized_pnl);
+    aggregate.exposure = Some(exposure);
+    aggregate.open_positions = Some(open_positions);
+    aggregate.trades = Some(trades);
+    aggregate.win_rate = Some(if trades > 0 {
+        wins / trades as f64
+    } else {
+        0.0
+    });
+    aggregate.expectancy_trades = Some(expectancy_trades);
+    aggregate.expectancy_rr = Some(if expectancy_trades > 0 {
+        expectancy_sum / expectancy_trades as f64
+    } else {
+        0.0
+    });
+    aggregate.cumulative_return = Some(if starting_equity > 0.0 {
+        (equity - starting_equity) / starting_equity
+    } else {
+        0.0
+    });
+    aggregate.absolute_return = Some(equity - starting_equity);
+    aggregate.max_drawdown = Some(max_drawdown(equity_history));
+    aggregate.sortino = Some(sortino(equity_history));
+    aggregate.status = Some(
+        if errored {
+            "error"
+        } else if active {
+            "enabled"
+        } else {
+            "disabled"
+        }
+        .to_string(),
+    );
+    // Operational telemetry is produced per worker. Preserve it in the
+    // aggregate view instead of silently dropping it when summing P&L.
+    aggregate.latest_market_data = eligible
+        .iter()
+        .filter_map(|instance| instance.statistics.latest_market_data.as_deref())
+        .filter_map(|value| value.parse::<u64>().ok())
+        .max()
+        .map(|timestamp| timestamp.to_string());
+    aggregate.latest_decision = eligible
+        .iter()
+        .rev()
+        .find_map(|instance| instance.statistics.latest_decision.clone());
+    let mean = |select: fn(&Statistics) -> Option<f64>| {
+        let values = eligible
+            .iter()
+            .filter_map(|instance| select(&instance.statistics))
+            .filter(|value| value.is_finite())
+            .collect::<Vec<_>>();
+        (!values.is_empty()).then(|| values.iter().sum::<f64>() / values.len() as f64)
+    };
+    aggregate.exchange_latency_ms = mean(|s| s.exchange_latency_ms);
+    aggregate.processing_latency_ms = mean(|s| s.processing_latency_ms);
+    aggregate.latency_p05_ms = mean(|s| s.latency_p05_ms);
+    aggregate.latency_p95_ms = mean(|s| s.latency_p95_ms);
+    aggregate.latency_p99_ms = mean(|s| s.latency_p99_ms);
+    aggregate.decision_to_order_ms = mean(|s| s.decision_to_order_ms);
+    aggregate.order_to_fill_ms = mean(|s| s.order_to_fill_ms);
+    aggregate.clock_skew_mean_ms = mean(|s| s.clock_skew_mean_ms);
+    aggregate.clock_skew_max_ms = eligible
+        .iter()
+        .filter_map(|instance| instance.statistics.clock_skew_max_ms)
+        .reduce(f64::max);
+    aggregate.memory_mb = mean(|s| s.memory_mb);
+    aggregate.cpu_percent = mean(|s| s.cpu_percent);
+    aggregate.tick_to_trade_ms = mean(|s| s.tick_to_trade_ms);
+    aggregate.persistence_write_ms = mean(|s| s.persistence_write_ms);
+    aggregate.persistence_queue = eligible.iter().filter_map(|i| i.statistics.persistence_queue).max();
+    aggregate.persistence_errors = eligible.iter().filter_map(|i| i.statistics.persistence_errors).reduce(|a, b| a.saturating_add(b));
+    aggregate
+}
+
+fn max_drawdown(equity: &[f64]) -> f64 {
+    let mut peak = f64::NEG_INFINITY;
+    let mut worst: f64 = 0.0;
+    for value in equity.iter().copied().filter(|value| value.is_finite()) {
+        peak = peak.max(value);
+        if peak > 0.0 {
+            worst = worst.max((peak - value) / peak);
+        }
+    }
+    worst
+}
+
+fn sortino(equity: &[f64]) -> f64 {
+    let returns = equity
+        .windows(2)
+        .filter_map(|pair| (pair[0] > 0.0).then_some((pair[1] - pair[0]) / pair[0]))
+        .filter(|value| value.is_finite())
+        .collect::<Vec<_>>();
+    if returns.is_empty() {
+        return 0.0;
+    }
+    let mean = returns.iter().sum::<f64>() / returns.len() as f64;
+    let downside = (returns
+        .iter()
+        .map(|value| value.min(0.0).powi(2))
+        .sum::<f64>()
+        / returns.len() as f64)
+        .sqrt();
+    if downside > 0.0 {
+        mean / downside
+    } else if mean > 0.0 {
+        f64::INFINITY
+    } else {
+        0.0
+    }
 }
 
 /// The producer should publish already-calculated snapshots. `snapshot` must
@@ -237,6 +419,114 @@ impl<S: SnapshotSource> Monitor<S> {
     }
 }
 
+#[cfg(test)]
+mod aggregation_tests {
+    use super::*;
+
+    fn instance(
+        asset: &str,
+        starting: f64,
+        equity: f64,
+        trades: usize,
+        win_rate: f64,
+        rr: f64,
+        rr_trades: usize,
+    ) -> InstanceSnapshot {
+        InstanceSnapshot {
+            strategy_id: "ofmr".into(),
+            asset_id: asset.into(),
+            statistics: Statistics {
+                starting_equity: Some(starting),
+                equity: Some(equity),
+                cash: Some(equity),
+                realized_pnl: Some(equity - starting),
+                unrealized_pnl: Some(0.0),
+                exposure: Some(0.0),
+                trades: Some(trades),
+                win_rate: Some(win_rate),
+                expectancy_rr: Some(rr),
+                expectancy_trades: Some(rr_trades),
+                status: Some("enabled".into()),
+                ..Statistics::default()
+            },
+            equity_history: vec![starting, equity],
+        }
+    }
+
+    #[test]
+    fn aggregates_account_values_and_weights_trade_metrics() {
+        let instances = [
+            instance("btcusdt", 100.0, 110.0, 2, 0.5, 1.0, 2),
+            instance("ethusdt", 200.0, 180.0, 1, 0.0, -2.0, 1),
+        ];
+        let mut history = Vec::new();
+        let mut starting_equity = 0.0;
+        let stats = aggregate_instances(&instances, &mut history, &mut starting_equity);
+        assert_eq!(stats.starting_equity, Some(300.0));
+        assert_eq!(stats.equity, Some(290.0));
+        assert_eq!(stats.absolute_return, Some(-10.0));
+        assert!((stats.cumulative_return.unwrap() + 1.0 / 30.0).abs() < 1e-12);
+        assert_eq!(stats.trades, Some(3));
+        assert!((stats.win_rate.unwrap() - 1.0 / 3.0).abs() < 1e-12);
+        assert_eq!(stats.expectancy_rr, Some(0.0));
+        assert_eq!(history, vec![290.0]);
+        assert_eq!(stats.status.as_deref(), Some("enabled"));
+    }
+
+    #[test]
+    fn aggregate_preserves_worker_operational_telemetry() {
+        let mut item = instance("btcusdt", 100.0, 101.0, 0, 0.0, 0.0, 0);
+        item.statistics.latest_market_data = Some("1792249435161".into());
+        item.statistics.latest_decision = Some("Hold".into());
+        item.statistics.exchange_latency_ms = Some(12.0);
+        item.statistics.processing_latency_ms = Some(0.25);
+        item.statistics.latency_p95_ms = Some(0.4);
+        item.statistics.clock_skew_mean_ms = Some(-3.0);
+        item.statistics.clock_skew_max_ms = Some(5.0);
+        item.statistics.memory_mb = Some(18.0);
+        let mut history = Vec::new();
+        let mut starting_equity = 0.0;
+        let stats = aggregate_instances(&[item], &mut history, &mut starting_equity);
+        assert_eq!(stats.latest_market_data.as_deref(), Some("1792249435161"));
+        assert_eq!(stats.latest_decision.as_deref(), Some("Hold"));
+        assert_eq!(stats.exchange_latency_ms, Some(12.0));
+        assert_eq!(stats.processing_latency_ms, Some(0.25));
+        assert_eq!(stats.latency_p95_ms, Some(0.4));
+        assert_eq!(stats.clock_skew_mean_ms, Some(-3.0));
+        assert_eq!(stats.clock_skew_max_ms, Some(5.0));
+        assert_eq!(stats.memory_mb, Some(18.0));
+    }
+
+    #[test]
+    fn aggregate_drawdown_and_sortino_use_aggregate_curve() {
+        let instances = [instance("btcusdt", 100.0, 90.0, 0, 0.0, 0.0, 0)];
+        let mut history = vec![100.0, 120.0];
+        let mut starting_equity = 100.0;
+        let stats = aggregate_instances(&instances, &mut history, &mut starting_equity);
+        assert_eq!(stats.max_drawdown, Some(0.25));
+        assert!(
+            (stats.sortino.unwrap() - (-0.025 / (0.25_f64.powi(2) / 2.0).sqrt())).abs() < 1e-12
+        );
+    }
+
+    #[test]
+    fn adding_an_instance_rebases_history_without_creating_fake_returns() {
+        let mut history = Vec::new();
+        let mut starting_equity = 0.0;
+        let one = [instance("btcusdt", 100.0, 110.0, 0, 0.0, 0.0, 0)];
+        aggregate_instances(&one, &mut history, &mut starting_equity);
+        let two = [
+            instance("btcusdt", 100.0, 110.0, 0, 0.0, 0.0, 0),
+            instance("ethusdt", 200.0, 200.0, 0, 0.0, 0.0, 0),
+        ];
+        let stats = aggregate_instances(&two, &mut history, &mut starting_equity);
+        assert_eq!(starting_equity, 300.0);
+        assert_eq!(history, vec![310.0, 310.0]);
+        assert_eq!(stats.cumulative_return, Some(10.0 / 300.0));
+        assert_eq!(stats.max_drawdown, Some(0.0));
+    }
+}
+
 fn render(
     frame: &mut Frame<'_>,
     snapshot: &DashboardSnapshot,
@@ -393,12 +683,26 @@ fn metric(name: &str, value: Option<String>) -> String {
 }
 fn number(value: Option<f64>, percent: bool) -> Option<String> {
     value.map(|v| {
-        if percent {
+        if v.is_nan() {
+            "—".to_string()
+        } else if v == f64::INFINITY {
+            "∞".to_string()
+        } else if v == f64::NEG_INFINITY {
+            "−∞".to_string()
+        } else if percent {
             format!("{:.2}%", v * 100.0)
         } else {
             format!("{v:.3}")
         }
     })
+}
+
+fn telemetry_number(value: Option<f64>) -> Option<String> {
+    Some(number(value, false).unwrap_or_else(|| "n/a".to_string()))
+}
+
+fn telemetry_text(value: Option<String>) -> Option<String> {
+    Some(value.unwrap_or_else(|| "n/a".to_string()))
 }
 
 fn render_statistics(
@@ -424,36 +728,51 @@ fn render_statistics(
         metric("Win rate", number(stats.win_rate, true)),
         metric("Status", stats.status.clone()),
         metric("Error", stats.last_error.clone()),
-        metric("Market data", stats.latest_market_data.clone()),
-        metric("Decision", stats.latest_decision.clone()),
-        metric("Strategy ms", number(stats.processing_latency_ms, false)),
+        metric(
+            "Market data",
+            telemetry_text(stats.latest_market_data.clone()),
+        ),
+        metric("Decision", telemetry_text(stats.latest_decision.clone())),
+        metric("Strategy ms", telemetry_number(stats.processing_latency_ms)),
         metric(
             "Exchange→local ms",
-            number(stats.exchange_latency_ms, false),
+            telemetry_number(stats.exchange_latency_ms),
         ),
-        metric("Latency p05 ms", number(stats.latency_p05_ms, false)),
-        metric("Latency p95 ms", number(stats.latency_p95_ms, false)),
-        metric("Latency p99 ms", number(stats.latency_p99_ms, false)),
+        metric("Latency p05 ms", telemetry_number(stats.latency_p05_ms)),
+        metric("Latency p95 ms", telemetry_number(stats.latency_p95_ms)),
+        metric("Latency p99 ms", telemetry_number(stats.latency_p99_ms)),
         metric(
             "Clock skew mean ms",
-            number(stats.clock_skew_mean_ms, false),
+            telemetry_number(stats.clock_skew_mean_ms),
         ),
-        metric("Clock skew max ms", number(stats.clock_skew_max_ms, false)),
+        metric(
+            "Clock skew max ms",
+            telemetry_number(stats.clock_skew_max_ms),
+        ),
         metric(
             "Decision→order ms",
-            number(stats.decision_to_order_ms, false),
+            telemetry_number(stats.decision_to_order_ms),
         ),
-        metric("Order→fill ms", number(stats.order_to_fill_ms, false)),
-        metric("Memory MB", number(stats.memory_mb, false)),
-        metric("CPU %", number(stats.cpu_percent, false)),
+        metric("Order→fill ms", telemetry_number(stats.order_to_fill_ms)),
+        metric("Tick→trade ms", telemetry_number(stats.tick_to_trade_ms)),
+        metric("Memory MB", telemetry_number(stats.memory_mb)),
+        metric("CPU %", telemetry_number(stats.cpu_percent)),
         metric(
             "Persist queue",
-            stats.persistence_queue.map(|v| v.to_string()),
+            Some(
+                stats
+                    .persistence_queue
+                    .map_or_else(|| "n/a".to_string(), |v| v.to_string()),
+            ),
         ),
-        metric("Write ms", number(stats.persistence_write_ms, false)),
+        metric("Write ms", telemetry_number(stats.persistence_write_ms)),
         metric(
             "Storage errors",
-            stats.persistence_errors.map(|v| v.to_string()),
+            Some(
+                stats
+                    .persistence_errors
+                    .map_or_else(|| "n/a".to_string(), |v| v.to_string()),
+            ),
         ),
         metric("Return $", number(stats.absolute_return, false)),
         metric("Trades", stats.trades.map(|v| v.to_string())),
