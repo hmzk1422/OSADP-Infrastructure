@@ -35,5 +35,4 @@ tracing = "0.1"
 # Error handling
 thiserror = "1"
 
-# Local uets_trades crate
-uets_trades = { path = "../uets_trades" }
+

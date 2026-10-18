@@ -23,7 +23,7 @@ pub use persistence::{
     SubmitOutcome,
 };
 pub use schema::{
-    IntegrityReport, OrderEvent, PortfolioRecord, QueryFilter, SchemaVersion, SessionMeta,
-    SessionSummary, StrategyInstance, TradeRecord,
+    IntegrityReport, OrderEvent, OrderStatus, PortfolioRecord, QueryFilter, SchemaVersion,
+    SessionMeta, SessionSummary, StrategyInstance, TradeIntent, TradeRecord,
 };
 pub use store::{DbError, UetsDb};

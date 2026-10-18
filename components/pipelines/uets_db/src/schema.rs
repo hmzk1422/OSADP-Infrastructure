@@ -5,7 +5,27 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use uets_trades::types::{OrderStatus, TradeIntent};
+
+/// Strategy action: what the strategy wants to do.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TradeIntent {
+    Long,
+    Short,
+    Exit,
+    Hold,
+}
+
+/// Order lifecycle status.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum OrderStatus {
+    Submitted,
+    Accepted,
+    PartiallyFilled,
+    Filled,
+    Rejected,
+    Cancelled,
+    Uncertain,
+}
 
 /// Schema version — increment when the record format changes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -193,49 +213,7 @@ impl IntegrityReport {
     }
 }
 
-impl PortfolioRecord {
-    /// Build a portfolio record from a shared `calc` performance snapshot —
-    /// the GUI/database never recompute metrics, they only store what `calc`
-    /// produced.
-    pub fn from_snapshot(
-        session_id: impl Into<String>,
-        snapshot: &uets_trades::calc::metrics::PerformanceSnapshot,
-    ) -> Self {
-        let (strategy_id, asset_id) = match snapshot.strategy_id.split_once('@') {
-            Some((s, a)) => (s.to_string(), a.to_string()),
-            None => (snapshot.strategy_id.clone(), snapshot.asset_id.clone()),
-        };
-        let starting = snapshot.starting_capital;
-        let unrealized = snapshot.unrealized_pnl;
-        let (win_count, loss_count) = (snapshot.wins, snapshot.losses.max(0.0) as usize);
-        Self {
-            schema: SchemaVersion::default(),
-            session_id: session_id.into(),
-            instance: StrategyInstance::new(strategy_id, asset_id.clone()),
-            asset_id,
-            timestamp: snapshot.timestamp,
-            allocated_capital: starting,
-            cash: snapshot.cash,
-            equity: snapshot.equity,
-            realized_pnl: snapshot.realized_pnl,
-            unrealized_pnl: unrealized,
-            cumulative_return: snapshot.cumulative_return,
-            sortino: snapshot.sortino,
-            drawdown: snapshot.current_drawdown,
-            max_drawdown: snapshot.max_drawdown,
-            gross_exposure: snapshot.gross_exposure,
-            net_exposure: snapshot.net_exposure,
-            margin_used: snapshot.margin_used,
-            available_margin: snapshot.available_margin,
-            effective_leverage: snapshot.effective_leverage,
-            fees_paid: snapshot.fees_paid,
-            trade_count: snapshot.trades,
-            win_count,
-            loss_count,
-            win_rate: snapshot.win_rate,
-        }
-    }
-}
+impl PortfolioRecord {}
 
 /// Query filter for retrieving records.
 #[derive(Clone, Debug)]

@@ -14,6 +14,7 @@ use std::process::ExitCode;
 
 use uets::connectors::binance::websocket::{diagnostic, live, monitor, reader};
 use uets::live_strategy::{self, ComputeFeatures, LiveStrategy, StateBuilder};
+use uets_db::{QueryFilter, UetsDb};
 
 /// Default capture directory, `market_data/live_db` at the repo root.
 ///
@@ -132,6 +133,7 @@ fn print_help() {
          \x20                         (default DIR: uets/out/live)\n\
          \x20 strategies               list compiled vs on-disk strategy bundles\n\
          \x20 strategy <strategy>@<asset> run one strategy socket consumer\n\
+         \x20 db [SESSION [STRAT@ASSET]]  inspect live_db contents (trades + portfolio)\n\
          \x20 user-stream             REST listen-key lifecycle (needs API key)\n\
          \x20 user-stream-ws          account/order update stream (needs API key)\n\
          \x20 help                    show this message\n\
@@ -1565,6 +1567,152 @@ mod record_args_tests {
     }
 }
 
+/// `db` inspector: verify live_db contents.
+///
+/// Physical layout: `live_db/trades/<session>/` and
+/// `live_db/portfolio/<session>/` are independent RocksDB instances.
+///
+/// Usage:
+///   dev_test db                      — list all sessions and record counts
+///   dev_test db <SESSION>            — list trades + portfolio for a session
+///   dev_test db <SESSION> <STRAT@ASSET>  — list trades + portfolio for one instance
+fn cmd_db(args: &[String]) -> Result<(), String> {
+    let root: PathBuf = PathBuf::from(default_live_db_dir());
+
+    let session = args.first().map(String::as_str).filter(|s| !s.is_empty());
+    let instance = args.get(1).map(String::as_str).filter(|s| !s.is_empty());
+
+    if let Some((strategy, asset)) = instance.and_then(|i| i.split_once('@')) {
+        // Specific session + instance.
+        let Some(sid) = session else {
+            return Err("usage: dev_test db <SESSION> <STRATEGY@ASSET>".into());
+        };
+        let filter = QueryFilter::new()
+            .session(sid)
+            .strategy(strategy)
+            .asset(asset);
+        let trades_db =
+            UetsDb::open(&root.join("trades").join(sid)).map_err(|e| format!("open trades: {e}"))?;
+        let portfolio_db = UetsDb::open(&root.join("portfolio").join(sid))
+            .map_err(|e| format!("open portfolio: {e}"))?;
+        print_instance(&trades_db, &portfolio_db, sid, &filter)?;
+    } else if let Some(sid) = session {
+        // Whole session: both strategy instances.
+        let filter = QueryFilter::new().session(sid);
+        let trades_db =
+            UetsDb::open(&root.join("trades").join(sid)).map_err(|e| format!("open trades: {e}"))?;
+        let portfolio_db = UetsDb::open(&root.join("portfolio").join(sid))
+            .map_err(|e| format!("open portfolio: {e}"))?;
+        print_session(&trades_db, &portfolio_db, sid, &filter)?;
+    } else {
+        // No args: list all sessions from both stage directories.
+        print_all_sessions(&root)?;
+    }
+
+    Ok(())
+}
+
+fn list_session_dirs(root: &std::path::Path, stage: &str) -> Vec<String> {
+    let stage_dir = root.join(stage);
+    let mut out = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(&stage_dir) {
+        for entry in entries.flatten() {
+            if entry.path().is_dir() {
+                if let Some(name) = entry.file_name().to_str() {
+                    out.push(name.to_string());
+                }
+            }
+        }
+    }
+    out
+}
+
+fn print_all_sessions(root: &std::path::Path) -> Result<(), String> {
+    let trades_sessions = list_session_dirs(root, "trades");
+    let portfolio_sessions = list_session_dirs(root, "portfolio");
+
+    let mut all: std::collections::BTreeSet<String> =
+        trades_sessions.into_iter().collect();
+    all.extend(portfolio_sessions);
+
+    if all.is_empty() {
+        println!("no sessions found");
+        return Ok(());
+    }
+    println!("sessions:");
+    for sid in &all {
+        let trades_db =
+            UetsDb::open(&root.join("trades").join(sid)).map_err(|e| format!("open trades: {e}"))?;
+        let portfolio_db = UetsDb::open(&root.join("portfolio").join(sid))
+            .map_err(|e| format!("open portfolio: {e}"))?;
+        let trades = trades_db
+            .query_trades(&QueryFilter::new().session(sid))
+            .map_err(|e| e.to_string())?
+            .len();
+        let portfolios = portfolio_db
+            .query_portfolio(&QueryFilter::new().session(sid))
+            .map_err(|e| e.to_string())?
+            .len();
+        println!("  {}  trades={} portfolio={}", sid, trades, portfolios);
+    }
+    Ok(())
+}
+
+fn print_session(
+    trades_db: &UetsDb,
+    portfolio_db: &UetsDb,
+    sid: &str,
+    filter: &QueryFilter,
+) -> Result<(), String> {
+    let trades = trades_db.query_trades(filter).map_err(|e| e.to_string())?;
+    let portfolios = portfolio_db.query_portfolio(filter).map_err(|e| e.to_string())?;
+
+    println!("session: {sid}");
+    println!("  trades: {}   portfolio: {}", trades.len(), portfolios.len());
+
+    if !trades.is_empty() {
+        println!("  trades:");
+        for t in &trades {
+            println!(
+                "    t={}  sym={}  strat={}  asset={}  decision={:?}  price={:?}",
+                t.event_time.timestamp_millis(),
+                t.symbol,
+                t.instance.strategy_id,
+                t.instance.asset_id,
+                t.decision,
+                t.entry_price
+            );
+        }
+    }
+
+    if !portfolios.is_empty() {
+        println!("  portfolio:");
+        for p in &portfolios {
+            println!(
+                "    t={}  cash={:.2}  equity={:.2}  realized={:.2}  unrealized={:.2}  dd={:.4}  ret={:.4}",
+                p.timestamp.timestamp_millis(),
+                p.cash,
+                p.equity,
+                p.realized_pnl,
+                p.unrealized_pnl,
+                p.max_drawdown,
+                p.cumulative_return
+            );
+        }
+    }
+
+    Ok(())
+}
+
+fn print_instance(
+    trades_db: &UetsDb,
+    portfolio_db: &UetsDb,
+    sid: &str,
+    filter: &QueryFilter,
+) -> Result<(), String> {
+    print_session(trades_db, portfolio_db, sid, filter)
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let cmd = args.first().map(String::as_str).unwrap_or("help");
@@ -1740,6 +1888,15 @@ fn main() -> ExitCode {
         "user-stream-ws" => {
             println!("note: requires a real API key (edit reader::user_stream_websocket)");
             reader::user_stream_websocket();
+        }
+        "db" => {
+            return match cmd_db(&rest) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(error) => {
+                    eprintln!("db failed: {error}");
+                    return ExitCode::FAILURE;
+                }
+            };
         }
         "help" | "--help" | "-h" => print_help(),
         other => {

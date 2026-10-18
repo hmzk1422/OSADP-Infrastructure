@@ -505,7 +505,7 @@ mod tests {
     };
     use chrono::{TimeZone, Utc};
     use std::sync::atomic::AtomicBool;
-    use uets_trades::types::TradeIntent;
+    use crate::schema::TradeIntent;
 
     fn sample_trade(n: i64) -> TradeRecord {
         TradeRecord {
