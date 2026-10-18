@@ -219,6 +219,8 @@ impl OrderExecutor {
         decision: Decision,
         position: &mut Position,
         price: f64,
+        bid_price: Option<f64>,
+        ask_price: Option<f64>,
     ) -> Result<Vec<Fill>, String> {
         self.last_decision_to_order_ms = None;
         self.last_order_to_fill_ms = None;
@@ -228,6 +230,7 @@ impl OrderExecutor {
         let decision_at = std::time::Instant::now();
         self.sequence = self.sequence.saturating_add(1);
         let client_id = format!("uets-{}-{}", std::process::id(), self.sequence);
+        
         let request = match decision {
             Decision::EnterLong | Decision::EnterShort => {
                 if *position != Position::Flat {
@@ -245,7 +248,22 @@ impl OrderExecutor {
                 } else {
                     Side::Sell
                 };
-                OrderRequest::market(symbol, side, qty).with_client_order_id(client_id)
+
+                // Toggle between Market and Limit (Maker) orders here
+                let use_limit_orders = false; // Change to true if you want limit/maker orders
+
+                if use_limit_orders {
+                    let limit_px = if side == Side::Buy {
+                        bid_price.unwrap_or(price)
+                    } else {
+                        ask_price.unwrap_or(price)
+                    };
+                    OrderRequest::limit(symbol, side, qty, limit_px, 0.01) // Added tick_size: 0.01
+                        .with_client_order_id(client_id)
+                } else {
+                    OrderRequest::market(symbol, side, qty)
+                        .with_client_order_id(client_id)
+                }
             }
             Decision::Exit => {
                 if *position == Position::Flat || self.quantity <= 0.0 {
@@ -262,6 +280,7 @@ impl OrderExecutor {
             }
             Decision::Hold => return Ok(Vec::new()),
         };
+        
         self.last_decision_to_order_ms = Some(decision_at.elapsed().as_secs_f64() * 1_000.0);
         if let Some(connector) = self.connector.as_mut() {
             let order_submitted_at = std::time::Instant::now();
@@ -516,6 +535,24 @@ pub fn run(socket_path: &str, symbol: &str) -> Result<(), String> {
         .unwrap_or(10_000.0);
     let mut account = StrategyAccount::new(starting_equity)?;
     let mut telemetry = StrategyTelemetry::new(symbol, &account);
+    // Live RocksDB link: live_db/<session>/ofmr@<asset>/ with trades/ +
+    // portfolio/ keys. Session comes from the monitor env so every worker
+    // of one `run` shares it; standalone workers mint their own.
+    let session_id = std::env::var("UETS_SESSION_ID")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(crate::live_strategy::live_db::new_session_id);
+    let live_db_root = std::env::var("UETS_LIVE_DB")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| crate::live_strategy::live_db::default_live_db_root());
+    let live_db = crate::live_strategy::live_db::LiveDb::open(
+        &live_db_root,
+        &session_id,
+        "ofmr",
+        symbol,
+    );
+    eprintln!("[strategy] live_db session={session_id} persistence={}",
+        if live_db.enabled() { live_db_root.display().to_string() } else { "disabled".to_string() });
 
     let mut position = Position::Flat;
     let mut active_barriers: Option<ActiveBarriers> = None;
@@ -617,8 +654,38 @@ pub fn run(socket_path: &str, symbol: &str) -> Result<(), String> {
                 ));
             }
             let previous_position = position;
-            let fills = executor.act(symbol, decision, &mut position, price)?;
+            let bid_price = row.get("bid_price");
+            let ask_price = row.get("ask_price");
+            let fills = executor.act(symbol, decision, &mut position, price, bid_price, ask_price)?;
             account.apply_fills_and_mark(&fills, symbol, price);
+            // live_db/trades: what the strategy saw (tick + features +
+            // decision + fills), keyed by ticker/strategy/session. Fail-open.
+            let event_ms = row.get("event_time_ms").map(|v| v as u64);
+            let recv_ms = row.get("received_time_ms").map(|v| v as u64);
+            let fills_json = fills_to_json(&fills);
+            let tick_seq = live_db.next_seq();
+            live_db.record_tick(
+                &row,
+                &state.features,
+                event_ms,
+                recv_ms,
+                &format!("{decision:?}"),
+                &format!("{position:?}"),
+                &fills_json,
+                account.portfolio.ledger().current_equity(),
+                account.portfolio.cash(),
+            );
+            // live_db/portfolio: what the GUI shows. Same seq as the tick.
+            live_db.record_portfolio(portfolio_snapshot(
+                &session_id,
+                symbol,
+                tick_seq,
+                event_ms,
+                price,
+                &account,
+            ));
+            telemetry.persistence_write_ms = Some(live_db.last_write_ms());
+            telemetry.persistence_errors = Some(live_db.error_count());
             if previous_position == Position::Flat && position != Position::Flat {
                 let filled_qty = fills.iter().map(|fill| fill.qty).sum::<f64>();
                 let entry_price = if filled_qty > 0.0 {
@@ -648,6 +715,74 @@ pub fn run(socket_path: &str, symbol: &str) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+#[cfg(unix)]
+fn fills_to_json(fills: &[Fill]) -> String {
+    let items: Vec<String> = fills
+        .iter()
+        .map(|f| {
+            format!(
+                "{{\"order\":\"{}\",\"symbol\":\"{}\",\"side\":\"{}\",\"qty\":{},\"price\":{},\"fee\":{}}}",
+                f.order_id, f.symbol, f.side.as_str(), f.qty, f.price, f.fee
+            )
+        })
+        .collect();
+    format!("[{}]", items.join(","))
+}
+
+#[cfg(unix)]
+fn portfolio_snapshot(
+    session_id: &str,
+    symbol: &str,
+    seq: u64,
+    event_time_ms: Option<u64>,
+    price: f64,
+    account: &StrategyAccount,
+) -> crate::live_strategy::live_db::LivePortfolioSnapshot {
+    use crate::live_strategy::live_db::LivePortfolioSnapshot;
+    let stats = PerformanceStats::from_ledger(account.portfolio.ledger(), 1.0);
+    let asset = symbol.to_ascii_lowercase();
+    // Same marks rule as the GUI telemetry: last mark, else entry price
+    // (which contributes zero unrealized — a stale mark is worse).
+    let marks = std::collections::BTreeMap::from([(
+        asset.clone(),
+        if account.last_mark > 0.0 { account.last_mark } else { price },
+    )]);
+    let portfolio = &account.portfolio;
+    LivePortfolioSnapshot {
+        session_id: session_id.to_string(),
+        strategy_id: "ofmr".to_string(),
+        asset_id: asset.clone(),
+        symbol: symbol.to_ascii_uppercase(),
+        seq,
+        event_time_ms,
+        cash: portfolio.cash(),
+        equity: portfolio.ledger().current_equity(),
+        realized_pnl: portfolio.holdings().realized_pnl(),
+        unrealized_pnl: portfolio.unrealized_pnl(&marks),
+        fees_paid: portfolio.holdings().fees_paid(),
+        gross_exposure: portfolio.gross_exposure(&marks),
+        net_exposure: portfolio.net_exposure(&marks),
+        margin_used: portfolio.margin_used(&marks),
+        available_margin: portfolio.available_margin(&marks),
+        effective_leverage: portfolio.effective_leverage(&marks),
+        r_multiple_sum: account.r_multiple_sum,
+        r_trades: account.r_trades as u64,
+        sortino: stats.sortino,
+        win_rate: if stats.trades > 0 { stats.wins as f64 / stats.trades as f64 } else { 0.0 },
+        cumulative_return: stats.cumulative_return,
+        max_drawdown: stats.max_drawdown,
+        trades: stats.trades,
+        wins: stats.wins,
+        losses: stats.losses,
+        expectancy_rr: if account.r_trades > 0 {
+            account.r_multiple_sum / account.r_trades as f64
+        } else {
+            0.0
+        },
+        mdd: stats.max_drawdown,
+    }
 }
 
 #[cfg(unix)]

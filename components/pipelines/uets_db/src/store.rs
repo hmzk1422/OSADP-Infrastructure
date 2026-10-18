@@ -611,7 +611,7 @@ impl UetsDb {
 mod tests {
     use super::*;
     use crate::schema::{PortfolioRecord, SchemaVersion, SessionSummary, StrategyInstance};
-    use uets_trades::types::TradeIntent;
+    use crate::schema::TradeIntent;
     use chrono::{TimeZone, Utc};
     use std::env;
     use std::fs;

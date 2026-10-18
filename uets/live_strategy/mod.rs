@@ -12,12 +12,14 @@
 //! Flow per row: `compute_feature` first, `state_builder` second, back to
 //! `executor.rs`. Unknown name is a hard error, never a silent hold.
 
+pub mod live_db;
 pub mod ofmr;
 pub mod strategy2;
 pub mod traits;
 
 pub mod runner;
 
+pub use live_db::LiveDb;
 pub use runner::{StrategyRunner, discover_strategy_dirs};
 pub use traits::{ComputeFeatures, LiveStrategy, StateBuilder};
 
