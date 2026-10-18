@@ -219,6 +219,8 @@ impl OrderExecutor {
         decision: Decision,
         position: &mut Position,
         price: f64,
+        bid_price: Option<f64>,
+        ask_price: Option<f64>,
     ) -> Result<Vec<Fill>, String> {
         self.last_decision_to_order_ms = None;
         self.last_order_to_fill_ms = None;
@@ -228,6 +230,7 @@ impl OrderExecutor {
         let decision_at = std::time::Instant::now();
         self.sequence = self.sequence.saturating_add(1);
         let client_id = format!("uets-{}-{}", std::process::id(), self.sequence);
+        
         let request = match decision {
             Decision::EnterLong | Decision::EnterShort => {
                 if *position != Position::Flat {
@@ -245,7 +248,22 @@ impl OrderExecutor {
                 } else {
                     Side::Sell
                 };
-                OrderRequest::market(symbol, side, qty).with_client_order_id(client_id)
+
+                // Toggle between Market and Limit (Maker) orders here
+                let use_limit_orders = false; // Change to true if you want limit/maker orders
+
+                if use_limit_orders {
+                    let limit_px = if side == Side::Buy {
+                        bid_price.unwrap_or(price)
+                    } else {
+                        ask_price.unwrap_or(price)
+                    };
+                    OrderRequest::limit(symbol, side, qty, limit_px, 0.01) // Added tick_size: 0.01
+                        .with_client_order_id(client_id)
+                } else {
+                    OrderRequest::market(symbol, side, qty)
+                        .with_client_order_id(client_id)
+                }
             }
             Decision::Exit => {
                 if *position == Position::Flat || self.quantity <= 0.0 {
@@ -262,6 +280,7 @@ impl OrderExecutor {
             }
             Decision::Hold => return Ok(Vec::new()),
         };
+        
         self.last_decision_to_order_ms = Some(decision_at.elapsed().as_secs_f64() * 1_000.0);
         if let Some(connector) = self.connector.as_mut() {
             let order_submitted_at = std::time::Instant::now();
@@ -635,7 +654,9 @@ pub fn run(socket_path: &str, symbol: &str) -> Result<(), String> {
                 ));
             }
             let previous_position = position;
-            let fills = executor.act(symbol, decision, &mut position, price)?;
+            let bid_price = row.get("bid_price");
+            let ask_price = row.get("ask_price");
+            let fills = executor.act(symbol, decision, &mut position, price, bid_price, ask_price)?;
             account.apply_fills_and_mark(&fills, symbol, price);
             // live_db/trades: what the strategy saw (tick + features +
             // decision + fills), keyed by ticker/strategy/session. Fail-open.

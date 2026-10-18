@@ -35,6 +35,7 @@ rocksdb = { version = "0.22", default-features = false, features = ["lz4"] }
 uets_db = { path = "../components/pipelines/uets_db" }
 uets_gui = { path = "../components/pipelines/uets_gui" }
 libc = "0.2"
+serde_yaml = "0.9.34"
 
 [dev-dependencies]
 tempfile = "3"

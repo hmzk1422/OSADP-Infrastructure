@@ -61,21 +61,32 @@ impl<C: ExecutionConnector + Send + Sync> VenueConnector for UetsExecutionConnec
         request: &OrderRequest,
         now: DateTime<Utc>,
     ) -> Result<Vec<ExecutionEvent>, VenueError> {
-        if request.order_type == OrderType::Limit {
-            return Err(VenueError::Rejected(
-                "the current repository connector contract cannot correlate resting limit orders"
-                    .into(),
-            ));
+        let mut connector_request = match request.order_type {
+            OrderType::Market => ConnectorOrderRequest::market(
+                request.symbol.clone(),
+                match request.side {
+                    OrderSide::Buy => ConnectorSide::Buy,
+                    OrderSide::Sell => ConnectorSide::Sell,
+                },
+                request.qty,
+            ),
+            OrderType::Limit => {
+                let price = request.price.ok_or_else(|| {
+                    VenueError::Rejected("limit order requires a price".into())
+                })?;
+                ConnectorOrderRequest::limit(
+                    request.symbol.clone(),
+                    match request.side {
+                        OrderSide::Buy => ConnectorSide::Buy,
+                        OrderSide::Sell => ConnectorSide::Sell,
+                    },
+                    request.qty,
+                    price,
+                )
+            }
         }
-        let mut connector_request = ConnectorOrderRequest::market(
-            request.symbol.clone(),
-            match request.side {
-                OrderSide::Buy => ConnectorSide::Buy,
-                OrderSide::Sell => ConnectorSide::Sell,
-            },
-            request.qty,
-        )
         .with_client_order_id(request.id.0.clone());
+
         connector_request.time_in_force = match request.time_in_force {
             TimeInForce::Gtc => ConnectorTimeInForce::Gtc,
             TimeInForce::Ioc => ConnectorTimeInForce::Ioc,
@@ -84,6 +95,7 @@ impl<C: ExecutionConnector + Send + Sync> VenueConnector for UetsExecutionConnec
         if request.reduce_only {
             connector_request = connector_request.reducing();
         }
+
         let fills = self
             .connector
             .submit(&connector_request)
@@ -97,43 +109,52 @@ impl<C: ExecutionConnector + Send + Sync> VenueConnector for UetsExecutionConnec
                 }
                 other => VenueError::Transport(other.to_string()),
             })?;
-        if fills.is_empty() {
+
+        // Market orders must fill immediately; limit orders may rest on the book (zero fills).
+        if fills.is_empty() && request.order_type == OrderType::Market {
             return Err(VenueError::Transport(
-                "venue returned no fill; reconcile order state before retry".into(),
+                "venue returned no fill for market order; reconcile order state before retry".into(),
             ));
         }
-        let venue_id = fills[0].order_id.clone();
-        self.venue_order_ids
-            .insert(request.id.clone(), venue_id.as_str().to_string());
+
         let mut events = vec![ExecutionEvent::OrderAccepted {
             order_id: request.id.clone(),
             symbol: request.symbol.clone(),
             at: now,
         }];
-        for fill in fills {
-            if !fill.qty.is_finite()
-                || fill.qty <= 0.0
-                || !fill.price.is_finite()
-                || fill.price <= 0.0
-                || !fill.fee.is_finite()
-            {
-                return Err(VenueError::Transport(
-                    "venue returned invalid fill data; reconciliation is required".into(),
-                ));
+
+        // If fills are returned immediately (market execution or immediate limit cross), record them.
+        if !fills.is_empty() {
+            let venue_id = fills[0].order_id.clone();
+            self.venue_order_ids
+                .insert(request.id.clone(), venue_id.as_str().to_string());
+
+            for fill in fills {
+                if !fill.qty.is_finite()
+                    || fill.qty <= 0.0
+                    || !fill.price.is_finite()
+                    || fill.price <= 0.0
+                    || !fill.fee.is_finite()
+                {
+                    return Err(VenueError::Transport(
+                        "venue returned invalid fill data; reconciliation is required".into(),
+                    ));
+                }
+                events.push(ExecutionEvent::Fill(FillEvent {
+                    order_id: request.id.clone(),
+                    symbol: fill.symbol,
+                    side: match fill.side {
+                        ConnectorSide::Buy => OrderSide::Buy,
+                        ConnectorSide::Sell => OrderSide::Sell,
+                    },
+                    qty: fill.qty,
+                    price: fill.price,
+                    fee: fill.fee,
+                    executed_at: now,
+                }));
             }
-            events.push(ExecutionEvent::Fill(FillEvent {
-                order_id: request.id.clone(),
-                symbol: fill.symbol,
-                side: match fill.side {
-                    ConnectorSide::Buy => OrderSide::Buy,
-                    ConnectorSide::Sell => OrderSide::Sell,
-                },
-                qty: fill.qty,
-                price: fill.price,
-                fee: fill.fee,
-                executed_at: now,
-            }));
         }
+
         Ok(events)
     }
 

@@ -77,7 +77,15 @@ pub trait ExecutionBackend: Send + Sync {
     // decides how each action is handled (simulated vs venue-routed).
 
     /// Go long: submits a market order with the attached barrier.
-    fn long(&mut self, ctx: &ActionContext) -> Result<OrderId, BackendError> {
+    // ---- Strategy action interface (supporting Market & Limit/Maker entries) ----
+
+    /// Go long: submits a Market or Limit (Maker) buy order with the attached triple barrier.
+    fn long(
+        &mut self,
+        ctx: &ActionContext,
+        order_type: OrderType,
+        price: Option<f64>,
+    ) -> Result<OrderId, BackendError> {
         let mut request = OrderRequest::new(
             ctx.order_id.clone(),
             ctx.symbol.clone(),
@@ -86,12 +94,19 @@ pub trait ExecutionBackend: Send + Sync {
             ctx.strategy_id.clone(),
             ctx.asset_id.clone(),
         );
-        request.barrier = ctx.barrier.clone();
+        request.order_type = order_type;
+        request.price = price;
+        request.barrier = ctx.barrier.clone(); // TP above, SL below for long
         self.submit_order(request)
     }
 
-    /// Go short: submits a market order with the attached barrier.
-    fn short(&mut self, ctx: &ActionContext) -> Result<OrderId, BackendError> {
+    /// Go short: submits a Market or Limit (Maker) sell order with the attached triple barrier.
+    fn short(
+        &mut self,
+        ctx: &ActionContext,
+        order_type: OrderType,
+        price: Option<f64>,
+    ) -> Result<OrderId, BackendError> {
         let mut request = OrderRequest::new(
             ctx.order_id.clone(),
             ctx.symbol.clone(),
@@ -100,7 +115,36 @@ pub trait ExecutionBackend: Send + Sync {
             ctx.strategy_id.clone(),
             ctx.asset_id.clone(),
         );
-        request.barrier = ctx.barrier.clone();
+        request.order_type = order_type;
+        request.price = price;
+        request.barrier = ctx.barrier.clone(); // TP below, SL above for short
+        self.submit_order(request)
+    }
+
+    /// Exit the open position for (strategy, symbol): opposite side, full quantity.
+    fn exit(&mut self, ctx: &ActionContext) -> Result<OrderId, BackendError> {
+        let Some(qty) = self.position_qty(&ctx.strategy_id, &ctx.symbol) else {
+            return Err(BackendError::Internal(format!(
+                "no open position to exit for {}/{}",
+                ctx.strategy_id, ctx.symbol
+            )));
+        };
+        if qty == 0.0 {
+            return Err(BackendError::Internal(format!(
+                "no open position to exit for {}/{}",
+                ctx.strategy_id, ctx.symbol
+            )));
+        }
+        let side = if qty > 0.0 { OrderSide::Sell } else { OrderSide::Buy };
+        let request = OrderRequest::new(
+            ctx.order_id.clone(),
+            ctx.symbol.clone(),
+            side,
+            qty.abs(),
+            ctx.strategy_id.clone(),
+            ctx.asset_id.clone(),
+        )
+        .reducing();
         self.submit_order(request)
     }
 

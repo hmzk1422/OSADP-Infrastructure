@@ -6,7 +6,7 @@
 
 model:
   path: "uets/models/ofmr/trader.txt"
-  threshold: 0.20
+  threshold: 0.50
   trade_direction: "long"
 
 feature:
@@ -24,7 +24,7 @@ feature:
   barrier_vol_bar_window: 20
 
 trade:
-  max_position_usd: 100.0
+  max_position_usd: 10000.0
   min_order_size: 0.001
   stop_loss_bps: 5.0
   take_profit_bps: 5.0
