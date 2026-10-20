@@ -7,6 +7,7 @@ pub use router::{ManagerConfig, ManagerRouter};
 pub use venue::{UetsExecutionConnectorAdapter, VenueConnector, VenueError};
 
 use chrono::{DateTime, Utc};
+use serde::Deserialize;
 use std::collections::BTreeMap;
 use uets_trades::backend::{BackendError, ExecutionBackend};
 use uets_trades::live_test::LiveTestBackend;
@@ -29,6 +30,179 @@ pub enum ExecutionMode {
         config: SimConfig,
         acceleration: f64,
     },
+}
+
+/// Errors raised while validating or deserializing execution settings.
+#[derive(Debug, thiserror::Error)]
+pub enum ConfigError {
+    #[error("unknown execution mode: {0}")]
+    UnknownMode(String),
+    #[error("live_trade requires a configured venue router")]
+    LiveTradeMissingRouter,
+    #[error("invalid acceleration: {0}")]
+    InvalidAcceleration(String),
+    #[error("invalid spread_bps: {0}")]
+    InvalidSpreadBps(String),
+    #[error("invalid slippage_bps: {0}")]
+    InvalidSlippageBps(String),
+    #[error("invalid fee_bps: {0}")]
+    InvalidFeeBps(String),
+    #[error("invalid starting_capital: {0}")]
+    InvalidStartingCapital(String),
+    #[error("yaml deserialization failed: {0}")]
+    Yaml(#[from] serde_yaml::Error),
+}
+
+/// Typed execution mode accepted from YAML. Using an enum (rather than a free
+/// string) means typos like `play_back` fail during deserialization with a
+/// normal serde error instead of a runtime panic.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionModeSetting {
+    LiveTest,
+    LiveTrade,
+    Playback,
+}
+
+/// YAML-deserializable execution settings. Mirrors [`ExecutionMode`] variants
+/// but uses only plain data so it can be loaded from `settings.yaml`.
+///
+/// This struct is intended for the `execution:` section of a settings file, not
+/// necessarily the entire file — `#[serde(deny_unknown_fields)]` will reject any
+/// key that does not match a field below. If `settings.yaml` holds other
+/// top-level sections, deserialize a nested `execution` block instead.
+///
+/// Changing `mode` to `playback` (and setting `acceleration`) makes
+/// [`ManagerEngine::from_settings`] build a `PlaybackBackend` that replays
+/// merged Parquet through the same `SimEngine` paper trading uses.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExecutionSettings {
+    /// `live_test`, `live_trade`, or `playback`.
+    pub mode: ExecutionModeSetting,
+    /// Replay speed multiplier (playback only). 1.0 = real time, 100 = 100x.
+    /// Ignored for `live_test` and `live_trade`.
+    #[serde(default = "default_acceleration")]
+    pub acceleration: f64,
+    /// Half-spread applied at execution, in bps.
+    #[serde(default)]
+    pub spread_bps: Option<f64>,
+    /// Adverse slippage applied at execution, in bps.
+    #[serde(default)]
+    pub slippage_bps: Option<f64>,
+    /// Taker fee per fill notional, in bps.
+    #[serde(default)]
+    pub fee_bps: Option<f64>,
+    /// Capital allocated to strategies with no explicit allocation.
+    #[serde(default)]
+    pub starting_capital: Option<f64>,
+}
+
+fn default_acceleration() -> f64 {
+    1.0
+}
+
+impl ExecutionSettings {
+    /// Validate numeric fields and return `Ok(())` when all are within range.
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        if !self.acceleration.is_finite() || self.acceleration <= 0.0 {
+            return Err(ConfigError::InvalidAcceleration(format!(
+                "acceleration must be finite and positive, got {}",
+                self.acceleration
+            )));
+        }
+        if let Some(v) = self.spread_bps {
+            if !v.is_finite() || v < 0.0 {
+                return Err(ConfigError::InvalidSpreadBps(format!(
+                    "spread_bps must be finite and nonnegative, got {v}"
+                )));
+            }
+        }
+        if let Some(v) = self.slippage_bps {
+            if !v.is_finite() || v < 0.0 {
+                return Err(ConfigError::InvalidSlippageBps(format!(
+                    "slippage_bps must be finite and nonnegative, got {v}"
+                )));
+            }
+        }
+        if let Some(v) = self.fee_bps {
+            if !v.is_finite() || v < 0.0 {
+                return Err(ConfigError::InvalidFeeBps(format!(
+                    "fee_bps must be finite and nonnegative, got {v}"
+                )));
+            }
+        }
+        if let Some(v) = self.starting_capital {
+            if !v.is_finite() || v <= 0.0 {
+                return Err(ConfigError::InvalidStartingCapital(format!(
+                    "starting_capital must be finite and positive, got {v}"
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    /// Build the [`ExecutionMode`] for this settings block after validation.
+    ///
+    /// `live_trade` requires `Some(router)`; passing `None` returns
+    /// [`ConfigError::LiveTradeMissingRouter`] rather than silently building an
+    /// unconfigured router that would reject every live order.
+    pub fn into_mode(self, router: Option<ManagerRouter>) -> Result<ExecutionMode, ConfigError> {
+        self.validate()?;
+
+        let mut config = SimConfig::default();
+        if let Some(v) = self.spread_bps {
+            config.spread_bps = v;
+        }
+        if let Some(v) = self.slippage_bps {
+            config.slippage_bps = v;
+        }
+        if let Some(v) = self.fee_bps {
+            config.fee_bps = v;
+        }
+        if let Some(v) = self.starting_capital {
+            config.starting_capital = v;
+        }
+
+        match self.mode {
+            ExecutionModeSetting::LiveTest => Ok(ExecutionMode::LiveTest { config }),
+            ExecutionModeSetting::LiveTrade => {
+                let router = router.ok_or(ConfigError::LiveTradeMissingRouter)?;
+                Ok(ExecutionMode::LiveTrade { router })
+            }
+            ExecutionModeSetting::Playback => Ok(ExecutionMode::Playback {
+                config,
+                acceleration: self.acceleration,
+            }),
+        }
+    }
+
+    /// Load execution settings from a YAML string.
+    pub fn from_yaml_str(yaml: &str) -> Result<Self, ConfigError> {
+        serde_yaml::from_str(yaml).map_err(ConfigError::Yaml)
+    }
+
+    /// Load execution settings from a YAML file.
+    pub fn from_yaml_file(path: &std::path::Path) -> Result<Self, ConfigError> {
+        let contents = std::fs::read_to_string(path).map_err(|e| {
+            ConfigError::Yaml(serde_yaml::Error::custom(e.to_string()))
+        })?;
+        Self::from_yaml_str(&contents)
+    }
+}
+
+impl ManagerEngine {
+    /// Build an engine from YAML-loaded execution settings.
+    ///
+    /// Pass `Some(router)` when `mode` is `live_trade`; otherwise `None` is fine
+    /// (playback / live_test never touch a venue). Returns an error for invalid
+    /// settings or a missing live-trade router.
+    pub fn from_settings(
+        settings: ExecutionSettings,
+        router: Option<ManagerRouter>,
+    ) -> Result<Self, ConfigError> {
+        Ok(Self::new(settings.into_mode(router)?))
+    }
 }
 
 /// Owns the selected backend and exposes the shared trading interface.
@@ -199,5 +373,157 @@ mod tests {
             stale.route(&request(), now),
             Err(RouterError::StaleMarketData { .. })
         ));
+    }
+
+    // ---- ExecutionSettings / ConfigError tests ----
+
+    #[test]
+    fn valid_yaml_selects_live_test() {
+        let yaml = "mode: live_test";
+        let settings = ExecutionSettings::from_yaml_str(yaml).unwrap();
+        assert_eq!(settings.mode, ExecutionModeSetting::LiveTest);
+        assert_eq!(settings.acceleration, 1.0);
+        let mode = settings.into_mode(None).unwrap();
+        assert!(matches!(mode, ExecutionMode::LiveTest { .. }));
+    }
+
+    #[test]
+    fn valid_yaml_selects_live_trade_with_router() {
+        let yaml = "mode: live_trade";
+        let settings = ExecutionSettings::from_yaml_str(yaml).unwrap();
+        let router = ManagerRouter::unconfigured(ManagerConfig::default());
+        let mode = settings.into_mode(Some(router)).unwrap();
+        assert!(matches!(mode, ExecutionMode::LiveTrade { .. }));
+    }
+
+    #[test]
+    fn live_trade_without_router_returns_error() {
+        let yaml = "mode: live_trade";
+        let settings = ExecutionSettings::from_yaml_str(yaml).unwrap();
+        let err = settings.into_mode(None).unwrap_err();
+        assert!(matches!(err, ConfigError::LiveTradeMissingRouter));
+    }
+
+    #[test]
+    fn valid_yaml_selects_playback() {
+        let yaml = "mode: playback\nacceleration: 100";
+        let settings = ExecutionSettings::from_yaml_str(yaml).unwrap();
+        assert_eq!(settings.mode, ExecutionModeSetting::Playback);
+        assert_eq!(settings.acceleration, 100.0);
+        let mode = settings.into_mode(None).unwrap();
+        assert!(matches!(
+            mode,
+            ExecutionMode::Playback {
+                acceleration: 100.0,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn omitted_optional_fields_receive_defaults() {
+        let yaml = "mode: playback";
+        let settings = ExecutionSettings::from_yaml_str(yaml).unwrap();
+        assert_eq!(settings.acceleration, 1.0);
+        assert!(settings.spread_bps.is_none());
+        assert!(settings.slippage_bps.is_none());
+        assert!(settings.fee_bps.is_none());
+        assert!(settings.starting_capital.is_none());
+    }
+
+    #[test]
+    fn sim_config_overrides_reach_selected_backend() {
+        let yaml = "mode: live_test\nspread_bps: 2.5\nslippage_bps: 1.5\nfee_bps: 8.0\nstarting_capital: 50000.0";
+        let settings = ExecutionSettings::from_yaml_str(yaml).unwrap();
+        let mode = settings.into_mode(None).unwrap();
+        match mode {
+            ExecutionMode::LiveTest { config } => {
+                assert_eq!(config.spread_bps, 2.5);
+                assert_eq!(config.slippage_bps, 1.5);
+                assert_eq!(config.fee_bps, 8.0);
+                assert_eq!(config.starting_capital, 50000.0);
+            }
+            _ => panic!("expected LiveTest"),
+        }
+    }
+
+    #[test]
+    fn unknown_mode_deserialization_fails_instead_of_panic() {
+        let yaml = "mode: play_back";
+        let err = ExecutionSettings::from_yaml_str(yaml).unwrap_err();
+        assert!(err.to_string().contains("play_back"));
+    }
+
+    #[test]
+    fn unknown_key_is_rejected() {
+        let yaml = "mode: live_test\nbogus_key: 42";
+        let err = ExecutionSettings::from_yaml_str(yaml).unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("bogus_key") || err.to_string().contains("unknown field"));
+    }
+
+    #[test]
+    fn invalid_acceleration_is_rejected() {
+        let yaml = "mode: playback\nacceleration: 0";
+        let settings = ExecutionSettings::from_yaml_str(yaml).unwrap();
+        let err = settings.into_mode(None).unwrap_err();
+        assert!(matches!(err, ConfigError::InvalidAcceleration(_)));
+    }
+
+    #[test]
+    fn negative_acceleration_is_rejected() {
+        let yaml = "mode: playback\nacceleration: -5";
+        let settings = ExecutionSettings::from_yaml_str(yaml).unwrap();
+        let err = settings.into_mode(None).unwrap_err();
+        assert!(matches!(err, ConfigError::InvalidAcceleration(_)));
+    }
+
+    #[test]
+    fn negative_spread_bps_is_rejected() {
+        let yaml = "mode: live_test\nspread_bps: -1";
+        let settings = ExecutionSettings::from_yaml_str(yaml).unwrap();
+        let err = settings.into_mode(None).unwrap_err();
+        assert!(matches!(err, ConfigError::InvalidSpreadBps(_)));
+    }
+
+    #[test]
+    fn negative_starting_capital_is_rejected() {
+        let yaml = "mode: live_test\nstarting_capital: 0";
+        let settings = ExecutionSettings::from_yaml_str(yaml).unwrap();
+        let err = settings.into_mode(None).unwrap_err();
+        assert!(matches!(err, ConfigError::InvalidStartingCapital(_)));
+    }
+
+    #[test]
+    fn negative_fee_bps_is_rejected() {
+        let yaml = "mode: live_test\nfee_bps: -0.5";
+        let settings = ExecutionSettings::from_yaml_str(yaml).unwrap();
+        let err = settings.into_mode(None).unwrap_err();
+        assert!(matches!(err, ConfigError::InvalidFeeBps(_)));
+    }
+
+    #[test]
+    fn from_settings_returns_result_for_live_trade_missing_router() {
+        let yaml = "mode: live_trade";
+        let settings = ExecutionSettings::from_yaml_str(yaml).unwrap();
+        let err = ManagerEngine::from_settings(settings, None).unwrap_err();
+        assert!(matches!(err, ConfigError::LiveTradeMissingRouter));
+    }
+
+    #[test]
+    fn from_settings_succeeds_for_playback_without_router() {
+        let yaml = "mode: playback\nacceleration: 10";
+        let settings = ExecutionSettings::from_yaml_str(yaml).unwrap();
+        let engine = ManagerEngine::from_settings(settings, None).unwrap();
+        assert_eq!(engine.acceleration(), 10.0);
+    }
+
+    #[test]
+    fn from_settings_succeeds_for_live_test_without_router() {
+        let yaml = "mode: live_test";
+        let settings = ExecutionSettings::from_yaml_str(yaml).unwrap();
+        let engine = ManagerEngine::from_settings(settings, None).unwrap();
+        assert_eq!(engine.acceleration(), 1.0);
     }
 }
