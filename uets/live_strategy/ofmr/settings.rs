@@ -25,6 +25,12 @@ pub struct ModelSettings {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct FeatureSettings {
+    /// Macro grid: seconds per higher-timeframe bar. Mirrors research
+    /// `BAR_FREQ = f"{timeframe_barrier_secs}s"` (config/portfolio.json).
+    pub htf_timeframe_secs: u64,
+    /// Micro grid: seconds per lower-timeframe bar. Mirrors research
+    /// `micro_barrier_secs` (the 1-second decision grid).
+    pub ltf_timeframe_secs: u64,
     pub rsi_14_window: usize,
     pub rsi_2_window: usize,
     pub sma_14_window: usize,
@@ -47,6 +53,12 @@ pub struct TradeSettings {
     pub max_hold_seconds: u64,
     pub lockout_seconds: f64,
     pub max_trades_per_hour: u32,
+    /// Fixed stop-loss width, in basis points of entry price (mirrors
+    /// `config.py` `STOP_LOSS_BPS` / `config/portfolio.json`).
+    pub stop_loss_bps: f64,
+    /// Fixed take-profit width, in basis points of entry price (mirrors
+    /// `config.py` `TAKE_PROFIT_BPS` / `config/portfolio.json`).
+    pub take_profit_bps: f64,
 }
 
 impl Default for Settings {
@@ -59,6 +71,7 @@ impl Default for ModelSettings {
 }
 impl Default for FeatureSettings {
     fn default() -> Self { Self {
+        htf_timeframe_secs: 300, ltf_timeframe_secs: 1,
         rsi_14_window: 14, rsi_2_window: 2, sma_14_window: 14, ma_slope_window: 5,
         price_roc_window_3: 3, price_roc_window_5: 5, rsi_z_window: 20,
         deeplob_z_window: 10, orderflow_z_window: 10, rsi_roc_window_3: 3,
@@ -70,6 +83,8 @@ impl Default for TradeSettings {
         max_position_usd: 10_000.0, min_order_size: 0.001,
         max_hold_seconds: 300, lockout_seconds: 1000.0,
         max_trades_per_hour: 300,
+        stop_loss_bps: 5.0,
+        take_profit_bps: 5.0,
     } }
 }
 
@@ -112,6 +127,14 @@ impl Settings {
     }
 
     pub fn validate(&self) -> Result<(), String> {
+        if self.feature.htf_timeframe_secs == 0 { return Err("feature.htf_timeframe_secs must be > 0".into()); }
+        if self.feature.ltf_timeframe_secs == 0 { return Err("feature.ltf_timeframe_secs must be > 0".into()); }
+        if self.feature.ltf_timeframe_secs > self.feature.htf_timeframe_secs {
+            return Err(format!(
+                "feature.ltf_timeframe_secs ({}) must be <= feature.htf_timeframe_secs ({})",
+                self.feature.ltf_timeframe_secs, self.feature.htf_timeframe_secs
+            ));
+        }
         let positive_windows = [
             ("feature.rsi_14_window", self.feature.rsi_14_window),
             ("feature.rsi_2_window", self.feature.rsi_2_window),
@@ -159,6 +182,8 @@ model:
   threshold: 0.50
   trade_direction: "long"
 feature:
+  htf_timeframe_secs: 300
+  ltf_timeframe_secs: 1
   rsi_14_window: 14
   rsi_2_window: 2
   sma_14_window: 14

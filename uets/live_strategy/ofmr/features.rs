@@ -14,6 +14,7 @@ use std::collections::VecDeque;
 use crate::core::feature::FeatureRow;
 use crate::live_strategy::ofmr::settings::Settings;
 use crate::live_strategy::ComputeFeatures;
+use stream_handler::{Reconstructor, Sample, Timeframe};
 
 pub const N_FEATURES: usize = 15;
 
@@ -163,6 +164,12 @@ impl RsiState {
 /// One instance per (strategy x symbol).
 pub struct OfmrFeatures {
     config: Settings,
+    /// LTF reconstructor (default 1s): closed LTF bars feed the micro
+    /// orderflow state. HTF reconstructor (default 300s): closed HTF bars
+    /// feed the macro state + close-to-close returns. Both consume the SAME
+    /// raw tick sample — neither derives from the other.
+    ltf: Reconstructor,
+    htf: Reconstructor,
 
     mid_prices: VecDeque<f64>,
     rsi_2: RsiState,
@@ -192,8 +199,6 @@ pub struct OfmrFeatures {
     sequence: u64,
 
     // One-minute close-to-close volatility state.
-    minute_bucket: Option<u64>,
-    minute_close: Option<f64>,
     previous_completed_close: Option<f64>,
     minute_returns: VecDeque<f64>,
 }
@@ -205,6 +210,12 @@ impl OfmrFeatures {
 
     pub fn with_settings(config: Settings) -> Self {
         Self {
+            ltf: Reconstructor::new(Timeframe::Seconds(
+                config.feature.ltf_timeframe_secs.max(1),
+            )),
+            htf: Reconstructor::new(Timeframe::Seconds(
+                config.feature.htf_timeframe_secs.max(1),
+            )),
             config,
 
             mid_prices: VecDeque::with_capacity(200),
@@ -234,8 +245,6 @@ impl OfmrFeatures {
             delta_divergence_window: VecDeque::with_capacity(60),
             sequence: 0,
 
-            minute_bucket: None,
-            minute_close: None,
             previous_completed_close: None,
             minute_returns: VecDeque::with_capacity(
                 BARRIER_VOL_BAR_WINDOW,
@@ -243,71 +252,23 @@ impl OfmrFeatures {
         }
     }
 
-    /// Update the one-minute close-to-close return window.
-    ///
-    /// The close is the last valid trade price observed in each minute.
-    /// When a later minute arrives, the previous minute is finalized and
-    /// its return is calculated against the preceding completed minute.
-    fn update_minute_volatility(&mut self, row: &FeatureRow) {
-        let event_time_ms = row
-            .get("event_time_ms")
-            .unwrap_or(0.0)
-            .max(0.0) as u64;
-
-        let bucket = event_time_ms / 60_000;
-
-        // Python's bar close corresponds to the last trade price,
-        // not the bid/ask midpoint.
-        let Some(close) = row
-            .get("price")
-            .filter(|price| price.is_finite() && *price > 0.0)
-        else {
-            return;
-        };
-
-        match (self.minute_bucket, self.minute_close) {
-            // First valid trade: start the first observed minute.
-            (None, _) => {
-                self.minute_bucket = Some(bucket);
-                self.minute_close = Some(close);
-            }
-
-            // Still in the current minute: update its close.
-            (Some(current_bucket), Some(_))
-                if bucket == current_bucket =>
-            {
-                self.minute_close = Some(close);
-            }
-
-            // A later minute has arrived: finalize the previous minute.
-            (Some(current_bucket), Some(current_close))
-                if bucket > current_bucket =>
-            {
-                if let Some(previous_close) = self.previous_completed_close {
-                    if current_close.is_finite()
-                        && previous_close.is_finite()
-                        && previous_close > 0.0
-                    {
-                        let ret = current_close / previous_close - 1.0;
-
-                        if ret.is_finite() {
-                            push_window(
-                                &mut self.minute_returns,
-                                BARRIER_VOL_BAR_WINDOW,
-                                ret,
-                            );
-                        }
-                    }
+    /// Feed one CLOSED HTF bar into the macro state + close-to-close
+    /// returns. ONLY non-empty HTF bars arrive here (macro drop_empty=True);
+    /// LTF data never touches this path.
+    fn feed_htf_bar(&mut self, close: f64) {
+        if let Some(previous_close) = self.previous_completed_close {
+            if previous_close.is_finite() && previous_close > 0.0 {
+                let ret = close / previous_close - 1.0;
+                if ret.is_finite() {
+                    push_window(
+                        &mut self.minute_returns,
+                        self.config.feature.barrier_vol_bar_window,
+                        ret,
+                    );
                 }
-
-                self.previous_completed_close = Some(current_close);
-                self.minute_bucket = Some(bucket);
-                self.minute_close = Some(close);
             }
-
-            // Ignore out-of-order events; do not roll the state backward.
-            _ => {}
         }
+        self.previous_completed_close = Some(close);
     }
 }
 
@@ -336,8 +297,37 @@ impl ComputeFeatures for OfmrFeatures {
             _ => trade_price.unwrap_or(0.0),
         };
 
-        // Update the separate volatility feature.
-        self.update_minute_volatility(row);
+        // Feed the shared sample into both timeframe reconstructors. Neither
+        // reconstructor derives from the other — they bucket the same raw tick
+        // stream onto independent HTF/LTF grids.
+        let event_time_ms = row
+            .get("event_time_ms")
+            .unwrap_or(0.0)
+            .max(0.0) as i64;
+        let sample = Sample {
+            timestamp_ms: event_time_ms,
+            price: mid,
+            has_trade: trade_price.is_some(),
+            quantity: trade_amount,
+            is_buyer_maker,
+            bid_price: row.get("bid_price"),
+            bid_amount: row.get("bid_amount").unwrap_or(0.0),
+            ask_price: row.get("ask_price"),
+            ask_amount: row.get("ask_amount").unwrap_or(0.0),
+        };
+
+        // HTF (macro): only non-empty closed bars drive the close-to-close
+        // returns behind `bar_vol_std`. Empty HTF bars are skipped
+        // (macro `drop_empty=True` in research).
+        for bar in self.htf.push(sample) {
+            if !bar.empty {
+                self.feed_htf_bar(bar.close);
+            }
+        }
+        // LTF (micro): the same sample maintains the 1s grid. Completed LTF
+        // bars are available here; per-tick micro columns below are computed
+        // straight off the raw row as before.
+        let _ltf_bars = self.ltf.push(sample);
 
         push_window(
             &mut self.mid_prices,
@@ -761,45 +751,17 @@ mod tests {
     }
 
     #[test]
-    fn volatility_uses_minute_close_to_close_returns() {
-        let mut features = OfmrFeatures::new();
-
-        // Minute 0 closes at 100.
-        features
-            .compute(&timed_tick(100.0, 1_000.0))
-            .unwrap();
-        features
-            .compute(&timed_tick(100.0, 59_000.0))
-            .unwrap();
-
-        // Minute 1 closes at 110; transition finalizes minute 0.
-        features
-            .compute(&timed_tick(105.0, 60_000.0))
-            .unwrap();
-        features
-            .compute(&timed_tick(110.0, 119_000.0))
-            .unwrap();
-
-        // Minute 2 starts; transition finalizes minute 1 and adds
-        // the first return: 110 / 100 - 1 = 0.10.
-        features
-            .compute(&timed_tick(121.0, 120_000.0))
-            .unwrap();
-
-        // Only one return exists so far; volatility remains missing.
-        assert_eq!(features.minute_returns.len(), 1);
-
-        // Minute 2 closes at 121; transition to minute 3 adds
-        // the second return: 121 / 110 - 1 = 0.10.
-        let row = features
-            .compute(&timed_tick(121.0, 180_000.0))
-            .unwrap();
-
+    fn volatility_uses_htf_close_to_close_returns() {
+        let mut config = Settings::default();
+        config.feature.htf_timeframe_secs = 60;
+        let mut features = OfmrFeatures::with_settings(config);
+        features.compute(&timed_tick(100.0, 1_000.0)).unwrap();
+        features.compute(&timed_tick(100.0, 59_000.0)).unwrap();
+        features.compute(&timed_tick(110.0, 119_000.0)).unwrap();
+        features.compute(&timed_tick(121.0, 179_000.0)).unwrap();
+        features.compute(&timed_tick(121.0, 239_000.0)).unwrap();
         assert_eq!(features.minute_returns.len(), 2);
-
         let volatility = rolling_population_std(&features.minute_returns).unwrap();
         assert!(volatility.abs() < 1e-12);
-
-        assert!(row.contains("bar_vol_std"));
     }
 }

@@ -59,7 +59,7 @@ fn core_never_imports_a_connector_or_a_wire_transport() {
         "use binance::",
         "tungstenite",
         "wss://",
-        "event_merger_live",
+        "stream_handler",
     ];
     let mut files = Vec::new();
     core_sources(&core_dir(), &mut files);

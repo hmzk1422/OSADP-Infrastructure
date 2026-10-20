@@ -356,6 +356,12 @@ struct StrategyAccount {
     entry_fees: f64,
     sequence: u64,
     entry_risk_per_unit: Option<f64>,
+    /// Absolute stop-loss price of the open position (if any), used for the
+    /// GUI stop-loss % readout.
+    stop_price: Option<f64>,
+    /// Absolute take-profit price of the open position (if any), used for the
+    /// GUI take-profit % readout.
+    target_price: Option<f64>,
     r_multiple_sum: f64,
     r_trades: usize,
     last_mark: f64,
@@ -372,6 +378,8 @@ impl StrategyAccount {
             entry_fees: 0.0,
             sequence: 0,
             entry_risk_per_unit: None,
+            stop_price: None,
+            target_price: None,
             r_multiple_sum: 0.0,
             r_trades: 0,
             last_mark: 0.0,
@@ -700,8 +708,13 @@ pub fn run(socket_path: &str, symbol: &str) -> Result<(), String> {
                     target_fraction,
                 ));
                 account.entry_risk_per_unit = Some(entry_price * stop_fraction);
+                let barriers = active_barriers.as_ref().unwrap();
+                account.stop_price = Some(barriers.stop_price);
+                account.target_price = Some(barriers.target_price);
             } else if position == Position::Flat {
                 active_barriers = None;
+                account.stop_price = None;
+                account.target_price = None;
             }
             let processing_ns = started.elapsed().as_nanos().min(u64::MAX as u128) as u64;
             telemetry.publish(
@@ -942,6 +955,22 @@ impl StrategyTelemetry {
             .unwrap_or(account.portfolio.starting_cash());
         let stats = PerformanceStats::from_ledger(account.portfolio.ledger(), 1.0);
         let holding = account.portfolio.holdings().holding(&self.symbol);
+        let entry = holding.avg_entry;
+        let position_open = !holding.is_flat() && entry > 0.0;
+        let mark = if account.last_mark > 0.0 {
+            account.last_mark
+        } else {
+            entry
+        };
+        let (stop_loss_pct, take_profit_pct, price_vs_entry_pct) = if position_open {
+            (
+                account.stop_price.map(|stop| (entry - stop).abs() / entry * 100.0),
+                account.target_price.map(|target| (target - entry).abs() / entry * 100.0),
+                Some((mark - entry) / entry * 100.0),
+            )
+        } else {
+            (None, None, None)
+        };
         let marks = std::collections::BTreeMap::from([(
             self.symbol.clone(),
             if account.last_mark > 0.0 {
@@ -968,6 +997,9 @@ impl StrategyTelemetry {
             "unrealized_pnl": unrealized_pnl,
             "exposure": account.portfolio.gross_exposure(&marks),
             "open_positions": if holding.is_flat() { 0 } else { 1 },
+            "stop_loss_pct": stop_loss_pct,
+            "take_profit_pct": take_profit_pct,
+            "price_vs_entry_pct": price_vs_entry_pct,
             "trades": stats.trades,
             "win_rate": stats.win_rate,
             "sortino": sortino,

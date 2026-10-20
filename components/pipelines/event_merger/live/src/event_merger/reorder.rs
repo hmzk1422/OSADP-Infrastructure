@@ -20,7 +20,7 @@
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 
-use crate::event::MarketEvent;
+use super::event::MarketEvent;
 
 /// Total order over events.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -177,7 +177,7 @@ impl ReorderBuffer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::event::{DiffFrame, Source, Trade};
+    use super::super::event::{DiffFrame, Source, Trade};
 
     fn trade(ts: i64, id: u64) -> MarketEvent {
         MarketEvent::Trade(Trade {

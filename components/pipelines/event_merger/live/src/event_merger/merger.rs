@@ -4,10 +4,10 @@
 //! Binance's wire format, and of Arrow/Parquet, so the same code path serves a
 //! live capture today and a recorded-feed backtest later.
 
-use crate::book::{price_to_tick, tick_to_price, PriceTick};
-use crate::event::{BookSnapshot, MarketEvent, Source, Trade};
-use crate::row::FieldWriter;
-use crate::state::{BookHealth, Counters, State};
+use super::book::{price_to_tick, tick_to_price, PriceTick};
+use super::event::{BookSnapshot, MarketEvent, Source, Trade};
+use super::row::FieldWriter;
+use super::state::{BookHealth, Counters, State};
 
 /// One canonical row.
 ///

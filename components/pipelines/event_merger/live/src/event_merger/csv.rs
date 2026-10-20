@@ -7,7 +7,7 @@
 //!
 //! # Byte-for-byte schema compatibility
 //!
-//! The header is [`crate::row::schema`] and the field order is produced by
+//! The header is [`crate::schema`] and the field order is produced by
 //! [`Merger::write_row`], the same emitter the historical pipeline uses. That
 //! is the point: a live capture and a historical merge are readable by one
 //! feature spec with no column remapping. Every row is checked against the
@@ -31,8 +31,8 @@ use std::fs::{File, OpenOptions};
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
-use crate::merger::{CanonicalRow, Merger};
-use crate::row::{schema, FieldWriter, FIELD_COUNT};
+use super::merger::{CanonicalRow, Merger};
+use super::row::{schema, FieldWriter, FIELD_COUNT};
 
 /// Why a row could not be written.
 #[derive(Debug)]
@@ -231,7 +231,7 @@ pub fn header_line() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::event::{BookSnapshot, BookUpdate, DiffFrame, MarketEvent, Trade};
+    use super::super::event::{BookSnapshot, BookUpdate, DiffFrame, MarketEvent, Trade};
     use crate::DEFAULT_LEVELS;
 
     fn temp_path(name: &str) -> PathBuf {
