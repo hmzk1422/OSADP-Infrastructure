@@ -9,5 +9,7 @@ crate-type = ["rlib"]
 [dependencies]
 chrono = { version = "0.4", features = ["serde"] }
 thiserror = "1"
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
 uets = { path = "../../../uets" }
 uets_trades = { path = "../uets_trades" }
