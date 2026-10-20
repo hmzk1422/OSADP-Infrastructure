@@ -547,7 +547,7 @@ mod record {
     use std::sync::{Arc, Mutex};
     use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-    use event_merger_live::{BookSnapshot, CsvRecorder, MarketEvent, Merger, ReorderBuffer};
+    use stream_handler::{BookSnapshot, CsvRecorder, MarketEvent, Merger, ReorderBuffer};
     use tungstenite::{Message, connect};
 
     use super::live;
@@ -960,7 +960,7 @@ mod record {
 
         eprintln!("[capture] output   {}", config.output.display());
         eprintln!("[capture] symbol   {}", config.symbol);
-        eprintln!("[capture] columns  {}", event_merger_live::schema().len());
+        eprintln!("[capture] columns  {}", stream_handler::schema().len());
 
         let max_rows = config.max_rows;
 
@@ -1115,7 +1115,7 @@ mod record {
     #[cfg(test)]
     mod tests {
         use super::*;
-        use event_merger_live::schema;
+        use stream_handler::schema;
 
         fn temp(name: &str) -> std::path::PathBuf {
             let mut p = std::env::temp_dir();

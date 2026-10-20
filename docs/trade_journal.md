@@ -29,7 +29,7 @@ Possibility of edge decay (unproven, still running). Strategy suffers from terri
 - MoE system with underlying strategy using VQ-VAE to act as OOD filter. Still utilizes OFMR with each expert trained specifically for certain latent space. Use this as a method of trading only in markets we know.
 - Optimize strategy with objective of both sortino and trade expectancy in mind. Use improved data source, restart OFMR research over strategy. Not for solving edge, but rather solving for managing non-stationarity problem.
 
-# Testing with OOD and MoE system (1 Oct 2026 - 14 Oct 2026)
+# Testing with OOD and MoE system (25 sept 2026 - 14 Oct 2026)
 After 2 weeks of testing OOD system, we figured out that similarity regimes don't necessarily equate to edge.
 - Running a naive strategy inside of a huge sample of brute-forced regimes returning high similarity scores (temporally and geometrically) along with TDMI failed to yield any meaningful result with edge expectancy.
     - Possible reasons of failure includes: Forced overfitting. Using GPLearn for regime separation and running the model might've meant the similarity meant nothing where the point of similarity being contrasted here is meaningless. For example, a strategy that profits from volatility means nothing if the current regime is 99% similar with high volatility regime in terms of price direction, orderflow, etc but not volatility prediction. In simple words, OOD only identified similarity in variables that yield no economical meaning with GPLearn.

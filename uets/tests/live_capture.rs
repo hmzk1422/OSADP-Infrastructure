@@ -194,7 +194,7 @@ fn cadence(table: &Table, event_type: &str) -> Option<Cadence> {
 
 #[test]
 fn live_schema_is_128_unique_columns_starting_with_timestamp() {
-    let schema = event_merger_live::schema();
+    let schema = stream_handler::schema();
     assert_eq!(schema.len(), 128, "the merged table is 128 columns wide");
     assert_eq!(schema[0], "timestamp");
     assert_eq!(schema[1], "event_type");
@@ -222,7 +222,7 @@ fn live_schema_matches_the_historical_matched_header() {
         table.header[0]
     );
     let historical: Vec<&str> = table.header[1..].iter().map(String::as_str).collect();
-    let live: &[&str] = event_merger_live::schema();
+    let live: &[&str] = stream_handler::schema();
 
     assert_eq!(
         live.len(),
@@ -483,12 +483,12 @@ fn live_capture_holds_100ms_cadence_and_reports_its_losses() {
         128,
         "capture emitted {} columns, schema has {}",
         table.header.len(),
-        event_merger_live::schema().len()
+        stream_handler::schema().len()
     );
     for (i, (got, want)) in table
         .header
         .iter()
-        .zip(event_merger_live::schema().iter())
+        .zip(stream_handler::schema().iter())
         .enumerate()
     {
         assert_eq!(

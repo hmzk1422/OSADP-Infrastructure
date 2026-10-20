@@ -2,7 +2,7 @@
 //!
 //! This is the module that makes `executor.rs` produce the merged table. It is
 //! the only place that knows about Binance's wire format *and* about writing
-//! files; `event_merger_live` stays free of both, and `core::feature` stays free
+//! files; `stream_handler` stays free of both, and `core::feature` stays free
 //! of both, so each piece remains independently testable.
 //!
 //! ```text
@@ -35,7 +35,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use serde_json::Value;
 use tungstenite::{Message, connect};
 
-use event_merger_live::{
+use stream_handler::{
     BookSnapshot, CsvRecorder, DEFAULT_LATENESS_MS, DEFAULT_LEVELS, DiffFrame, MarketEvent, Merger,
     ReorderBuffer, Trade,
 };
@@ -219,8 +219,8 @@ fn strategy_frame(
         .ok_or_else(|| "best ask unavailable".to_string())?;
     let mut payload = format!(
         "event_time_ms:{event_time_ms}\nreceived_time_ms:{received_time_ms}\npersistence_write_ms:{persistence_write_ms}\npersistence_errors:{persistence_errors}\npersistence_queue:{persistence_queue}\nbid_price:{}\nbid_qty:{bid_qty}\nask_price:{}\nask_qty:{ask_qty}\n",
-        event_merger_live::tick_to_price(bid_tick),
-        event_merger_live::tick_to_price(ask_tick),
+        stream_handler::tick_to_price(bid_tick),
+        stream_handler::tick_to_price(ask_tick),
     );
     if let Some(trade) = trade {
         payload.push_str(&format!(
@@ -474,7 +474,7 @@ pub fn parse_diff(text: &str) -> Option<MarketEvent> {
             let (Some(price), Some(quantity)) = (num(pair.first()), num(pair.get(1))) else {
                 continue;
             };
-            updates.push(event_merger_live::BookUpdate {
+            updates.push(stream_handler::BookUpdate {
                 is_bid,
                 price,
                 quantity,
@@ -517,7 +517,7 @@ pub fn run_capture(config: CaptureConfig) -> Result<(), String> {
 
     eprintln!("[capture] output   {}", config.output.display());
     eprintln!("[capture] symbol   {}", config.symbol);
-    eprintln!("[capture] columns  {}", event_merger_live::schema().len());
+    eprintln!("[capture] columns  {}", stream_handler::schema().len());
 
     let capture = Arc::new(Mutex::new(Capture {
         merger: Merger::new(config.levels),
@@ -800,7 +800,7 @@ mod end_to_end {
     use crate::core::feature::{
         CanonicalIntegers, CanonicalTop, CanonicalValues, row_from_canonical,
     };
-    use event_merger_live::schema;
+    use stream_handler::schema;
 
     /// Drive real wire frames through the whole pipeline, offline.
     ///

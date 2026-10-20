@@ -515,10 +515,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0206175f82b8d6bf6652ff7d71a1e27fd2e4efde587fd368662814d6ec1d9ce0"
 
 [[package]]
-name = "event_merger_live"
-version = "0.1.0"
-
-[[package]]
 name = "fastrand"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1811,6 +1807,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
+name = "stream_handler"
+version = "0.1.0"
+
+[[package]]
 name = "strsim"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2079,13 +2079,13 @@ dependencies = [
  "binance",
  "bincode",
  "chrono",
- "event_merger_live",
  "libc",
  "pyo3",
  "rocksdb",
  "serde",
  "serde_json",
  "serde_yaml",
+ "stream_handler",
  "tempfile",
  "tungstenite",
  "uets_db",

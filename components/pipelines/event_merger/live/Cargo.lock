@@ -3,5 +3,5 @@
 version = 4
 
 [[package]]
-name = "event_merger_live"
+name = "stream_handler"
 version = "0.1.0"

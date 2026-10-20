@@ -10,6 +10,8 @@ model:
   trade_direction: "long"
 
 feature:
+  htf_timeframe_secs: 300   # macro grid: BAR_FREQ = timeframe_barrier_secs
+  ltf_timeframe_secs: 1     # micro grid: 1-second decision rows
   rsi_14_window: 14
   rsi_2_window: 2
   sma_14_window: 14

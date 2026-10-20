@@ -33,6 +33,9 @@ pub struct Statistics {
     pub unrealized_pnl: Option<f64>,
     pub trades: Option<usize>,
     pub open_positions: Option<usize>,
+    pub stop_loss_pct: Option<f64>,
+    pub take_profit_pct: Option<f64>,
+    pub price_vs_entry_pct: Option<f64>,
     pub win_rate: Option<f64>,
     pub exposure: Option<f64>,
     pub status: Option<String>,
@@ -217,6 +220,12 @@ pub fn aggregate_instances(
     aggregate.persistence_write_ms = mean(|s| s.persistence_write_ms);
     aggregate.persistence_queue = eligible.iter().filter_map(|i| i.statistics.persistence_queue).max();
     aggregate.persistence_errors = eligible.iter().filter_map(|i| i.statistics.persistence_errors).reduce(|a, b| a.saturating_add(b));
+    // Bracket and mark-to-entry telemetry is per position; surface the mean
+    // across workers holding a position instead of dropping it in the
+    // aggregate view.
+    aggregate.stop_loss_pct = mean(|s| s.stop_loss_pct);
+    aggregate.take_profit_pct = mean(|s| s.take_profit_pct);
+    aggregate.price_vs_entry_pct = mean(|s| s.price_vs_entry_pct);
     aggregate
 }
 
@@ -525,6 +534,80 @@ mod aggregation_tests {
         assert_eq!(stats.cumulative_return, Some(10.0 / 300.0));
         assert_eq!(stats.max_drawdown, Some(0.0));
     }
+    #[test]
+    fn statistics_serializes_stop_loss_take_profit_and_price_vs_entry_pct() {
+        let stats = Statistics {
+            stop_loss_pct: Some(0.5),
+            take_profit_pct: Some(1.0),
+            price_vs_entry_pct: Some(2.5),
+            ..Statistics::default()
+        };
+        let json = serde_json::to_string(&stats).unwrap();
+        let back: Statistics = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.stop_loss_pct, Some(0.5));
+        assert_eq!(back.take_profit_pct, Some(1.0));
+        assert_eq!(back.price_vs_entry_pct, Some(2.5));
+
+        // Older payloads without the new keys deserialize to None.
+        let back: Statistics = serde_json::from_str("{}" ).unwrap();
+        assert_eq!(back.stop_loss_pct, None);
+        assert_eq!(back.take_profit_pct, None);
+        assert_eq!(back.price_vs_entry_pct, None);
+    }
+
+    #[test]
+    fn aggregate_preserves_stop_loss_take_profit_and_price_vs_entry_pct() {
+        let mut first = instance("btcusdt", 100.0, 101.0, 0, 0.0, 0.0, 0);
+        first.statistics.stop_loss_pct = Some(0.4);
+        first.statistics.take_profit_pct = Some(0.8);
+        first.statistics.price_vs_entry_pct = Some(2.0);
+        let mut second = instance("ethusdt", 100.0, 100.0, 0, 0.0, 0.0, 0);
+        second.statistics.stop_loss_pct = Some(0.6);
+        second.statistics.take_profit_pct = Some(1.2);
+        second.statistics.price_vs_entry_pct = Some(-1.0);
+        // Instances without an open position report None and are skipped.
+        let third = instance("solusdt", 100.0, 100.0, 0, 0.0, 0.0, 0);
+        let instances = [first, second, third];
+        let mut history = Vec::new();
+        let mut starting_equity = 0.0;
+        let stats = aggregate_instances(&instances, &mut history, &mut starting_equity);
+        assert!((stats.stop_loss_pct.unwrap() - 0.5).abs() < 1e-12);
+        assert!((stats.take_profit_pct.unwrap() - 1.0).abs() < 1e-12);
+        assert!((stats.price_vs_entry_pct.unwrap() - 0.5).abs() < 1e-12);
+    }
+
+    #[test]
+    fn instance_detail_table_shows_bracket_and_price_vs_entry_columns() {
+        let mut item = instance("btcusdt", 10_000.0, 10_000.0, 1, 0.5, 1.0, 1);
+        item.statistics.stop_loss_pct = Some(0.5);
+        item.statistics.take_profit_pct = Some(1.0);
+        item.statistics.price_vs_entry_pct = Some(2.5);
+        item.statistics.status = Some("enabled".into());
+        let snapshot = DashboardSnapshot {
+            timestamp: None,
+            aggregate: Statistics::default(),
+            aggregate_equity_history: Vec::new(),
+            instances: vec![item],
+        };
+        let backend = ratatui::backend::TestBackend::new(160, 44);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| render(frame, &snapshot, Some(0), None, None))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let mut screen = String::new();
+        for y in 0..buffer.area.height {
+            for x in 0..buffer.area.width {
+                screen.push_str(buffer[(x, y)].symbol());
+            }
+        }
+        assert!(screen.contains("SL%"), "missing SL% column:\n{screen}");
+        assert!(screen.contains("TP%"), "missing TP% column:\n{screen}");
+        assert!(screen.contains("PvE%"), "missing PvE% column:\n{screen}");
+        assert!(screen.contains("0.50%"), "missing stop distance:\n{screen}");
+        assert!(screen.contains("1.00%"), "missing target distance:\n{screen}");
+        assert!(screen.contains("2.50%"), "missing price vs entry:\n{screen}");
+    }
 }
 
 fn render(
@@ -726,6 +809,9 @@ fn render_statistics(
             stats.open_positions.map(|v| v.to_string()),
         ),
         metric("Win rate", number(stats.win_rate, true)),
+        metric("Stop loss %", telemetry_number(stats.stop_loss_pct)),
+        metric("Take profit %", telemetry_number(stats.take_profit_pct)),
+        metric("Price vs entry %", telemetry_number(stats.price_vs_entry_pct)),
         metric("Status", stats.status.clone()),
         metric("Error", stats.last_error.clone()),
         metric(
@@ -837,8 +923,13 @@ fn render_instances(
         .iter()
         .map(|i| {
             let s = &i.statistics;
+            let pct = |value: Option<f64>| {
+                value
+                    .map(|v| format!("{v:.2}%"))
+                    .unwrap_or_else(|| "—".into())
+            };
             format!(
-                "{:<20} {:>8} {:>12} {:>12} {:>9} {:>7} {:>7}",
+                "{:<20} {:>8} {:>12} {:>12} {:>9} {:>7} {:>7} {:>7} {:>7} {:>7}",
                 i.identity(),
                 s.status.as_deref().unwrap_or("—"),
                 number(s.equity, false).unwrap_or_else(|| "—".into()),
@@ -849,13 +940,26 @@ fn render_instances(
                     .unwrap_or_else(|| "—".into()),
                 s.open_positions
                     .map(|v| v.to_string())
-                    .unwrap_or_else(|| "—".into())
+                    .unwrap_or_else(|| "—".into()),
+                pct(s.stop_loss_pct),
+                pct(s.take_profit_pct),
+                pct(s.price_vs_entry_pct)
             )
         })
         .collect::<Vec<_>>();
-    let table = std::iter::once(
-        "INSTANCE             STATUS       EQUITY       PNL       WIN% TRADES POS".to_string(),
-    )
+    let table = std::iter::once(format!(
+        "{:<20} {:>8} {:>12} {:>12} {:>9} {:>7} {:>7} {:>7} {:>7} {:>7}",
+        "INSTANCE",
+        "STATUS",
+        "EQUITY",
+        "PNL",
+        "WIN%",
+        "TRADES",
+        "POS",
+        "SL%",
+        "TP%",
+        "PvE%"
+    ))
     .chain(rows)
     .collect::<Vec<_>>()
     .join("\n");

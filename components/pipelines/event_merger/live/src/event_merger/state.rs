@@ -4,8 +4,8 @@
 //! gaps, and the validity flags that make a compromised book *visible* rather
 //! than silently wrong.
 
-use crate::book::{LobBook, PriceTick};
-use crate::event::{DiffFrame, Source, Trade};
+use super::book::{LobBook, PriceTick};
+use super::event::{DiffFrame, Source, Trade};
 
 /// Why the book cannot currently be trusted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -126,7 +126,7 @@ impl State {
         }
 
         for update in &frame.updates {
-            let Some(tick) = crate::book::price_to_tick(update.price) else {
+            let Some(tick) = super::book::price_to_tick(update.price) else {
                 self.counters.bad_price_dropped += 1;
                 continue;
             };

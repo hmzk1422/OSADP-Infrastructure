@@ -1,20 +1,24 @@
-[package]
-name = "event_merger_live"
-version = "0.1.0"
-edition = "2021"
-
-# Deliberately dependency-free.
+# `stream_handler` — the live stream handler: canonical rows + timeframe bars.
 #
-# This crate is the live state-machine that turns typed market events into
-# canonical rows. It must know NOTHING about:
+# Replaces the old `event_merger_live` name: this crate is no longer just the
+# merger. It has two halves:
+#   * `event_merger/` — typed market events -> merged canonical rows
+#   * `matched/`      — canonical rows    -> timeframe bars (1s, 1min, N-tick)
+#
+# It must know NOTHING about:
 #   * how events arrive (websockets, REST, files)      -> `uets` owns that
 #   * Binance's JSON wire format                        -> `uets` owns that
 #   * Arrow / Parquet / any historical storage          -> `merger/` owns that
 #
 # The payoff: the core is allocation-free, deterministically testable with no
 # I/O, and the same code can later backtest a recorded feed.
+[package]
+name = "stream_handler"
+version = "0.1.0"
+edition = "2021"
+
 [lib]
-name = "event_merger_live"
+name = "stream_handler"
 path = "src/lib.rs"
 
 [dependencies]
