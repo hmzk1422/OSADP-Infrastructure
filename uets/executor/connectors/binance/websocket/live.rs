@@ -106,6 +106,7 @@ struct Capture {
 
 impl Capture {
     /// Merge one event and write whatever rows become emittable.
+    #[allow(dead_code)]
     fn offer(&mut self, event: MarketEvent) -> Result<u64, String> {
         let received_ms = wall_time_ms();
         self.offer_received(event, received_ms)
@@ -621,11 +622,10 @@ pub fn run_capture(config: CaptureConfig) -> Result<(), String> {
     loop {
         std::thread::sleep(Duration::from_millis(200));
         let total = rows_seen.load(Ordering::Relaxed);
-        if let Some(limit) = max_rows {
-            if total >= limit {
+        if let Some(limit) = max_rows
+            && total >= limit {
                 break;
             }
-        }
         if fanout_failed.load(Ordering::Acquire) {
             keep_running.store(false, Ordering::Release);
             return Err("strategy socket disconnected; feed process stopping".into());

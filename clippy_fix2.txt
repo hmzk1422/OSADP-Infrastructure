@@ -1,0 +1,280 @@
+    Checking uets_gui v0.1.0 (C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\components\pipelines\uets_gui)
+    Checking uets_db v0.1.0 (C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\components\pipelines\uets_db)
+    Checking stream_handler v0.1.0 (C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\components\pipelines\event_merger\live)
+    Checking uets v0.1.0 (C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\uets)
+       Fixed uets\executor\core\gui.rs (1 fix)
+       Fixed uets\executor\..\live_strategy\live_db.rs (4 fixes)
+       Fixed uets\executor\core\order.rs (2 fixes)
+       Fixed uets\executor\..\live_strategy\ofmr\features.rs (1 fix)
+       Fixed uets\executor\core\strategy\reconstruct.rs (1 fix)
+       Fixed uets\executor\core\feature\compute.rs (1 fix)
+       Fixed uets\executor\connectors\binance\websocket\live.rs (1 fix)
+       Fixed uets\executor\core\strategy\registry.rs (1 fix)
+       Fixed uets\executor\exchange\exchange.rs (1 fix)
+       Fixed uets\executor\..\live_strategy\ofmr\settings.rs (1 fix)
+warning: method `offer` is never used
+   --> uets\executor\connectors\binance\websocket\live.rs:109:8
+    |
+107 | impl Capture {
+    | ------------ method in this implementation
+108 |     /// Merge one event and write whatever rows become emittable.
+109 |     fn offer(&mut self, event: MarketEvent) -> Result<u64, String> {
+    |        ^^^^^
+    |
+    = note: `-D dead-code` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[expect(dead_code)]` or `#[allow(dead_code)]`
+    = note: the `dead_code` lint ignores `-D warnings`
+
+warning: field `prev_cvd` is never read
+   --> uets\executor\..\live_strategy\ofmr\features.rs:188:5
+    |
+165 | pub struct OfmrFeatures {
+    |            ------------ field in this struct
+...
+188 |     prev_cvd: Option<f64>,
+    |     ^^^^^^^^
+
+warning: the `Err`-variant returned from this closure is very large
+  --> uets\executor\connectors\binance\websocket\reader.rs:63:62
+   |
+63 |           let mut web_socket: WebSockets<'_> = WebSockets::new(|event: WebsocketEvent| {
+   |  ______________________________________________________________^
+64 | |             match event {
+65 | |                 WebsocketEvent::AccountUpdate(account_update) => {
+66 | |                     for balance in &account_update.data.balances {
+...  |
+85 | |             Ok(())
+86 | |         });
+   | |_________^ the `Err`-variant is at least 152 bytes
+   |
+   = help: try reducing the size of `binance::errors::Error`, for example by boxing large elements or replacing it with `Box<binance::errors::Error>`
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#result_large_err
+   = note: `-D clippy::result-large-err` implied by `-D warnings`
+   = help: to override `-D warnings` add `#[allow(clippy::result_large_err)]`
+   = note: the `clippy::result_large_err` lint ignores `-D warnings`
+
+warning: the `Err`-variant returned from this closure is very large
+   --> uets\executor\connectors\binance\websocket\reader.rs:108:58
+    |
+108 |       let mut web_socket: WebSockets<'_> = WebSockets::new(|event: WebsocketEvent| {
+    |  __________________________________________________________^
+109 | |         match event {
+...   |
+145 | |         Ok(())
+146 | |     });
+    | |_____^ the `Err`-variant is at least 152 bytes
+    |
+    = help: try reducing the size of `binance::errors::Error`, for example by boxing large elements or replacing it with `Box<binance::errors::Error>`
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#result_large_err
+
+warning: the `Err`-variant returned from this closure is very large
+   --> uets\executor\connectors\binance\websocket\reader.rs:211:42
+    |
+211 |       let mut web_socket = WebSockets::new(|event: WebsocketEvent| {
+    |  __________________________________________^
+212 | |         if let WebsocketEvent::Kline(kline_event) = event {
+213 | |             println!(
+214 | |                 "Symbol: {}, high: {}, low: {}",
+...   |
+218 | |         Ok(())
+219 | |     });
+    | |_____^ the `Err`-variant is at least 152 bytes
+    |
+    = help: try reducing the size of `binance::errors::Error`, for example by boxing large elements or replacing it with `Box<binance::errors::Error>`
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#result_large_err
+
+warning: the `Err`-variant returned from this closure is very large
+   --> uets\executor\connectors\binance\websocket\reader.rs:235:42
+    |
+235 |       let mut web_socket = WebSockets::new(|event: WebsocketEvent| {
+    |  __________________________________________^
+236 | |         if let WebsocketEvent::DayTicker(ticker_event) = event {
+237 | |             let average_price: f32 = ticker_event.average_price.parse().unwrap();
+238 | |             let current_close: f32 = ticker_event.current_close.parse().unwrap();
+...   |
+241 | |         Ok(())
+242 | |     });
+    | |_____^ the `Err`-variant is at least 152 bytes
+    |
+    = help: try reducing the size of `binance::errors::Error`, for example by boxing large elements or replacing it with `Box<binance::errors::Error>`
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#result_large_err
+
+warning: the `Err`-variant returned from this closure is very large
+   --> uets\executor\connectors\binance\websocket\reader.rs:261:42
+    |
+261 |       let mut web_socket = WebSockets::new(|event: WebsocketEvent| {
+    |  __________________________________________^
+262 | |         if let WebsocketEvent::DepthOrderBook(depth_order_book) = event {
+263 | |             let top_bid = depth_order_book.bids.first();
+264 | |             let top_ask = depth_order_book.asks.first();
+...   |
+276 | |         Ok(())
+277 | |     });
+    | |_____^ the `Err`-variant is at least 152 bytes
+    |
+    = help: try reducing the size of `binance::errors::Error`, for example by boxing large elements or replacing it with `Box<binance::errors::Error>`
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#result_large_err
+
+warning: methods with the following characteristics: (`to_*` and `self` type is `Copy`) usually take `self` by value
+  --> uets\executor\core\telemetry\latency.rs:25:20
+   |
+25 |     pub fn to_json(&self) -> String {
+   |                    ^^^^^
+   |
+   = help: consider choosing a less ambiguous name
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#wrong_self_convention
+   = note: `-D clippy::wrong-self-convention` implied by `-D warnings`
+   = help: to override `-D warnings` add `#[allow(clippy::wrong_self_convention)]`
+   = note: the `clippy::wrong_self_convention` lint ignores `-D warnings`
+
+warning: methods with the following characteristics: (`to_*` and `self` type is `Copy`) usually take `self` by value
+  --> uets\executor\core\telemetry\skew.rs:25:20
+   |
+25 |     pub fn to_json(&self) -> String {
+   |                    ^^^^^
+   |
+   = help: consider choosing a less ambiguous name
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#wrong_self_convention
+
+warning: methods with the following characteristics: (`to_*` and `self` type is `Copy`) usually take `self` by value
+   --> uets\executor\core\telemetry\mod.rs:233:20
+    |
+233 |     pub fn to_json(&self) -> String {
+    |                    ^^^^^
+    |
+    = help: consider choosing a less ambiguous name
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#wrong_self_convention
+
+warning: module has the same name as its containing module
+  --> uets\executor\exchange\mod.rs:21:1
+   |
+21 | pub mod exchange;
+   | ^^^^^^^^^^^^^^^^^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#module_inception
+   = note: `-D clippy::module-inception` implied by `-D warnings`
+   = help: to override `-D warnings` add `#[allow(clippy::module_inception)]`
+   = note: the `clippy::module_inception` lint ignores `-D warnings`
+
+warning: `uets` (lib) generated 11 warnings
+    Checking uets_trades v0.1.0 (C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\components\pipelines\uets_trades)
+error: failed to write `uets\executor\core\gui.rs`
+
+Caused by:
+  The requested operation cannot be performed on a file with a user-mapped section open. (os error 1224)
+error: could not compile `uets` (lib test)
+
+Caused by:
+  process didn't exit successfully: `C:\Users\Himaska\.rustup\toolchains\stable-x86_64-pc-windows-msvc\bin\cargo.exe C:\Users\Himaska\.rustup\toolchains\stable-x86_64-pc-windows-msvc\bin\rustc.exe --crate-name uets --edition=2024 uets\executor\lib.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --emit=dep-info,metadata -C embed-bitcode=no -C debuginfo=2 --test --check-cfg cfg(docsrs,test) --check-cfg "cfg(feature, values(\"extension-module\"))" -C metadata=e2e6f21b5e02736e -C extra-filename=-5d5ab273b5ef025f --out-dir C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\target\debug\deps -C incremental=C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\target\debug\incremental -L dependency=C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\target\debug\deps --extern binance=C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\target\debug\deps\libbinance-7a18bb305d4d58d5.rmeta --extern bincode=C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\target\debug\deps\libbincode-7c18b40c51e29bb0.rmeta --extern chrono=C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\target\debug\deps\libchrono-84df81a9832f720f.rmeta --extern libc=C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\target\debug\deps\liblibc-e78b47e48df4499c.rmeta --extern pyo3=C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\target\debug\deps\libpyo3-30234bf54d29f837.rmeta --extern rocksdb=C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\target\debug\deps\librocksdb-2f27aa38cf0eae69.rmeta --extern serde=C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\target\debug\deps\libserde-d4ba28265c0125e8.rmeta --extern serde_json=C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\target\debug\deps\libserde_json-f098771bdc4d35ab.rmeta --extern serde_yaml=C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\target\debug\deps\libserde_yaml-3dc0f62e1a937456.rmeta --extern stream_handler=C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\target\debug\deps\libstream_handler-ca71588b5d592531.rmeta --extern tempfile=C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\target\debug\deps\libtempfile-5ed89d95219a1951.rmeta --extern tungstenite=C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\target\debug\deps\libtungstenite-6f06db2a6ec949b1.rmeta --extern uets_db=C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\target\debug\deps\libuets_db-e95eb6d937481e7d.rmeta --extern uets_gui=C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\target\debug\deps\libuets_gui-4aaef2f63f04ea1b.rmeta -L native=C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\target\debug\build\librocksdb-sys-9ea34a7417206c7d\out -L native=C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\target\debug\build\lz4-sys-749739ad0d227749\out -L native=C:\Users\Himaska\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows_x86_64_msvc-0.52.6\lib -L native=C:\Users\Himaska\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows_x86_64_msvc-0.48.5\lib -L "native=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\atlmfc\lib\x64" -L "native=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\atlmfc\lib\x64"` (exit code: 101)
+warning: build failed, waiting for other jobs to finish...
+       Fixed uets\executor\executor.rs (9 fixes)
+       Fixed components\pipelines\uets_trades\src\sim.rs (1 fix)
+       Fixed components\pipelines\uets_trades\src\playback\crypto_l2.rs (3 fixes)
+warning: empty line after doc comment
+  --> components\pipelines\uets_trades\src\backend.rs:80:5
+   |
+80 | /     /// Go long: submits a market order with the attached barrier.
+81 | |     // ---- Strategy action interface (supporting Market & Limit/Maker entries) ----
+82 | |
+   | |_^
+83 |       /// Go long: submits a Market or Limit (Maker) buy order with the attached triple barrier.
+84 |       fn long(
+   |       ------- the comment documents this function
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#empty_line_after_doc_comments
+   = note: `-D clippy::empty-line-after-doc-comments` implied by `-D warnings`
+   = help: to override `-D warnings` add `#[allow(clippy::empty_line_after_doc_comments)]`
+   = note: the `clippy::empty_line_after_doc_comments` lint ignores `-D warnings`
+   = help: if the empty line is unintentional, remove it
+help: if the doc comment should not document function `long` then comment it out
+   |
+80 |     // /// Go long: submits a market order with the attached barrier.
+   |     ++
+
+warning: redundant field names in struct initialization
+   --> components\pipelines\uets_trades\src\playback\crypto_l2.rs:707:9
+    |
+707 |         source: source,
+    |         ^^^^^^^^^^^^^^ help: replace it with: `source`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#redundant_field_names
+    = note: `-D clippy::redundant-field-names` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::redundant_field_names)]`
+    = note: the `clippy::redundant_field_names` lint ignores `-D warnings`
+
+warning: very complex type used. Consider factoring parts into `type` definitions
+   --> components\pipelines\uets_trades\src\playback\crypto_l2.rs:547:21
+    |
+547 |       let level_cols: Vec<(
+    |  _____________________^
+548 | |         Option<&Float64Array>,
+549 | |         Option<&Float64Array>,
+550 | |         Option<&Float64Array>,
+551 | |         Option<&Float64Array>,
+552 | |     )> = (FIRST_INDEXED_LEVEL..=TOTAL_LEVELS)
+    | |______^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#type_complexity
+    = note: `-D clippy::type-complexity` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::type_complexity)]`
+    = note: the `clippy::type_complexity` lint ignores `-D warnings`
+
+warning: this function has too many arguments (8/7)
+   --> components\pipelines\uets_trades\src\sim.rs:182:5
+    |
+182 | /     pub fn apply_fill(
+183 | |         &mut self,
+184 | |         strategy_id: &str,
+185 | |         symbol: &str,
+...   |
+190 | |         entry_barrier: Option<&TripleBarrier>,
+191 | |     ) -> Result<(), String> {
+    | |___________________________^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#too_many_arguments
+    = note: `-D clippy::too-many-arguments` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::too_many_arguments)]`
+    = note: the `clippy::too_many_arguments` lint ignores `-D warnings`
+
+warning: this `if` has identical blocks
+   --> components\pipelines\uets_trades\src\sim.rs:573:25
+    |
+573 |           if fully_filled {
+    |  _________________________^
+574 | |             FillOutcome::Filled
+575 | |         } else {
+    | |_________^
+    |
+note: same as this
+   --> components\pipelines\uets_trades\src\sim.rs:575:16
+    |
+575 |           } else {
+    |  ________________^
+576 | |             FillOutcome::Filled
+577 | |         }
+    | |_________^
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#if_same_then_else
+    = note: `-D clippy::if-same-then-else` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::if_same_then_else)]`
+    = note: the `clippy::if_same_then_else` lint ignores `-D warnings`
+
+warning: `uets_trades` (lib) generated 5 warnings (run `cargo clippy --fix --lib -p uets_trades -- -D warnings --no-deps` to apply 1 suggestion)
+       Fixed components\pipelines\uets_trades\src\playback\crypto_l2.rs (2 fixes)
+       Fixed components\pipelines\uets_trades\src\live_trade\mod.rs (1 fix)
+warning: field assignment outside of initializer for an instance created with Default::default()
+   --> components\pipelines\uets_trades\src\live_test\mod.rs:185:9
+    |
+185 |         config.partial_fill_ratio = Some(0.5);
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+note: consider initializing the variable with `sim::SimConfig { partial_fill_ratio: Some(0.5), ..Default::default() }` and removing relevant reassignments
+   --> components\pipelines\uets_trades\src\live_test\mod.rs:184:9
+    |
+184 |         let mut config = SimConfig::default();
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#field_reassign_with_default
+    = note: `-D clippy::field-reassign-with-default` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::field_reassign_with_default)]`
+    = note: the `clippy::field_reassign_with_default` lint ignores `-D warnings`
+
+warning: `uets_trades` (lib test) generated 5 warnings (4 duplicates)

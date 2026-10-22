@@ -97,7 +97,7 @@ impl std::fmt::Debug for StrategyRegistry {
 ///
 /// Exists so the "which model" concern is injectable in tests without the
 /// registry depending on a concrete selector.
-pub fn select_model<'a>(selector: &'a dyn ModelSelector, symbol: &str, sequence: u64) -> ModelId {
+pub fn select_model(selector: &dyn ModelSelector, symbol: &str, sequence: u64) -> ModelId {
     selector.select(symbol, sequence)
 }
 

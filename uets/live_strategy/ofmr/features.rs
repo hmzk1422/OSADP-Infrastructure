@@ -185,6 +185,7 @@ pub struct OfmrFeatures {
     cvd: f64,
     cvd_delta_window: VecDeque<f64>,
     cvd_slope_window: VecDeque<f64>,
+    #[allow(dead_code)]
     prev_cvd: Option<f64>,
     tick_rule_window: VecDeque<i32>,
     prev_trade_price: Option<f64>,
@@ -256,8 +257,8 @@ impl OfmrFeatures {
     /// returns. ONLY non-empty HTF bars arrive here (macro drop_empty=True);
     /// LTF data never touches this path.
     fn feed_htf_bar(&mut self, close: f64) {
-        if let Some(previous_close) = self.previous_completed_close {
-            if previous_close.is_finite() && previous_close > 0.0 {
+        if let Some(previous_close) = self.previous_completed_close
+            && previous_close.is_finite() && previous_close > 0.0 {
                 let ret = close / previous_close - 1.0;
                 if ret.is_finite() {
                     push_window(
@@ -267,7 +268,6 @@ impl OfmrFeatures {
                     );
                 }
             }
-        }
         self.previous_completed_close = Some(close);
     }
 }
@@ -482,7 +482,7 @@ impl ComputeFeatures for OfmrFeatures {
 
         let ofi_z = rolling_zscore(&self.ofi_window, ofi_diff, orderflow_min_size);
 
-        let cvd_delta_z = rolling_zscore(&self.cvd_delta_window, cvd_delta, orderflow_min_size);
+        let _cvd_delta_z = rolling_zscore(&self.cvd_delta_window, cvd_delta, orderflow_min_size);
         self.cvd += cvd_delta;
 
         push_window(&mut self.cvd_delta_window, 60, cvd_delta);

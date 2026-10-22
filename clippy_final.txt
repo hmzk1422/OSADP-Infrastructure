@@ -1,0 +1,550 @@
+    Checking uets_gui v0.1.0 (C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\components\pipelines\uets_gui)
+    Checking uets_db v0.1.0 (C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\components\pipelines\uets_db)
+    Checking stream_handler v0.1.0 (C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\components\pipelines\event_merger\live)
+    Checking uets v0.1.0 (C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\uets)
+error: method `offer` is never used
+   --> uets\executor\connectors\binance\websocket\live.rs:109:8
+    |
+107 | impl Capture {
+    | ------------ method in this implementation
+108 |     /// Merge one event and write whatever rows become emittable.
+109 |     fn offer(&mut self, event: MarketEvent) -> Result<u64, String> {
+    |        ^^^^^
+    |
+    = note: `-D dead-code` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[expect(dead_code)]` or `#[allow(dead_code)]`
+
+error: field `prev_cvd` is never read
+   --> uets\executor\..\live_strategy\ofmr\features.rs:188:5
+    |
+165 | pub struct OfmrFeatures {
+    |            ------------ field in this struct
+...
+188 |     prev_cvd: Option<f64>,
+    |     ^^^^^^^^
+
+error: this `if` statement can be collapsed
+   --> uets\executor\connectors\binance\websocket\live.rs:624:9
+    |
+624 | /         if let Some(limit) = max_rows {
+625 | |             if total >= limit {
+626 | |                 break;
+627 | |             }
+628 | |         }
+    | |_________^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#collapsible_if
+    = note: `-D clippy::collapsible-if` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::collapsible_if)]`
+help: collapse nested if block
+    |
+624 ~         if let Some(limit) = max_rows
+625 ~             && total >= limit {
+626 |                 break;
+627 ~             }
+    |
+
+error: the `Err`-variant returned from this closure is very large
+  --> uets\executor\connectors\binance\websocket\reader.rs:63:62
+   |
+63 |           let mut web_socket: WebSockets<'_> = WebSockets::new(|event: WebsocketEvent| {
+   |  ______________________________________________________________^
+64 | |             match event {
+65 | |                 WebsocketEvent::AccountUpdate(account_update) => {
+66 | |                     for balance in &account_update.data.balances {
+...  |
+85 | |             Ok(())
+86 | |         });
+   | |_________^ the `Err`-variant is at least 152 bytes
+   |
+   = help: try reducing the size of `binance::errors::Error`, for example by boxing large elements or replacing it with `Box<binance::errors::Error>`
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#result_large_err
+   = note: `-D clippy::result-large-err` implied by `-D warnings`
+   = help: to override `-D warnings` add `#[allow(clippy::result_large_err)]`
+
+error: the `Err`-variant returned from this closure is very large
+   --> uets\executor\connectors\binance\websocket\reader.rs:108:58
+    |
+108 |       let mut web_socket: WebSockets<'_> = WebSockets::new(|event: WebsocketEvent| {
+    |  __________________________________________________________^
+109 | |         match event {
+...   |
+145 | |         Ok(())
+146 | |     });
+    | |_____^ the `Err`-variant is at least 152 bytes
+    |
+    = help: try reducing the size of `binance::errors::Error`, for example by boxing large elements or replacing it with `Box<binance::errors::Error>`
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#result_large_err
+
+error: the `Err`-variant returned from this closure is very large
+   --> uets\executor\connectors\binance\websocket\reader.rs:211:42
+    |
+211 |       let mut web_socket = WebSockets::new(|event: WebsocketEvent| {
+    |  __________________________________________^
+212 | |         if let WebsocketEvent::Kline(kline_event) = event {
+213 | |             println!(
+214 | |                 "Symbol: {}, high: {}, low: {}",
+...   |
+218 | |         Ok(())
+219 | |     });
+    | |_____^ the `Err`-variant is at least 152 bytes
+    |
+    = help: try reducing the size of `binance::errors::Error`, for example by boxing large elements or replacing it with `Box<binance::errors::Error>`
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#result_large_err
+
+error: the `Err`-variant returned from this closure is very large
+   --> uets\executor\connectors\binance\websocket\reader.rs:235:42
+    |
+235 |       let mut web_socket = WebSockets::new(|event: WebsocketEvent| {
+    |  __________________________________________^
+236 | |         if let WebsocketEvent::DayTicker(ticker_event) = event {
+237 | |             let average_price: f32 = ticker_event.average_price.parse().unwrap();
+238 | |             let current_close: f32 = ticker_event.current_close.parse().unwrap();
+...   |
+241 | |         Ok(())
+242 | |     });
+    | |_____^ the `Err`-variant is at least 152 bytes
+    |
+    = help: try reducing the size of `binance::errors::Error`, for example by boxing large elements or replacing it with `Box<binance::errors::Error>`
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#result_large_err
+
+error: the `Err`-variant returned from this closure is very large
+   --> uets\executor\connectors\binance\websocket\reader.rs:261:42
+    |
+261 |       let mut web_socket = WebSockets::new(|event: WebsocketEvent| {
+    |  __________________________________________^
+262 | |         if let WebsocketEvent::DepthOrderBook(depth_order_book) = event {
+263 | |             let top_bid = depth_order_book.bids.first();
+264 | |             let top_ask = depth_order_book.asks.first();
+...   |
+276 | |         Ok(())
+277 | |     });
+    | |_____^ the `Err`-variant is at least 152 bytes
+    |
+    = help: try reducing the size of `binance::errors::Error`, for example by boxing large elements or replacing it with `Box<binance::errors::Error>`
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#result_large_err
+
+error: enclosing `Ok` and `?` operator are unneeded
+  --> uets\executor\core\feature\compute.rs:87:9
+   |
+87 |         Ok(Self::new(parse_spec(json)?)?)
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#needless_question_mark
+   = note: `-D clippy::needless-question-mark` implied by `-D warnings`
+   = help: to override `-D warnings` add `#[allow(clippy::needless_question_mark)]`
+help: remove the enclosing `Ok` and `?` operator
+   |
+87 -         Ok(Self::new(parse_spec(json)?)?)
+87 +         Self::new(parse_spec(json)?)
+   |
+
+error: this `match` expression can be replaced with `?`
+   --> uets\executor\core\gui.rs:369:21
+    |
+369 |           let taken = match self.read_command() {
+    |  _____________________^
+370 | |             Ok(taken) => taken,
+371 | |             Err(e) => return Err(e),
+372 | |         };
+    | |_________^ help: try instead: `self.read_command()?`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#question_mark
+    = note: `-D clippy::question-mark` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::question_mark)]`
+
+error: this `if` statement can be collapsed
+   --> uets\executor\core\order.rs:245:9
+    |
+245 | /         if self.order_type == OrderType::Limit {
+246 | |             if let (Some(tick), Some(price)) = (price_tick, self.limit_price) {
+247 | |                 if tick.is_finite() && tick > 0.0 && price.is_finite() && price > 0.0 {
+248 | |                     let snapped = (price / tick).round() * tick;
+...   |
+254 | |         }
+    | |_________^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#collapsible_if
+help: collapse nested if block
+    |
+245 ~         if self.order_type == OrderType::Limit
+246 ~             && let (Some(tick), Some(price)) = (price_tick, self.limit_price) {
+247 |                 if tick.is_finite() && tick > 0.0 && price.is_finite() && price > 0.0 {
+...
+252 |                 }
+253 ~             }
+    |
+
+error: this `if` statement can be collapsed
+   --> uets\executor\core\order.rs:246:13
+    |
+246 | /             if let (Some(tick), Some(price)) = (price_tick, self.limit_price) {
+247 | |                 if tick.is_finite() && tick > 0.0 && price.is_finite() && price > 0.0 {
+248 | |                     let snapped = (price / tick).round() * tick;
+249 | |                     if (price - snapped).abs() > 1e-9 {
+...   |
+253 | |             }
+    | |_____________^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#collapsible_if
+help: collapse nested if block
+    |
+246 ~             if let (Some(tick), Some(price)) = (price_tick, self.limit_price)
+247 ~                 && tick.is_finite() && tick > 0.0 && price.is_finite() && price > 0.0 {
+248 |                     let snapped = (price / tick).round() * tick;
+...
+251 |                     }
+252 ~                 }
+    |
+
+error: this `if` statement can be collapsed
+   --> uets\executor\core\strategy\reconstruct.rs:97:9
+    |
+ 97 | /         if let Some(previous) = self.last_timestamp {
+ 98 | |             if timestamp_ms < previous {
+ 99 | |                 return Err(ReconstructError::NonMonotonicTimestamp {
+100 | |                     previous,
+...   |
+104 | |         }
+    | |_________^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#collapsible_if
+help: collapse nested if block
+    |
+ 97 ~         if let Some(previous) = self.last_timestamp
+ 98 ~             && timestamp_ms < previous {
+ 99 |                 return Err(ReconstructError::NonMonotonicTimestamp {
+...
+102 |                 });
+103 ~             }
+    |
+
+error: the following explicit lifetimes could be elided: 'a
+   --> uets\executor\core\strategy\registry.rs:100:21
+    |
+100 | pub fn select_model<'a>(selector: &'a dyn ModelSelector, symbol: &str, sequence: u64) -> ModelId {
+    |                     ^^             ^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#needless_lifetimes
+    = note: `-D clippy::needless-lifetimes` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::needless_lifetimes)]`
+help: elide the lifetimes
+    |
+100 - pub fn select_model<'a>(selector: &'a dyn ModelSelector, symbol: &str, sequence: u64) -> ModelId {
+100 + pub fn select_model(selector: &dyn ModelSelector, symbol: &str, sequence: u64) -> ModelId {
+    |
+
+error: methods with the following characteristics: (`to_*` and `self` type is `Copy`) usually take `self` by value
+  --> uets\executor\core\telemetry\latency.rs:25:20
+   |
+25 |     pub fn to_json(&self) -> String {
+   |                    ^^^^^
+   |
+   = help: consider choosing a less ambiguous name
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#wrong_self_convention
+   = note: `-D clippy::wrong-self-convention` implied by `-D warnings`
+   = help: to override `-D warnings` add `#[allow(clippy::wrong_self_convention)]`
+
+error: methods with the following characteristics: (`to_*` and `self` type is `Copy`) usually take `self` by value
+  --> uets\executor\core\telemetry\skew.rs:25:20
+   |
+25 |     pub fn to_json(&self) -> String {
+   |                    ^^^^^
+   |
+   = help: consider choosing a less ambiguous name
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#wrong_self_convention
+
+error: methods with the following characteristics: (`to_*` and `self` type is `Copy`) usually take `self` by value
+   --> uets\executor\core\telemetry\mod.rs:233:20
+    |
+233 |     pub fn to_json(&self) -> String {
+    |                    ^^^^^
+    |
+    = help: consider choosing a less ambiguous name
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#wrong_self_convention
+
+error: module has the same name as its containing module
+  --> uets\executor\exchange\mod.rs:21:1
+   |
+21 | pub mod exchange;
+   | ^^^^^^^^^^^^^^^^^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#module_inception
+   = note: `-D clippy::module-inception` implied by `-D warnings`
+   = help: to override `-D warnings` add `#[allow(clippy::module_inception)]`
+
+error: this `if` statement can be collapsed
+   --> uets\executor\exchange\exchange.rs:160:13
+    |
+160 | /             if let Some(base) = symbol.strip_suffix(quote) {
+161 | |                 if !base.is_empty() {
+162 | |                     return quote;
+163 | |                 }
+164 | |             }
+    | |_____________^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#collapsible_if
+help: collapse nested if block
+    |
+160 ~             if let Some(base) = symbol.strip_suffix(quote)
+161 ~                 && !base.is_empty() {
+162 |                     return quote;
+163 ~                 }
+    |
+
+error: this `if` statement can be collapsed
+   --> uets\executor\..\live_strategy\live_db.rs:163:9
+    |
+163 | /         if let Some(db) = self.trades_db.as_ref() {
+164 | |             if let Err(error) = db.flush() {
+165 | |                 self.errors.fetch_add(1, Ordering::Relaxed);
+166 | |                 eprintln!("[live_db] trades flush failed (counted): {error}");
+167 | |             }
+168 | |         }
+    | |_________^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#collapsible_if
+help: collapse nested if block
+    |
+163 ~         if let Some(db) = self.trades_db.as_ref()
+164 ~             && let Err(error) = db.flush() {
+165 |                 self.errors.fetch_add(1, Ordering::Relaxed);
+166 |                 eprintln!("[live_db] trades flush failed (counted): {error}");
+167 ~             }
+    |
+
+error: this `if` statement can be collapsed
+   --> uets\executor\..\live_strategy\live_db.rs:169:9
+    |
+169 | /         if let Some(db) = self.portfolio_db.as_ref() {
+170 | |             if let Err(error) = db.flush() {
+171 | |                 self.errors.fetch_add(1, Ordering::Relaxed);
+172 | |                 eprintln!("[live_db] portfolio flush failed (counted): {error}");
+173 | |             }
+174 | |         }
+    | |_________^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#collapsible_if
+help: collapse nested if block
+    |
+169 ~         if let Some(db) = self.portfolio_db.as_ref()
+170 ~             && let Err(error) = db.flush() {
+171 |                 self.errors.fetch_add(1, Ordering::Relaxed);
+172 |                 eprintln!("[live_db] portfolio flush failed (counted): {error}");
+173 ~             }
+    |
+
+error: try not to call a closure in the expression where it is declared
+   --> uets\executor\..\live_strategy\live_db.rs:217:19
+    |
+217 |           let out = (|| -> Result<(), String> {
+    |  ___________________^
+218 | |             let event_time = event_time_ms
+219 | |                 .and_then(|ms| DateTime::from_timestamp_millis(ms as i64))
+220 | |                 .unwrap_or_else(Utc::now);
+...   |
+247 | |             db.write_trade(&record).map_err(|e| e.to_string())
+248 | |         })();
+    | |____________^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#redundant_closure_call
+    = note: `-D clippy::redundant-closure-call` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::redundant_closure_call)]`
+help: try doing something like
+    |
+217 ~         let out = {
+218 +             let event_time = event_time_ms
+219 +                 .and_then(|ms| DateTime::from_timestamp_millis(ms as i64))
+220 +                 .unwrap_or_else(Utc::now);
+221 +             let intent = match decision {
+222 +                 s if s.contains("Short") => TradeIntent::Short,
+223 +                 _ => TradeIntent::Long,
+224 +             };
+225 +             let record = TradeRecord {
+226 +                 schema: SchemaVersion::default(),
+227 +                 session_id: self.session_id.clone(),
+228 +                 instance: StrategyInstance::new(&self.strategy_id, &self.asset_id),
+229 +                 symbol: self.symbol.clone(),
+230 +                 event_time,
+231 +                 feature_inputs: raw_inputs_json(raw),
+232 +                 decision: intent.clone(),
+233 +                 decision_metadata: serde_json::json!({"decision": decision, "position": position}).to_string(),
+234 +                 intent,
+235 +                 order_events: Vec::new(),
+236 +                 entry_price: None,
+237 +                 exit_price: None,
+238 +                 tp_price: None,
+239 +                 sl_price: None,
+240 +                 vertical_time: None,
+241 +                 fill_qty: 0.0,
+242 +                 fees: 0.0,
+243 +                 realized_pnl: 0.0,
+244 +                 model_version: self.strategy_id.clone(),
+245 +                 config_id: self.strategy_id.clone(),
+246 +             };
+247 +             db.write_trade(&record).map_err(|e| e.to_string())
+248 ~         };
+    |
+
+error: try not to call a closure in the expression where it is declared
+   --> uets\executor\..\live_strategy\live_db.rs:260:19
+    |
+260 |           let out = (|| -> Result<(), String> {
+    |  ___________________^
+261 | |             let event_time = snapshot
+262 | |                 .event_time_ms
+263 | |                 .and_then(|ms| DateTime::from_timestamp_millis(ms as i64))
+...   |
+291 | |             db.write_portfolio(&record).map_err(|e| e.to_string())
+292 | |         })();
+    | |____________^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#redundant_closure_call
+help: try doing something like
+    |
+260 ~         let out = {
+261 +             let event_time = snapshot
+262 +                 .event_time_ms
+263 +                 .and_then(|ms| DateTime::from_timestamp_millis(ms as i64))
+264 +                 .unwrap_or_else(Utc::now);
+265 +             let record = uets_db::PortfolioRecord {
+266 +                 schema: SchemaVersion::default(),
+267 +                 session_id: self.session_id.clone(),
+268 +                 instance: StrategyInstance::new(&self.strategy_id, &self.asset_id),
+269 +                 asset_id: self.asset_id.clone(),
+270 +                 timestamp: event_time,
+271 +                 allocated_capital: snapshot.equity,
+272 +                 cash: snapshot.cash,
+273 +                 equity: snapshot.equity,
+274 +                 realized_pnl: snapshot.realized_pnl,
+275 +                 unrealized_pnl: snapshot.unrealized_pnl,
+276 +                 cumulative_return: snapshot.cumulative_return,
+277 +                 sortino: snapshot.sortino,
+278 +                 drawdown: snapshot.mdd,
+279 +                 max_drawdown: snapshot.mdd,
+280 +                 gross_exposure: snapshot.gross_exposure,
+281 +                 net_exposure: snapshot.net_exposure,
+282 +                 margin_used: snapshot.margin_used,
+283 +                 available_margin: snapshot.available_margin,
+284 +                 effective_leverage: snapshot.effective_leverage,
+285 +                 fees_paid: snapshot.fees_paid,
+286 +                 trade_count: snapshot.trades,
+287 +                 win_count: snapshot.wins,
+288 +                 loss_count: snapshot.losses,
+289 +                 win_rate: snapshot.win_rate,
+290 +             };
+291 +             db.write_portfolio(&record).map_err(|e| e.to_string())
+292 ~         };
+    |
+
+error: this `if` statement can be collapsed
+   --> uets\executor\..\live_strategy\ofmr\features.rs:259:9
+    |
+259 | /         if let Some(previous_close) = self.previous_completed_close {
+260 | |             if previous_close.is_finite() && previous_close > 0.0 {
+261 | |                 let ret = close / previous_close - 1.0;
+262 | |                 if ret.is_finite() {
+...   |
+270 | |         }
+    | |_________^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#collapsible_if
+help: collapse nested if block
+    |
+259 ~         if let Some(previous_close) = self.previous_completed_close
+260 ~             && previous_close.is_finite() && previous_close > 0.0 {
+261 |                 let ret = close / previous_close - 1.0;
+...
+268 |                 }
+269 ~             }
+    |
+
+error: this `impl` can be derived
+  --> uets\executor\..\live_strategy\ofmr\settings.rs:64:1
+   |
+64 | / impl Default for Settings {
+65 | |     fn default() -> Self {
+66 | |         Self { model: ModelSettings::default(), feature: FeatureSettings::default(), trade: TradeSettings::default() }
+67 | |     }
+68 | | }
+   | |_^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#derivable_impls
+   = note: `-D clippy::derivable-impls` implied by `-D warnings`
+   = help: to override `-D warnings` add `#[allow(clippy::derivable_impls)]`
+help: replace the manual implementation with a derive attribute
+   |
+11 + #[derive(Default)]
+12 | pub struct Settings {
+   |
+
+error: could not compile `uets` (lib) due to 25 previous errors
+warning: build failed, waiting for other jobs to finish...
+error: field `prev_cvd` is never read
+   --> uets\executor\..\live_strategy\ofmr\features.rs:188:5
+    |
+165 | pub struct OfmrFeatures {
+    |            ------------ field in this struct
+...
+188 |     prev_cvd: Option<f64>,
+    |     ^^^^^^^^
+    |
+    = note: `-D dead-code` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[expect(dead_code)]` or `#[allow(dead_code)]`
+
+error: associated function `load` is never used
+   --> uets\executor\..\live_strategy\ofmr\socket.rs:100:8
+    |
+ 99 | impl ExecutionConfig {
+    | -------------------- associated function in this implementation
+100 |     fn load() -> Result<Self, String> {
+    |        ^^^^
+
+error: fields `stop_price` and `target_price` are never read
+   --> uets\executor\..\live_strategy\ofmr\socket.rs:380:5
+    |
+373 | struct StrategyAccount {
+    |        --------------- fields in this struct
+...
+380 |     stop_price: Option<f64>,
+    |     ^^^^^^^^^^
+...
+383 |     target_price: Option<f64>,
+    |     ^^^^^^^^^^^^
+
+error: method `equity_history` is never used
+   --> uets\executor\..\live_strategy\ofmr\socket.rs:479:8
+    |
+391 | impl StrategyAccount {
+    | -------------------- method in this implementation
+...
+479 |     fn equity_history(&self) -> &[f64] {
+    |        ^^^^^^^^^^^^^^
+
+error: items after a test module
+   --> uets\executor\core\feature\window.rs:142:1
+    |
+142 | mod tests {
+    | ^^^^^^^^^
+...
+203 | pub fn aggregate(values: &[f64], aggregation: Aggregation) -> f64 {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#items_after_test_module
+    = note: `-D clippy::items-after-test-module` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::items_after_test_module)]`
+    = help: move the items to before the test module was defined
+
+error: items after a test module
+   --> uets\executor\core\gui.rs:383:1
+    |
+383 | mod tests {
+    | ^^^^^^^^^
+...
+674 | fn trade_json(trade: &super::pnl::Trade) -> String {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#items_after_test_module
+    = help: move the items to before the test module was defined
+
+error: could not compile `uets` (lib test) due to 29 previous errors

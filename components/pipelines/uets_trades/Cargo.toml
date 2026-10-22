@@ -37,6 +37,11 @@ thiserror = "1"
 # Numeric
 rust_decimal = "1"
 
+# Arrow / Parquet for reading the CryptoL2 ingest merged table
+arrow = "53"
+parquet = { package = "parquet", version = "53", features = ["arrow"] }
+rayon = "1"
+
 [dev-dependencies]
 # Testing support
 approx = "0.5"

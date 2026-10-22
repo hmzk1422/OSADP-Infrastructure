@@ -129,7 +129,7 @@ impl ExecutionBackend for LiveTestBackend {
 mod tests {
     use super::*;
     use crate::backend::ActionContext;
-    use crate::types::{OrderSide, OrderStatus};
+    use crate::types::{OrderSide, OrderStatus, OrderType};
 
     fn marks(price: f64) -> BTreeMap<String, f64> {
         let mut m = BTreeMap::new();
@@ -160,7 +160,7 @@ mod tests {
         let mut backend = LiveTestBackend::new();
         backend.on_market_update(&marks(100.0), Utc::now());
         let ctx = ActionContext::new("ofmr@btcusdt", "btcusdt", "BTCUSDT", 1.0);
-        backend.long(&ctx).unwrap();
+        backend.long(&ctx, OrderType::Market, None).unwrap();
 
         let capital = backend.capital("ofmr@btcusdt").unwrap();
         // Buy executes at mark + (spread/2 + slippage) = +1.5 bps.
@@ -181,12 +181,11 @@ mod tests {
 
     #[test]
     fn partial_fill_ratio_completes_on_next_update() {
-        let mut config = SimConfig::default();
-        config.partial_fill_ratio = Some(0.5);
+        let config = SimConfig { partial_fill_ratio: Some(0.5), ..Default::default() };
         let mut backend = LiveTestBackend::with_config(config);
         backend.on_market_update(&marks(100.0), Utc::now());
         let ctx = ActionContext::new("ofmr@btcusdt", "btcusdt", "BTCUSDT", 1.0);
-        let id = backend.long(&ctx).unwrap();
+        let id = backend.long(&ctx, OrderType::Market, None).unwrap();
 
         assert_eq!(backend.order_state(&id).unwrap().filled_qty, 0.5);
         let events = backend.drain_events();
@@ -208,7 +207,7 @@ mod tests {
         let mut backend = LiveTestBackend::new();
         let ctx = ActionContext::new("ofmr@btcusdt", "btcusdt", "BTCUSDT", 1.0);
         // No mark yet: order waits.
-        let id = backend.long(&ctx).unwrap();
+        let id = backend.long(&ctx, OrderType::Market, None).unwrap();
         backend.cancel_order(&id).unwrap();
         assert_eq!(
             backend.order_state(&id).unwrap().status,
@@ -228,7 +227,7 @@ mod tests {
         backend.on_market_update(&marks(100.0), Utc::now());
         let ctx = ActionContext::new("ofmr@btcusdt", "btcusdt", "BTCUSDT", 1.0);
         assert!(
-            backend.long(&ctx).is_err(),
+            backend.long(&ctx, OrderType::Market, None).is_err(),
             "1 BTC at ~100 must exceed 50 cash"
         );
 
@@ -247,7 +246,7 @@ mod tests {
         let mut backend = LiveTestBackend::new();
         backend.on_market_update(&marks(100.0), Utc::now());
         let ctx = ActionContext::new("ofmr@btcusdt", "btcusdt", "BTCUSDT", 1.0);
-        backend.long(&ctx).unwrap();
+        backend.long(&ctx, OrderType::Market, None).unwrap();
         assert_eq!(backend.position_qty("ofmr@btcusdt", "BTCUSDT"), Some(1.0));
 
         let exit_ctx = ActionContext::new("ofmr@btcusdt", "btcusdt", "BTCUSDT", 1.0);

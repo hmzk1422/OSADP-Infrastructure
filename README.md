@@ -1,214 +1,68 @@
-# OSADP-Core
+# OSADP-Core / UETS
+
 [![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![Rust](https://img.shields.io/badge/Rust-1.80%2B-000000?logo=rust&logoColor=white)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)](#)
 
-A hybrid Python/Rust production grade framework specifically for alpha research and multi-strategy live trading. One JSON file (`config/portfolio.json`) drives everything — strategy parameters, which tickers to trade, how much capital each gets, and which exchange/feed to use. Edit that file, save it, and the running system picks up the changes live. No Rust rebuild, no generated config files.
+Hybrid Python/Rust research and trading repository. On Windows, use Docker for
+UETS commands that need Linux Unix-domain sockets; market data is bind-mounted
+and remains on the host.
 
----
+## Run UETS
 
-## 1. Install
-
-```bash
-# 1. clone
-git clone https://github.com/hmzk1422/intraday-momentum-composite.git
-cd intraday-momentum-composite
-
-# 2. Python deps (3.11 recommended)
-python -m venv venv
-source venv/bin/activate          # Windows: venv\Scripts\activate
-pip install -r requirements.txt
-
-# 3. Rust engine (one-time native build)
-pip install maturin
-maturin develop --release
-
-# 4. verify
-python unified_runner.py doctor --require-native
-```
-
----
-
-## 2. Configure
-
-Everything lives in **`config/portfolio.json`** — there is no other config file.
-
-```json
-{
-  "exchange": "bitfinex",
-  "feed": "bybit",
-  "mode": "paper",
-  "capital": 10000,
-  "restart": true,
-  "status_interval": 5.0,
-  "_strategy_defaults": {
-    "rr_ratio": 10,
-    "confidence_threshold": 0.2,
-    "risk_pct_per_trade": 0.002,
-    "max_position_usd": 100,
-    "lookahead_seconds": 6000,
-    "lockout_seconds": 1000,
-    "rsi_filter_threshold": 30,
-    "trade_direction_is_long": true,
-    "use_orderflow_features": true
-  },
-  "assets": [
-    { "ticker": "btcusdt", "feed": "bybit",   "exchange": "bitfinex", "capital": 5000 },
-    { "ticker": "ethusdt", "feed": "binance", "exchange": "bitfinex", "capital": 3000,
-      "strategy": { "rr_ratio": 5, "confidence_threshold": 0.35 }
-    }
-  ]
-}
-```
-
-**Rules:**
-- `_strategy_defaults` — strategy parameters shared by every ticker. The Rust engine reads these directly; edit them live (see below).
-- `assets` — one entry per ticker. Each inherits `_strategy_defaults` and can override any parameter with its own `strategy` block (only the keys you want to change).
-- `mode` — `"paper"` (fake orders, real tape) or `"live"` (real orders on the exchange).
-- `feed` — where the market data comes from (`bybit`, `binance`, `bitfinex`).
-- `exchange` — where orders are routed (can differ from feed).
-
----
-
-## 3. Run — Headless (no GUI)
-
-`unified_runner.py` is the only entry point. Every command works headless — the VIM dashboard is optional.
+Run from the repository root:
 
 ```bash
-# single ticker, paper
-python unified_runner.py live-trade --ticker btcusdt --exchange bitfinex --feed bybit --mode paper --capital 10000
-
-# single ticker, LIVE ORDERS
-python unified_runner.py live-trade --ticker btcusdt --exchange bitfinex --feed bybit --mode live --capital 10000
-
-# multi-asset portfolio (one OS process per ticker, all from config/portfolio.json)
-python unified_runner.py portfolio --config config/portfolio.json --restart
-
-# replay historical data through the Rust engine
-python unified_runner.py live-test --ticker btcusdt --release
-
-# research walk-forward backtest
-python unified_runner.py backtest
-
-# manage RocksDB stores
-python unified_runner.py db --list
-python unified_runner.py db --clean-ticker btcusdt --yes
-
-# environment / setup self-check
-python unified_runner.py doctor --require-native
+docker compose -f docker-compose.dev.yml build uets-dev # Build the Linux Rust/Python development image
+docker compose -f docker-compose.dev.yml run --rm uets-dev cargo run --manifest-path uets/Cargo.toml --bin dev_test -- help # Show UETS CLI help
+docker compose -f docker-compose.dev.yml run --rm uets-dev cargo test --manifest-path uets/Cargo.toml # Run UETS tests in Linux
+docker compose -f docker-compose.dev.yml run --rm uets-dev cargo test --manifest-path components/pipelines/uets_trades/Cargo.toml # Test playback and trade execution
+docker compose -f docker-compose.dev.yml run --rm uets-dev cargo test --manifest-path components/pipelines/uets_manager/Cargo.toml # Test execution-mode settings and routing
+docker compose -f docker-compose.dev.yml run --rm uets-dev cargo run --manifest-path uets/Cargo.toml --bin dev_test -- playback # Run selected playback method from the YAML
+docker compose -f docker-compose.dev.yml run --rm uets-dev python tests/test_playback_runner.py # Verify all playback modes; prints SUCCESSFUL
+docker compose -f docker-compose.dev.yml --profile live run --rm uets-live run ofmr@btcusdt # Start the OFMR worker through Docker (paper by default)
+docker compose -f docker-compose.dev.yml --profile live run --rm uets-live run ofmr@btcusdt ofmr@ethusdt # Start multiple OFMR workers
 ```
 
-### UETS live monitor (Rust)
-
-The UETS websocket/UDS runtime is started by its Rust executor, not a Bash
-launcher or `unified_runner.py`:
+For an interactive development container:
 
 ```bash
-cargo run --release --manifest-path uets/Cargo.toml --bin dev_test -- run ofmr@btcusdt ofmr@ethusdt
+docker compose -f docker-compose.dev.yml up -d uets-dev # Start the reusable dev container
+docker compose -f docker-compose.dev.yml exec uets-dev cargo run --manifest-path uets/Cargo.toml --bin dev_test -- strategies ofmr # List OFMR strategies
+docker compose -f docker-compose.dev.yml down # Stop the dev container
 ```
 
-On Windows, launch it in the Linux Docker development container:
-
-```powershell
-docker compose -f docker-compose.dev.yml --profile live run --rm uets-live run ofmr@btcusdt ofmr@ethusdt
-```
-
-This currently runs the monitor/data-feed slice; it is not an order-enabled
-production trading command.
-
----
-
-## 4. Run — VIM Dashboard
+Local Rust equivalents (Linux/macOS):
 
 ```bash
-python unified_runner.py portfolio --config config/portfolio.json --restart
+cargo run --release --manifest-path uets/Cargo.toml --bin dev_test -- run ofmr@btcusdt ofmr@ethusdt # Launch UETS TUI and strategy workers
+cargo run --manifest-path uets/Cargo.toml --bin dev_test -- playback # Run YAML-selected playback
+python tests/test_playback_runner.py # Run all three playback smoke tests; prints SUCCESSFUL
+cargo test --manifest-path components/pipelines/uets_trades/Cargo.toml # Test playback/execution crate
+cargo test --manifest-path components/pipelines/uets_manager/Cargo.toml # Test manager/settings crate
 ```
 
-This launches a curses terminal dashboard (the supervisor keeps running on a background thread). Three views, toggled with **1 / 2 / 3** or **Tab**:
+The TUI supports adding/disabling workers; press `q` to stop. Logs are written
+under `logs/uets/`. See [uets/README.md](./uets/README.md) for CLI commands and
+TUI controls.
 
-| View      | Key | What you see |
-|-----------|-----|--------------|
-| Dashboard | 1   | PnL, equity, trades, win rate, RR, Sortino, MDD-R, RSI, P(WIN) — one row per asset |
-| Trades    | 2   | The event stream (entries/exits) for the **selected** asset, plus LAT/STAL/SK stats |
-| Config    | 3   | The raw `config/portfolio.json` with a vim-style cursor |
+## Configuration and playback status
 
-**Navigation:**
+All UETS mode, playback, and OFMR parameters are now in
+[uets/config/execution.yaml](./uets/config/execution.yaml). Set `mode: playback`
+and choose `playback.method`: `parametric_monte_carlo` (synthetic paths),
+`purged_walk_forward` (single asset), or `cpcv` (CryptoL2 Parquet; multiple
+symbols supported). Configure synthetic generation, data paths/symbols,
+correlation threshold, purging, strategy, and workers in that file. Playback
+is offline and cannot route live orders. For testnet/live, use their modes,
+credentials from environment variables, and require `allow_live_trading: true`
+for production live orders.
 
-| Key | Action |
-|-----|--------|
-| `j` / `k` | move down / up (assets in dashboard, lines in config) |
-| `g` / `G` | jump to top / bottom |
-| `Ctrl-d` / `Ctrl-u` | page down / up |
-| `Tab` / `h` / `l` | cycle views |
-| `Enter` or `i` | edit the config line under the cursor |
-| `R` / `F5` | restart the selected asset with the latest config |
-| `q` | quit |
-
-**Editing config live:**
-1. Switch to Config view (`3`).
-2. Move to any line, press **Enter** or **i**.
-3. For a parameter line like `"rr_ratio": 10,` the editor prefills just the value (`10`). Type the new value, **Enter** to save, **Esc** to cancel.
-4. The save is validated — invalid JSON or a broken config structure is rejected (disk untouched). A valid save writes the file, auto-reloads, and restarts only the assets whose effective config changed.
-
-**:commands** (type `:` in any view, then the command + Enter):
-
-| Command | Action |
-|---------|--------|
-| `:q` | quit |
-| `:w` | reload config from disk |
-| `:view dashboard` / `:view trades` / `:view config` | switch view |
-| `:restart [ticker]` | restart an asset (no arg = selected asset) |
-| `:stop [ticker]` | stop an asset |
-| `:start [ticker]` | start a stopped asset |
-| `:flatten [ticker]` | close any open position + pause entries |
-| `:pause [ticker]` | pause entries (keep monitoring) |
-| `:resume [ticker]` | resume a paused asset |
-
-All commands work with no argument (acts on the selected asset) or with a ticker prefix (`:flatten eth` matches `ethusdt`).
-
-**Status indicators:**
-
-| Status   | Meaning |
-|----------|---------|
-| running  | connected to feed, receiving data, trading |
-| outage   | feed staleness > 1000ms (network problem or illiquid market) |
-| paused   | entries paused (via `:pause` or `:flatten`) |
-| DOWN     | the child process exited (auto-restarts if `restart: true`) |
----
-
-## 5. Outputs
-
-- `build/pnl_report_<ticker>.html` — per-ticker report (equity curve, R-multiple histogram, latency/skew charts, trade table with LAT/STAL/SK columns).
-- `build/portfolio_dashboard.html` — multi-asset tabbed dashboard (open in browser; auto-refreshes). Same data as the terminal dashboard plus sparkline charts for latency/staleness/skew.
-
----
-
-## 6. Termux / Docker (legacy)
-
-See `docs/TERMUX.md` for the Android/Termux setup (runs the same stack inside a Docker container on a phone/tablet).
-
----
-
-## 7. Troubleshooting
-
-| Problem | Fix |
-|---------|-----|
-| `doctor --require-native` fails | Run `maturin develop --release` |
-| `ModuleNotFoundError: uets_rs` | Same — native binding not built |
-| Dashboard shows all DOWN | Check exchange/feed names; check network |
-| Config edit rejected | Check JSON syntax; the validator tells you what's wrong |
-| `live-trade` crashes on start | Check `config/portfolio.json` has an `assets` list with valid tickers |
-
-# Important System Commands
-**historical backtest ingestion**: keep concurrency deliberately low to avoid saturating disk I/O and network bandwidth. Run **two Binance download workers** for the smaller daily `aggTrades`/`bookDepth` files, while limiting **CryptoHFTData L2 to one worker** because its hourly order-book files are significantly larger and more disk-intensive. This prioritizes stable throughput and reliability over maximum parallelism.
-
-```bash
-python ingestion.py \
-  --symbol YOUR_SYMBOL \
-  --start-date START_DATE \ # 2025-06-28 furthest date
-  --end-date END_DATE \ # 2026-09-01 example (ISO date format)
-  --workers NUM_OF_WORKERS \
-  --overwrite # Use 
-  --delete-raw
-```
+Playback is runnable via the `dev_test playback` command and prints a report
+with mean cumulative return, per-trade expectancy, MDD, Sortino, and CVaR05/95.
+Its current built-in strategy is a vectorized momentum baseline, **not the
+trained OFMR model**; use results accordingly. The Python end-to-end smoke test
+executes all three methods and verifies their reports. It uses generated
+temporary CryptoL2-format Parquet fixtures for CPCV, not exchange history.
+See [uets/trading docs](./uets/README.md) and
+[playback details](./components/pipelines/uets_trades/README.md).

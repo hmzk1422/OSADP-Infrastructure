@@ -1,0 +1,33 @@
+    Checking uets_gui v0.1.0 (C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\components\pipelines\uets_gui)
+    Checking uets_db v0.1.0 (C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\components\pipelines\uets_db)
+    Checking stream_handler v0.1.0 (C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\components\pipelines\event_merger\live)
+    Checking uets v0.1.0 (C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\uets)
+    Checking uets_trades v0.1.0 (C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\components\pipelines\uets_trades)
+error: items after a test module
+   --> uets\executor\core\feature\window.rs:142:1
+    |
+142 | mod tests {
+    | ^^^^^^^^^
+...
+203 | pub fn aggregate(values: &[f64], aggregation: Aggregation) -> f64 {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#items_after_test_module
+    = note: `-D clippy::items-after-test-module` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::items_after_test_module)]`
+    = help: move the items to before the test module was defined
+
+error: items after a test module
+   --> uets\executor\core\gui.rs:380:1
+    |
+380 | mod tests {
+    | ^^^^^^^^^
+...
+671 | fn trade_json(trade: &super::pnl::Trade) -> String {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#items_after_test_module
+    = help: move the items to before the test module was defined
+
+error: could not compile `uets` (lib test) due to 2 previous errors
+warning: build failed, waiting for other jobs to finish...

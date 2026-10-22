@@ -8,6 +8,7 @@
 //! cargo run --bin dev_test -- help
 //! ```
 //!
+#![allow(clippy::result_large_err)]
 use binance::api::*;
 use binance::userstream::*;
 use binance::websockets::*;

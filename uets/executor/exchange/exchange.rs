@@ -157,11 +157,10 @@ impl AccountSnapshot {
     pub fn quote_asset(symbol: &str) -> &str {
         const QUOTES: [&str; 5] = ["USDT", "BUSD", "USDC", "BTC", "ETH"];
         for quote in QUOTES {
-            if let Some(base) = symbol.strip_suffix(quote) {
-                if !base.is_empty() {
+            if let Some(base) = symbol.strip_suffix(quote)
+                && !base.is_empty() {
                     return quote;
                 }
-            }
         }
         ""
     }
@@ -396,7 +395,7 @@ mod tests {
     fn an_unfiltered_spec_never_rewrites_a_price() {
         let spec = VenueSpec::new("binance", "USDT");
         assert_eq!(spec.price_tick, None);
-        assert_eq!(spec.round_price(64_123.4567), 64_123.4567);
+        assert_eq!(spec.round_price(64_123.456_7), 64_123.456_7);
         assert_eq!(spec.round_qty(0.0001234), 0.0001234);
         assert_eq!(spec.fee(true), 0.0, "unset fees stay unset");
     }

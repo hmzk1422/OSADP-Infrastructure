@@ -242,16 +242,14 @@ impl OrderRequest {
     /// an off-tick price fails locally instead of as INVALID_TICK_SIZE.
     pub fn validate_on_tick(&self, price_tick: Option<f64>) -> Result<(), OrderError> {
         self.validate()?;
-        if self.order_type == OrderType::Limit {
-            if let (Some(tick), Some(price)) = (price_tick, self.limit_price) {
-                if tick.is_finite() && tick > 0.0 && price.is_finite() && price > 0.0 {
+        if self.order_type == OrderType::Limit
+            && let (Some(tick), Some(price)) = (price_tick, self.limit_price)
+                && tick.is_finite() && tick > 0.0 && price.is_finite() && price > 0.0 {
                     let snapped = (price / tick).round() * tick;
                     if (price - snapped).abs() > 1e-9 {
                         return Err(OrderError::OffTickPrice { price, tick });
                     }
                 }
-            }
-        }
         Ok(())
     }
 }

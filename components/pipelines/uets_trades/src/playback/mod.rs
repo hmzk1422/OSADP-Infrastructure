@@ -11,6 +11,9 @@ use chrono::{DateTime, Utc};
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
+pub mod crypto_l2;
+pub mod evaluation;
+
 /// One ordered item in a deterministic market-data replay.
 #[derive(Clone, Debug)]
 pub struct MarketEvent {
@@ -67,6 +70,53 @@ impl PlaybackBackend {
     pub fn replay_events<F>(
         &mut self,
         events: impl IntoIterator<Item = MarketEvent>,
+        process: F,
+    ) -> Result<usize, BackendError>
+    where
+        F: FnMut(&mut Self, &MarketEvent) -> Result<(), BackendError>,
+    {
+        self.replay_events_inner(events, true, process)
+    }
+
+    /// Replay events as fast as possible, without wall-clock pacing.
+    pub fn replay_events_unpaced<F>(
+        &mut self,
+        events: impl IntoIterator<Item = MarketEvent>,
+        process: F,
+    ) -> Result<usize, BackendError>
+    where
+        F: FnMut(&mut Self, &MarketEvent) -> Result<(), BackendError>,
+    {
+        self.replay_events_inner(events, false, process)
+    }
+
+    /// Replay a borrowed event slice without cloning event marks.
+    pub fn replay_slice_unpaced<F>(
+        &mut self,
+        events: &[MarketEvent],
+        mut process: F,
+    ) -> Result<usize, BackendError>
+    where
+        F: FnMut(&mut Self, &MarketEvent) -> Result<(), BackendError>,
+    {
+        let mut previous_timestamp = None;
+        for event in events {
+            if previous_timestamp.is_some_and(|previous| event.timestamp < previous) {
+                return Err(BackendError::Internal(
+                    "playback events must be timestamp ordered".into(),
+                ));
+            }
+            self.on_market_update(&event.marks, event.timestamp);
+            process(self, event)?;
+            previous_timestamp = Some(event.timestamp);
+        }
+        Ok(events.len())
+    }
+
+    fn replay_events_inner<F>(
+        &mut self,
+        events: impl IntoIterator<Item = MarketEvent>,
+        paced: bool,
         mut process: F,
     ) -> Result<usize, BackendError>
     where
@@ -88,15 +138,17 @@ impl PlaybackBackend {
                 ));
             }
             let first = *first_timestamp.get_or_insert(event.timestamp);
-            let elapsed_ms = event
-                .timestamp
-                .signed_duration_since(first)
-                .num_milliseconds()
-                .max(0) as u64;
-            let target_ms = (elapsed_ms as f64 / self.acceleration).min(u64::MAX as f64) as u64;
-            let wait = Duration::from_millis(target_ms).saturating_sub(wall_start.elapsed());
-            if !wait.is_zero() {
-                std::thread::sleep(wait);
+            if paced {
+                let elapsed_ms = event
+                    .timestamp
+                    .signed_duration_since(first)
+                    .num_milliseconds()
+                    .max(0) as u64;
+                let target_ms = (elapsed_ms as f64 / self.acceleration).min(u64::MAX as f64) as u64;
+                let wait = Duration::from_millis(target_ms).saturating_sub(wall_start.elapsed());
+                if !wait.is_zero() {
+                    std::thread::sleep(wait);
+                }
             }
             self.on_market_update(&event.marks, event.timestamp);
             process(self, &event)?;
@@ -189,7 +241,7 @@ mod tests {
     use super::*;
     use crate::backend::ActionContext;
     use crate::triple_barrier::TripleBarrier;
-    use crate::types::{OrderSide, OrderStatus};
+    use crate::types::{OrderSide, OrderStatus, OrderType};
     use chrono::TimeZone;
 
     fn marks(price: f64) -> BTreeMap<String, f64> {
@@ -234,7 +286,7 @@ mod tests {
         let ctx =
             ActionContext::new("ofmr@btcusdt", "btcusdt", "BTCUSDT", 1.0).with_barrier(barrier);
         backend.on_market_update(&marks(100.0), base);
-        backend.long(&ctx).unwrap();
+        backend.long(&ctx, OrderType::Market, None).unwrap();
         assert_eq!(backend.position_qty("ofmr@btcusdt", "BTCUSDT"), Some(1.0));
 
         // Mark crosses the take-profit barrier.
@@ -274,7 +326,7 @@ mod tests {
         let ctx =
             ActionContext::new("ofmr@btcusdt", "btcusdt", "BTCUSDT", 1.0).with_barrier(barrier);
         backend.on_market_update(&marks(100.0), base);
-        backend.long(&ctx).unwrap();
+        backend.long(&ctx, OrderType::Market, None).unwrap();
 
         // 11 seconds later, price unchanged: vertical barrier fires.
         let late = base + chrono::Duration::seconds(11);

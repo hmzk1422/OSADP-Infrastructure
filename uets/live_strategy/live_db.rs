@@ -160,18 +160,16 @@ impl LiveDb {
     }
 
     pub fn flush(&self) {
-        if let Some(db) = self.trades_db.as_ref() {
-            if let Err(error) = db.flush() {
+        if let Some(db) = self.trades_db.as_ref()
+            && let Err(error) = db.flush() {
                 self.errors.fetch_add(1, Ordering::Relaxed);
                 eprintln!("[live_db] trades flush failed (counted): {error}");
             }
-        }
-        if let Some(db) = self.portfolio_db.as_ref() {
-            if let Err(error) = db.flush() {
+        if let Some(db) = self.portfolio_db.as_ref()
+            && let Err(error) = db.flush() {
                 self.errors.fetch_add(1, Ordering::Relaxed);
                 eprintln!("[live_db] portfolio flush failed (counted): {error}");
             }
-        }
     }
 
     pub fn read_all(&self) -> Result<(Vec<LiveTradeTick>, Vec<LivePortfolioSnapshot>), String> {
@@ -214,7 +212,7 @@ impl LiveDb {
         let Some(db) = self.trades_db.as_ref() else { return };
         let _seq = self.seq.fetch_add(1, Ordering::Relaxed);
         let started = std::time::Instant::now();
-        let out = (|| -> Result<(), String> {
+        let out = {
             let event_time = event_time_ms
                 .and_then(|ms| DateTime::from_timestamp_millis(ms as i64))
                 .unwrap_or_else(Utc::now);
@@ -245,7 +243,7 @@ impl LiveDb {
                 config_id: self.strategy_id.clone(),
             };
             db.write_trade(&record).map_err(|e| e.to_string())
-        })();
+        };
         *self.last_write_ms.lock().unwrap_or_else(|e| e.into_inner()) =
             started.elapsed().as_secs_f64() * 1_000.0;
         if let Err(error) = out {
@@ -257,7 +255,7 @@ impl LiveDb {
     pub fn record_portfolio(&self, snapshot: LivePortfolioSnapshot) {
         let Some(db) = self.portfolio_db.as_ref() else { return };
         let started = std::time::Instant::now();
-        let out = (|| -> Result<(), String> {
+        let out = {
             let event_time = snapshot
                 .event_time_ms
                 .and_then(|ms| DateTime::from_timestamp_millis(ms as i64))
@@ -289,7 +287,7 @@ impl LiveDb {
                 win_rate: snapshot.win_rate,
             };
             db.write_portfolio(&record).map_err(|e| e.to_string())
-        })();
+        };
         *self.last_write_ms.lock().unwrap_or_else(|e| e.into_inner()) =
             started.elapsed().as_secs_f64() * 1_000.0;
         if let Err(error) = out {

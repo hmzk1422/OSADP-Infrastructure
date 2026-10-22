@@ -549,59 +549,49 @@ impl UetsDb {
     }
 
     fn matches_trade_filter(record: &TradeRecord, filter: &QueryFilter) -> bool {
-        if let Some(ref sid) = filter.session_id {
-            if record.session_id != *sid {
-                return false;
-            }
+        if let Some(ref sid) = filter.session_id
+            && record.session_id != *sid {
+            return false;
         }
-        if let Some(ref strat) = filter.strategy_id {
-            if record.instance.strategy_id != *strat {
-                return false;
-            }
+        if let Some(ref strat) = filter.strategy_id
+            && record.instance.strategy_id != *strat {
+            return false;
         }
-        if let Some(ref asset) = filter.asset_id {
-            if record.instance.asset_id != *asset && record.symbol != *asset {
-                return false;
-            }
+        if let Some(ref asset) = filter.asset_id
+            && record.instance.asset_id != *asset && record.symbol != *asset {
+            return false;
         }
-        if let Some(start) = filter.start_time {
-            if record.event_time < start {
-                return false;
-            }
+        if let Some(start) = filter.start_time
+            && record.event_time < start {
+            return false;
         }
-        if let Some(end) = filter.end_time {
-            if record.event_time > end {
-                return false;
-            }
+        if let Some(end) = filter.end_time
+            && record.event_time > end {
+            return false;
         }
         true
     }
 
     fn matches_portfolio_filter(record: &PortfolioRecord, filter: &QueryFilter) -> bool {
-        if let Some(ref sid) = filter.session_id {
-            if record.session_id != *sid {
-                return false;
-            }
+        if let Some(ref sid) = filter.session_id
+            && record.session_id != *sid {
+            return false;
         }
-        if let Some(ref strat) = filter.strategy_id {
-            if record.instance.strategy_id != *strat {
-                return false;
-            }
+        if let Some(ref strat) = filter.strategy_id
+            && record.instance.strategy_id != *strat {
+            return false;
         }
-        if let Some(ref asset) = filter.asset_id {
-            if record.asset_id != *asset {
-                return false;
-            }
+        if let Some(ref asset) = filter.asset_id
+            && record.asset_id != *asset {
+            return false;
         }
-        if let Some(start) = filter.start_time {
-            if record.timestamp < start {
-                return false;
-            }
+        if let Some(start) = filter.start_time
+            && record.timestamp < start {
+            return false;
         }
-        if let Some(end) = filter.end_time {
-            if record.timestamp > end {
-                return false;
-            }
+        if let Some(end) = filter.end_time
+            && record.timestamp > end {
+            return false;
         }
         true
     }

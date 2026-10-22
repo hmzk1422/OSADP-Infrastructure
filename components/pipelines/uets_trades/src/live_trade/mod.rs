@@ -25,126 +25,6 @@ pub struct LiveTradeBackend {
     barrier_order_seq: u64,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::backend::{LiveRouter, RouterError};
-    use crate::triple_barrier::TripleBarrier;
-    use crate::types::{ExecutionEvent, OrderSide};
-    use chrono::TimeZone;
-    use std::sync::{Arc, Mutex};
-
-    struct RecordingRouter(Arc<Mutex<Vec<OrderRequest>>>);
-    impl LiveRouter for RecordingRouter {
-        fn note_market_tick(&mut self, _ts: DateTime<Utc>) {}
-        fn route(
-            &mut self,
-            request: &OrderRequest,
-            now: DateTime<Utc>,
-        ) -> Result<Vec<ExecutionEvent>, RouterError> {
-            self.0.lock().unwrap().push(request.clone());
-            Ok(vec![ExecutionEvent::OrderAccepted {
-                order_id: request.id.clone(),
-                symbol: request.symbol.clone(),
-                at: now,
-            }])
-        }
-        fn cancel(&mut self, _id: &OrderId, _symbol: &str) -> Result<(), RouterError> {
-            Ok(())
-        }
-        fn drain_events(&mut self) -> Vec<ExecutionEvent> {
-            Vec::new()
-        }
-    }
-
-    struct UncertainRouter;
-    impl LiveRouter for UncertainRouter {
-        fn note_market_tick(&mut self, _ts: DateTime<Utc>) {}
-        fn route(
-            &mut self,
-            _request: &OrderRequest,
-            _now: DateTime<Utc>,
-        ) -> Result<Vec<ExecutionEvent>, RouterError> {
-            Err(RouterError::Transport(
-                "connection lost after submit".into(),
-            ))
-        }
-        fn cancel(&mut self, _id: &OrderId, _symbol: &str) -> Result<(), RouterError> {
-            Err(RouterError::Transport("not reachable".into()))
-        }
-        fn drain_events(&mut self) -> Vec<ExecutionEvent> {
-            Vec::new()
-        }
-    }
-
-    #[test]
-    fn live_triple_barrier_routes_exit_through_live_router() {
-        let routed = Arc::new(Mutex::new(Vec::new()));
-        let mut backend = LiveTradeBackend::with_router(Box::new(RecordingRouter(routed.clone())));
-        let entered_at = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
-        let mut marks = BTreeMap::new();
-        marks.insert("BTCUSDT".to_string(), 100.0);
-        backend.on_market_update(&marks, entered_at);
-        let barrier = TripleBarrier::long(100.0, entered_at, 5.0, 5.0, 300);
-        let request = OrderRequest::new(
-            "entry",
-            "BTCUSDT",
-            OrderSide::Buy,
-            1.0,
-            "ofmr@btcusdt",
-            "btcusdt",
-        )
-        .with_barrier(barrier);
-        let order_id = backend.submit_order(request).unwrap();
-        backend.apply_fill(&FillEvent {
-            order_id,
-            symbol: "BTCUSDT".into(),
-            side: OrderSide::Buy,
-            qty: 1.0,
-            price: 100.0,
-            fee: 0.04,
-            executed_at: entered_at,
-        });
-
-        marks.insert("BTCUSDT".to_string(), 100.06);
-        backend.on_market_update(&marks, entered_at + chrono::Duration::seconds(1));
-
-        let routes = routed.lock().unwrap();
-        assert_eq!(routes.len(), 2);
-        assert_eq!(routes[1].side, OrderSide::Sell);
-        assert_eq!(routes[1].qty, 1.0);
-        assert!(routes[1].barrier.is_none());
-        assert!(routes[1].reduce_only);
-    }
-
-    #[test]
-    fn lost_venue_response_is_tracked_as_uncertain_not_rejected() {
-        let mut backend = LiveTradeBackend::with_router(Box::new(UncertainRouter));
-        let request = OrderRequest::new(
-            "uncertain",
-            "BTCUSDT",
-            OrderSide::Buy,
-            1.0,
-            "ofmr@btcusdt",
-            "btcusdt",
-        );
-        assert!(backend.submit_order(request).is_err());
-        assert_eq!(
-            backend
-                .order_state(&OrderId::new("uncertain"))
-                .unwrap()
-                .status,
-            crate::types::OrderStatus::Uncertain
-        );
-        assert!(
-            backend
-                .drain_events()
-                .iter()
-                .any(|event| matches!(event, ExecutionEvent::OrderUncertain { .. }))
-        );
-    }
-}
-
 impl LiveTradeBackend {
     /// A live backend **without** a router: every order is refused
     /// (explicit `NotConnected` — never a silent paper fallback).
@@ -458,6 +338,126 @@ impl ExecutionBackend for LiveTradeBackend {
 
     fn position_qty(&self, strategy_id: &str, symbol: &str) -> Option<f64> {
         self.book.position_qty(strategy_id, symbol)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::backend::{LiveRouter, RouterError};
+    use crate::triple_barrier::TripleBarrier;
+    use crate::types::{ExecutionEvent, OrderSide};
+    use chrono::TimeZone;
+    use std::sync::{Arc, Mutex};
+
+    struct RecordingRouter(Arc<Mutex<Vec<OrderRequest>>>);
+    impl LiveRouter for RecordingRouter {
+        fn note_market_tick(&mut self, _ts: DateTime<Utc>) {}
+        fn route(
+            &mut self,
+            request: &OrderRequest,
+            now: DateTime<Utc>,
+        ) -> Result<Vec<ExecutionEvent>, RouterError> {
+            self.0.lock().unwrap().push(request.clone());
+            Ok(vec![ExecutionEvent::OrderAccepted {
+                order_id: request.id.clone(),
+                symbol: request.symbol.clone(),
+                at: now,
+            }])
+        }
+        fn cancel(&mut self, _id: &OrderId, _symbol: &str) -> Result<(), RouterError> {
+            Ok(())
+        }
+        fn drain_events(&mut self) -> Vec<ExecutionEvent> {
+            Vec::new()
+        }
+    }
+
+    struct UncertainRouter;
+    impl LiveRouter for UncertainRouter {
+        fn note_market_tick(&mut self, _ts: DateTime<Utc>) {}
+        fn route(
+            &mut self,
+            _request: &OrderRequest,
+            _now: DateTime<Utc>,
+        ) -> Result<Vec<ExecutionEvent>, RouterError> {
+            Err(RouterError::Transport(
+                "connection lost after submit".into(),
+            ))
+        }
+        fn cancel(&mut self, _id: &OrderId, _symbol: &str) -> Result<(), RouterError> {
+            Err(RouterError::Transport("not reachable".into()))
+        }
+        fn drain_events(&mut self) -> Vec<ExecutionEvent> {
+            Vec::new()
+        }
+    }
+
+    #[test]
+    fn live_triple_barrier_routes_exit_through_live_router() {
+        let routed = Arc::new(Mutex::new(Vec::new()));
+        let mut backend = LiveTradeBackend::with_router(Box::new(RecordingRouter(routed.clone())));
+        let entered_at = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
+        let mut marks = BTreeMap::new();
+        marks.insert("BTCUSDT".to_string(), 100.0);
+        backend.on_market_update(&marks, entered_at);
+        let barrier = TripleBarrier::long(100.0, entered_at, 5.0, 5.0, 300);
+        let request = OrderRequest::new(
+            "entry",
+            "BTCUSDT",
+            OrderSide::Buy,
+            1.0,
+            "ofmr@btcusdt",
+            "btcusdt",
+        )
+        .with_barrier(barrier);
+        let order_id = backend.submit_order(request).unwrap();
+        backend.apply_fill(&FillEvent {
+            order_id,
+            symbol: "BTCUSDT".into(),
+            side: OrderSide::Buy,
+            qty: 1.0,
+            price: 100.0,
+            fee: 0.04,
+            executed_at: entered_at,
+        });
+
+        marks.insert("BTCUSDT".to_string(), 100.06);
+        backend.on_market_update(&marks, entered_at + chrono::Duration::seconds(1));
+
+        let routes = routed.lock().unwrap();
+        assert_eq!(routes.len(), 2);
+        assert_eq!(routes[1].side, OrderSide::Sell);
+        assert_eq!(routes[1].qty, 1.0);
+        assert!(routes[1].barrier.is_none());
+        assert!(routes[1].reduce_only);
+    }
+
+    #[test]
+    fn lost_venue_response_is_tracked_as_uncertain_not_rejected() {
+        let mut backend = LiveTradeBackend::with_router(Box::new(UncertainRouter));
+        let request = OrderRequest::new(
+            "uncertain",
+            "BTCUSDT",
+            OrderSide::Buy,
+            1.0,
+            "ofmr@btcusdt",
+            "btcusdt",
+        );
+        assert!(backend.submit_order(request).is_err());
+        assert_eq!(
+            backend
+                .order_state(&OrderId::new("uncertain"))
+                .unwrap()
+                .status,
+            crate::types::OrderStatus::Uncertain
+        );
+        assert!(
+            backend
+                .drain_events()
+                .iter()
+                .any(|event| matches!(event, ExecutionEvent::OrderUncertain { .. }))
+        );
     }
 }
 
