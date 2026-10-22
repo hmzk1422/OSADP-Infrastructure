@@ -1,30 +1,8 @@
-# =============================================================================
-# OSADP-Core — Continuous Integration / Delivery
-# =============================================================================
-# Matrix build for the hybrid Python/Rust stack using `maturin-action`:
-#   * Linux  (x86_64 + aarch64) — Oracle Cloud, Android proot distros, edge servers
-#   * Windows (x86_64)          — local development machines
-#
-# Jobs:
-#   rust        — compile + unit-test the entire Rust workspace on Linux & Windows
-#   wheels      — build native wheels with maturin-action, upload as artifacts
-#   docker      — build/push multi-arch runtime image to GHCR (Oracle/edge servers;
-#                 NOT for Android/Termux — see docs/TERMUX.md)
-#   smoke       — install the Linux wheel, validate the unified_runner CLI
-#   smoke-arm64 — validate the aarch64 wheel under QEMU (Termux-proot / RPi path)
-#   release     — publish wheels to PyPI on version tags (trusted publishing)
-#
-# NOTE: the `wheels` job compiles `uets_rs/engine` into a Python
-# module. The crate must expose a PyO3 `#[pymodule]` (see pyproject.toml);
-# the `rust` job validates the workspace independently of that binding.
-# =============================================================================
-
-name: CI
+name: UETS CI
 
 on:
   push:
     branches: [main, master]
-    tags: ["v*"]
   pull_request:
   workflow_dispatch:
 
@@ -32,227 +10,99 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: uets-ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  rust:
-    name: Rust (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-24.04, windows-2025]
+  linux-x86:
+    name: Linux x86_64 - UETS and Components
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          architecture: x64
+          cache: pip
+          cache-dependency-path: requirements.txt
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
 
       - name: Cache Cargo artifacts
         uses: Swatinem/rust-cache@v2
 
-      - name: cargo check
+      - name: Install Python dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Compile UETS and all workspace components
         run: cargo check --workspace --all-targets
 
-      - name: cargo test
+      - name: Run UETS and component tests
         run: cargo test --workspace
 
-  wheels:
-    name: Wheels (${{ matrix.platform.label }})
-    runs-on: ${{ matrix.platform.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        platform:
-          - { label: linux-x86_64,  os: ubuntu-24.04, target: x86_64,  manylinux: "2_28" }
-          - { label: linux-aarch64, os: ubuntu-24.04, target: aarch64, manylinux: "2_28" }
-          - { label: windows-x86_64, os: windows-2025, target: x86_64,  manylinux: "" }
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
+      - name: Verify mocked order routing and simulation edge cases
+        run: cargo test -p uets_manager adapter_preserves_reduce_only_on_exit_orders
 
-      # Only for local `act` runs: act executes the job inside a container, so
-      # maturin-action skips its own manylinux image and builds on the "host"
-      # (the job container), which ships without a Rust toolchain. On real
-      # GitHub runners this step is skipped — maturin-action handles Rust there.
-      - name: Install Rust (local act runs only)
-        if: env.ACT
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.platform.target }}
+      - name: Verify market fills and risk rejection paths
+        run: |
+          cargo test -p uets_trades market_order_fills_at_mark_with_slippage_and_fees
+          cargo test -p uets_trades insufficient_cash_rejects_with_state_update
 
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.11"
-          architecture: x64
+      - name: Run playback end-to-end smoke tests
+        run: python tests/test_playback_runner.py
 
-      - name: Build wheels
-        uses: PyO3/maturin-action@v1
-        with:
-          target: ${{ matrix.platform.target }}
-          args: --release --out dist --find-interpreter
-          sccache: true
-          manylinux: ${{ matrix.platform.manylinux }}
-          # Runs INSIDE the maturin-action container before maturin/cargo.
-          before-script-linux: |
-            # 1) libclang for bindgen (librocksdb-sys regenerates bindings)
-            if command -v yum &> /dev/null; then
-              yum install -y clang-devel llvm-devel
-            elif command -v apt-get &> /dev/null; then
-              apt-get update && apt-get install -y libclang-dev
-            fi
-            # 2) librocksdb-sys 0.16 always runs bindgen, which otherwise
-            #    parses RocksDB's c.h against HOST glibc headers and dies on
-            #    'bits/libc-header-start.h not found' when cross-compiling.
-            #    Point clang at the cross sysroot instead.
-            if [ -d /usr/aarch64-unknown-linux-gnu ]; then
-              SYSROOT=/usr/aarch64-unknown-linux-gnu
-              [ -d "$SYSROOT/aarch64-unknown-linux-gnu/sysroot" ] && SYSROOT="$SYSROOT/aarch64-unknown-linux-gnu/sysroot"
-              export BINDGEN_EXTRA_CLANG_ARGS="--target=aarch64-unknown-linux-gnu --sysroot=$SYSROOT -I/usr/aarch64-unknown-linux-gnu/include"
-              echo "BINDGEN_EXTRA_CLANG_ARGS=$BINDGEN_EXTRA_CLANG_ARGS"
-            fi
+      - name: Run Clippy on UETS and all workspace components
+        run: cargo clippy --workspace --all-targets -- -D clippy::correctness -D clippy::suspicious
 
-      - name: Upload wheels
-        uses: actions/upload-artifact@v6
-        with:
-          name: wheels-${{ matrix.platform.label }}
-          path: dist
-          if-no-files-found: error
+      - name: Install Semgrep
+        run: python -m pip install semgrep
 
-  docker:
-    name: Build and Push Docker Image
-    needs: wheels
+      - name: Run UETS static-analysis rules
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          BEFORE_SHA: ${{ github.event.before }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            baseline="origin/$BASE_REF"
+          else
+            baseline="$BEFORE_SHA"
+          fi
+          if [ -z "$baseline" ] || [ "$baseline" = "0000000000000000000000000000000000000000" ]; then
+            baseline="HEAD^"
+          fi
+          semgrep scan --config .semgrep.yml --baseline-commit "$baseline" --error --metrics=off
+
+  bybit-testnet-orders:
+    name: Bybit testnet order acceptance (manual)
+    if: github.event_name == 'workflow_dispatch' && vars.UETS_BYBIT_TESTNET_SMOKE == 'true'
     runs-on: ubuntu-24.04
-    if: github.ref == 'refs/heads/main' # Only push on main branch merges
-    permissions:
-      contents: read
-      packages: write # Allows pushing to GHCR
+    timeout-minutes: 10
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
-      - name: Download Linux x86_64 wheel
-        uses: actions/download-artifact@v6
-        with:
-          name: wheels-linux-x86_64
-          path: dist
-
-      - name: Download Linux aarch64 wheel
-        uses: actions/download-artifact@v6
-        with:
-          name: wheels-linux-aarch64
-          path: dist
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Set up QEMU (for ARM emulation)
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      # Handles lowercasing repository names and tag formatting safely
-      - name: Extract Docker metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ghcr.io/${{ github.repository }}
-          tags: |
-            type=raw,value=latest
-
-      - name: Build and Push Multi-Arch Image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./Dockerfile
-          push: true
-          platforms: linux/amd64,linux/arm64
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-
-  smoke:
-    name: Smoke test (unified_runner)
-    needs: wheels
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
+      - name: Install Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Download Linux x86_64 wheel
-        uses: actions/download-artifact@v6
-        with:
-          name: wheels-linux-x86_64
-          path: dist
-
-      - name: Install wheel
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install dist/*.whl
-
-      - name: Validate unified runner
-        run: |
-          python unified_runner.py --help
-          python unified_runner.py doctor --require-native
-
-  # Validates the exact artifact Termux-proot / Raspberry-Pi users install:
-  # glibc linux/arm64 + pip wheel. Runs the runner under QEMU emulation.
-  smoke-arm64:
-    name: Smoke test (linux-aarch64 under QEMU)
-    needs: wheels
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Download Linux aarch64 wheel
-        uses: actions/download-artifact@v6
-        with:
-          name: wheels-linux-aarch64
-          path: dist
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Validate wheel on emulated arm64
-        run: |
-          docker run --rm --platform linux/arm64 \
-            -v "$PWD":/work -w /work python:3.11-slim bash -exc '
-              pip install --no-cache-dir dist/*.whl
-              python unified_runner.py --help
-              python unified_runner.py doctor --require-native
-            '
-
-  release:
-    name: Publish to PyPI
-    runs-on: ubuntu-24.04
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: wheels
-    permissions:
-      id-token: write   # trusted publishing
-      contents: write
-      attestations: write
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Download all wheels
-        uses: actions/download-artifact@v6
-        with:
-          path: dist
-          merge-multiple: true
-
-      - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+      - name: Submit and verify testnet orders
+        env:
+          UETS_BYBIT_TESTNET_API_KEY: ${{ secrets.UETS_BYBIT_TESTNET_API_KEY }}
+          UETS_BYBIT_TESTNET_API_SECRET: ${{ secrets.UETS_BYBIT_TESTNET_API_SECRET }}
+          UETS_BYBIT_TESTNET_SYMBOL: ${{ vars.UETS_BYBIT_TESTNET_SYMBOL }}
+          UETS_BYBIT_TESTNET_QTY: ${{ vars.UETS_BYBIT_TESTNET_QTY }}
+          UETS_BYBIT_TESTNET_MAX_NOTIONAL_USDT: ${{ vars.UETS_BYBIT_TESTNET_MAX_NOTIONAL_USDT }}
+          UETS_BYBIT_TESTNET_POSITION_MODE: ${{ vars.UETS_BYBIT_TESTNET_POSITION_MODE }}
+          UETS_BYBIT_TESTNET_CONFIRM: YES
+        run: python tests/bybit_testnet_order_smoke.py

@@ -14,10 +14,10 @@ Run from the repository root:
 
 ```bash
 docker compose -f docker-compose.dev.yml build uets-dev # Build the Linux Rust/Python development image
+docker compose -f docker-compose.dev.yml run --rm uets-dev cargo check --workspace --all-targets # Compile UETS and all workspace components in Linux
+docker compose -f docker-compose.dev.yml run --rm uets-dev cargo test --workspace # Run all UETS and component tests in Linux
+docker compose -f docker-compose.dev.yml run --rm uets-dev cargo clippy --workspace --all-targets -- -D clippy::correctness -D clippy::suspicious # Run Rust static analysis
 docker compose -f docker-compose.dev.yml run --rm uets-dev cargo run --manifest-path uets/Cargo.toml --bin dev_test -- help # Show UETS CLI help
-docker compose -f docker-compose.dev.yml run --rm uets-dev cargo test --manifest-path uets/Cargo.toml # Run UETS tests in Linux
-docker compose -f docker-compose.dev.yml run --rm uets-dev cargo test --manifest-path components/pipelines/uets_trades/Cargo.toml # Test playback and trade execution
-docker compose -f docker-compose.dev.yml run --rm uets-dev cargo test --manifest-path components/pipelines/uets_manager/Cargo.toml # Test execution-mode settings and routing
 docker compose -f docker-compose.dev.yml run --rm uets-dev cargo run --manifest-path uets/Cargo.toml --bin dev_test -- playback # Run selected playback method from the YAML
 docker compose -f docker-compose.dev.yml run --rm uets-dev python tests/test_playback_runner.py # Verify all playback modes; prints SUCCESSFUL
 docker compose -f docker-compose.dev.yml --profile live run --rm uets-live run ofmr@btcusdt # Start the OFMR worker through Docker (paper by default)
@@ -36,10 +36,12 @@ Local Rust equivalents (Linux/macOS):
 
 ```bash
 cargo run --release --manifest-path uets/Cargo.toml --bin dev_test -- run ofmr@btcusdt ofmr@ethusdt # Launch UETS TUI and strategy workers
+cargo check --workspace --all-targets # Compile UETS and all workspace components
+cargo test --workspace # Run all UETS and component tests
+cargo clippy --workspace --all-targets -- -D clippy::correctness -D clippy::suspicious # Run Rust static analysis
 cargo run --manifest-path uets/Cargo.toml --bin dev_test -- playback # Run YAML-selected playback
 python tests/test_playback_runner.py # Run all three playback smoke tests; prints SUCCESSFUL
-cargo test --manifest-path components/pipelines/uets_trades/Cargo.toml # Test playback/execution crate
-cargo test --manifest-path components/pipelines/uets_manager/Cargo.toml # Test manager/settings crate
+python tests/bybit_testnet_order_smoke.py # Verify Bybit testnet market/limit/stop long/short calls; testnet env vars required
 ```
 
 The TUI supports adding/disabling workers; press `q` to stop. Logs are written

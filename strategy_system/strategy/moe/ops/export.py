@@ -169,6 +169,108 @@ def build_gp_features_payload(
     }
 
 
+def build_rust_gp_features_payload(
+    latent_id: str,
+    gp_model,
+    horizon_model,
+    terminal_names: list[str],
+    horizons: list[str],
+) -> dict:
+    """Serialize the shared Rust GP library with a latent-specific horizon model."""
+    library = gp_model.library
+    by_name = {item["name"]: item for item in library["features"]}
+    feature_order = list(horizon_model.feature_columns)
+    missing = [name for name in feature_order if name not in by_name]
+    if missing:
+        raise ValueError(f"Rust GP library is missing horizon features: {missing}")
+
+    def variable_indices(node: dict) -> set[int]:
+        indices: set[int] = set()
+
+        def visit(value: dict) -> None:
+            if value.get("op") == "var":
+                indices.add(int(value["idx"]))
+            for child in value.values():
+                if isinstance(child, dict):
+                    visit(child)
+                elif isinstance(child, list):
+                    for item in child:
+                        if isinstance(item, dict):
+                            visit(item)
+
+        visit(node)
+        return indices
+
+    features = []
+    for name in feature_order:
+        item = by_name[name]
+        features.append({
+            "output_column": name,
+            "target_column": None,
+            "formula": item["formula"],
+            "tree": item["tree"],
+            "terminals_used": [],
+            "direction": "unsupervised",
+            "train_ic": None,
+            "validation_ic": None,
+            "n_train": horizon_model.n_train,
+        })
+
+    used_indices: set[int] = set()
+    for item in features:
+        indices = variable_indices(by_name[item["output_column"]]["tree"])
+        used_indices.update(indices)
+        item["terminals_used"] = [terminal_names[i] for i in sorted(indices)]
+    used_names = [terminal_names[i] for i in sorted(used_indices)]
+
+    normalization = {
+        "normalization_window": int(gp_model.normalization["normalization_window"]),
+        "normalization_min_periods": int(gp_model.normalization["normalization_min_periods"]),
+        "clip_z": float(gp_model.normalization["clip_z"]),
+    }
+    price_exclusions = {
+        "return", "returns", "ret", "change", "pct", "percent", "qty",
+        "quantity", "size", "volume", "depth", "imbalance", "flow", "count", "ratio",
+    }
+    input_terminals = []
+    for name in used_names:
+        parts = name.lower().replace("-", "_").split("_")
+        is_price = not price_exclusions.intersection(parts) and (
+            bool({"price", "close", "mid", "last"}.intersection(parts))
+            or bool(parts and parts[-1] in {"bid", "ask"})
+        )
+        input_terminals.append({
+            "name": name,
+            "source_column": name,
+            "pre_transform": "log_return" if is_price else "identity",
+            "normalization": "causal_rolling_zscore",
+            "window": normalization["normalization_window"],
+            "min_periods": normalization["normalization_min_periods"],
+            "clip_z": normalization["clip_z"],
+        })
+
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "latent_id": latent_id,
+        "note": "Features are selected globally by the Rust GP and shared across latent states.",
+        "input_terminals": input_terminals,
+        "features": features,
+        "horizon_model": {
+            "type": "standardized_ridge_linreg",
+            "formula": "pred[h] = sum_j ((x_j - mean_j) / scale_j) * coefficients[j][h] + intercept[h]",
+            "feature_order": feature_order,
+            "target_order": list(horizon_model.target_columns),
+            "horizons": list(horizons),
+            "feature_mean": horizon_model.feature_mean,
+            "feature_scale": horizon_model.feature_scale,
+            "coefficients": horizon_model.coefficients,
+            "intercept": horizon_model.intercept,
+            "n_train": horizon_model.n_train,
+        },
+        "missing_value_policy": "non-finite feature -> row not tradeable (no prediction)",
+    }
+
+
 # --------------------------------------------------------------------------- #
 # tb_regressor.onnx
 # --------------------------------------------------------------------------- #
@@ -238,7 +340,12 @@ def export_tb_onnx(path: Path, tp_model, sl_model, n_features: int, parity_x: np
 def export_gp_features(models_dir: Path, latent_id: str, gp_model, horizon_model,
                        terminal_names: list[str], horizons: list[str]) -> Path:
     """Write ``latent_<id>/gp_features.json`` (feature formulas + horizon predictor)."""
-    payload = build_gp_features_payload(latent_id, gp_model, terminal_names, horizon_model, horizons)
+    if hasattr(gp_model, "library"):
+        payload = build_rust_gp_features_payload(
+            latent_id, gp_model, horizon_model, terminal_names, horizons
+        )
+    else:
+        payload = build_gp_features_payload(latent_id, gp_model, terminal_names, horizon_model, horizons)
     return write_json(models_dir / latent_dir_name(latent_id) / GP_FEATURES_FILE, payload)
 
 

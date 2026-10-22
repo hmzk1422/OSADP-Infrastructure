@@ -1,4 +1,4 @@
-mode: paper # paper | testnet | live | playback
+mode: playback # paper | testnet | live | playback
 allow_live_trading: false
 
 playback:
