@@ -1,0 +1,26 @@
+    Checking uets_gui v0.1.0 (C:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\components\pipelines\uets_gui)
+error: this `if` statement can be collapsed
+   --> components\pipelines\uets_gui\src\gui.rs:351:13
+    |
+351 | /             if event::poll(timeout)? {
+352 | |                 if let Event::Key(key) = event::read()? {
+353 | |                     if let Some(input) = &mut self.add_input {
+354 | |                         match key.code {
+...   |
+394 | |             }
+    | |_____________^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#collapsible_if
+    = note: `-D clippy::collapsible-if` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::collapsible_if)]`
+help: collapse nested if block
+    |
+351 ~             if event::poll(timeout)?
+352 ~                 && let Event::Key(key) = event::read()? {
+353 |                     if let Some(input) = &mut self.add_input {
+...
+392 |                     }
+393 ~                 }
+    |
+
+error: could not compile `uets_gui` (lib) due to 1 previous error

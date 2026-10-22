@@ -84,7 +84,7 @@ impl FeatureComputer {
     /// Compile a spec document and build from it. The normal entry point:
     /// hand it the JSON produced by the Python `FeaturePipeline.compile()`.
     pub fn from_spec_json(json: &str) -> Result<Self, FeatureError> {
-        Ok(Self::new(parse_spec(json)?)?)
+        Self::new(parse_spec(json)?)
     }
 
     /// Feature names, in declaration order.

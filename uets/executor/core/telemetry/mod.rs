@@ -230,7 +230,7 @@ pub struct TelemetrySnapshot {
 }
 
 impl TelemetrySnapshot {
-    pub fn to_json(&self) -> String {
+    pub fn to_json(self) -> String {
         let last = match self.last_event_ms {
             Some(ms) => ms.to_string(),
             None => "null".to_string(),

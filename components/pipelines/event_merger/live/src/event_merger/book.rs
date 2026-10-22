@@ -125,12 +125,12 @@ impl LobBook {
             self.asks.remove(&price);
             self.bids
                 .insert(price, Level { quantity })
-                .map_or(true, |old| old.quantity != quantity)
+                .is_none_or(|old| old.quantity != quantity)
         } else {
             self.bids.remove(&price);
             self.asks
                 .insert(price, Level { quantity })
-                .map_or(true, |old| old.quantity != quantity)
+                .is_none_or(|old| old.quantity != quantity)
         }
     }
 

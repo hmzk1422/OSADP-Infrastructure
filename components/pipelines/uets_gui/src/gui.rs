@@ -348,8 +348,8 @@ impl<S: SnapshotSource> Monitor<S> {
                 )
             })?;
             let timeout = self.interval.saturating_sub(started.elapsed());
-            if event::poll(timeout)? {
-                if let Event::Key(key) = event::read()? {
+            if event::poll(timeout)?
+                && let Event::Key(key) = event::read()? {
                     if let Some(input) = &mut self.add_input {
                         match key.code {
                             crossterm::event::KeyCode::Esc => self.add_input = None,
@@ -391,7 +391,6 @@ impl<S: SnapshotSource> Monitor<S> {
                         crate::controls::Action::None => {}
                     }
                 }
-            }
         }
     }
 
@@ -425,188 +424,6 @@ impl<S: SnapshotSource> Monitor<S> {
         let current = self.selected.unwrap_or(0) as isize;
         self.selected =
             Some((current + delta).clamp(0, snapshot.instances.len() as isize - 1) as usize);
-    }
-}
-
-#[cfg(test)]
-mod aggregation_tests {
-    use super::*;
-
-    fn instance(
-        asset: &str,
-        starting: f64,
-        equity: f64,
-        trades: usize,
-        win_rate: f64,
-        rr: f64,
-        rr_trades: usize,
-    ) -> InstanceSnapshot {
-        InstanceSnapshot {
-            strategy_id: "ofmr".into(),
-            asset_id: asset.into(),
-            statistics: Statistics {
-                starting_equity: Some(starting),
-                equity: Some(equity),
-                cash: Some(equity),
-                realized_pnl: Some(equity - starting),
-                unrealized_pnl: Some(0.0),
-                exposure: Some(0.0),
-                trades: Some(trades),
-                win_rate: Some(win_rate),
-                expectancy_rr: Some(rr),
-                expectancy_trades: Some(rr_trades),
-                status: Some("enabled".into()),
-                ..Statistics::default()
-            },
-            equity_history: vec![starting, equity],
-        }
-    }
-
-    #[test]
-    fn aggregates_account_values_and_weights_trade_metrics() {
-        let instances = [
-            instance("btcusdt", 100.0, 110.0, 2, 0.5, 1.0, 2),
-            instance("ethusdt", 200.0, 180.0, 1, 0.0, -2.0, 1),
-        ];
-        let mut history = Vec::new();
-        let mut starting_equity = 0.0;
-        let stats = aggregate_instances(&instances, &mut history, &mut starting_equity);
-        assert_eq!(stats.starting_equity, Some(300.0));
-        assert_eq!(stats.equity, Some(290.0));
-        assert_eq!(stats.absolute_return, Some(-10.0));
-        assert!((stats.cumulative_return.unwrap() + 1.0 / 30.0).abs() < 1e-12);
-        assert_eq!(stats.trades, Some(3));
-        assert!((stats.win_rate.unwrap() - 1.0 / 3.0).abs() < 1e-12);
-        assert_eq!(stats.expectancy_rr, Some(0.0));
-        assert_eq!(history, vec![290.0]);
-        assert_eq!(stats.status.as_deref(), Some("enabled"));
-    }
-
-    #[test]
-    fn aggregate_preserves_worker_operational_telemetry() {
-        let mut item = instance("btcusdt", 100.0, 101.0, 0, 0.0, 0.0, 0);
-        item.statistics.latest_market_data = Some("1792249435161".into());
-        item.statistics.latest_decision = Some("Hold".into());
-        item.statistics.exchange_latency_ms = Some(12.0);
-        item.statistics.processing_latency_ms = Some(0.25);
-        item.statistics.latency_p95_ms = Some(0.4);
-        item.statistics.clock_skew_mean_ms = Some(-3.0);
-        item.statistics.clock_skew_max_ms = Some(5.0);
-        item.statistics.memory_mb = Some(18.0);
-        let mut history = Vec::new();
-        let mut starting_equity = 0.0;
-        let stats = aggregate_instances(&[item], &mut history, &mut starting_equity);
-        assert_eq!(stats.latest_market_data.as_deref(), Some("1792249435161"));
-        assert_eq!(stats.latest_decision.as_deref(), Some("Hold"));
-        assert_eq!(stats.exchange_latency_ms, Some(12.0));
-        assert_eq!(stats.processing_latency_ms, Some(0.25));
-        assert_eq!(stats.latency_p95_ms, Some(0.4));
-        assert_eq!(stats.clock_skew_mean_ms, Some(-3.0));
-        assert_eq!(stats.clock_skew_max_ms, Some(5.0));
-        assert_eq!(stats.memory_mb, Some(18.0));
-    }
-
-    #[test]
-    fn aggregate_drawdown_and_sortino_use_aggregate_curve() {
-        let instances = [instance("btcusdt", 100.0, 90.0, 0, 0.0, 0.0, 0)];
-        let mut history = vec![100.0, 120.0];
-        let mut starting_equity = 100.0;
-        let stats = aggregate_instances(&instances, &mut history, &mut starting_equity);
-        assert_eq!(stats.max_drawdown, Some(0.25));
-        assert!(
-            (stats.sortino.unwrap() - (-0.025 / (0.25_f64.powi(2) / 2.0).sqrt())).abs() < 1e-12
-        );
-    }
-
-    #[test]
-    fn adding_an_instance_rebases_history_without_creating_fake_returns() {
-        let mut history = Vec::new();
-        let mut starting_equity = 0.0;
-        let one = [instance("btcusdt", 100.0, 110.0, 0, 0.0, 0.0, 0)];
-        aggregate_instances(&one, &mut history, &mut starting_equity);
-        let two = [
-            instance("btcusdt", 100.0, 110.0, 0, 0.0, 0.0, 0),
-            instance("ethusdt", 200.0, 200.0, 0, 0.0, 0.0, 0),
-        ];
-        let stats = aggregate_instances(&two, &mut history, &mut starting_equity);
-        assert_eq!(starting_equity, 300.0);
-        assert_eq!(history, vec![310.0, 310.0]);
-        assert_eq!(stats.cumulative_return, Some(10.0 / 300.0));
-        assert_eq!(stats.max_drawdown, Some(0.0));
-    }
-    #[test]
-    fn statistics_serializes_stop_loss_take_profit_and_price_vs_entry_pct() {
-        let stats = Statistics {
-            stop_loss_pct: Some(0.5),
-            take_profit_pct: Some(1.0),
-            price_vs_entry_pct: Some(2.5),
-            ..Statistics::default()
-        };
-        let json = serde_json::to_string(&stats).unwrap();
-        let back: Statistics = serde_json::from_str(&json).unwrap();
-        assert_eq!(back.stop_loss_pct, Some(0.5));
-        assert_eq!(back.take_profit_pct, Some(1.0));
-        assert_eq!(back.price_vs_entry_pct, Some(2.5));
-
-        // Older payloads without the new keys deserialize to None.
-        let back: Statistics = serde_json::from_str("{}" ).unwrap();
-        assert_eq!(back.stop_loss_pct, None);
-        assert_eq!(back.take_profit_pct, None);
-        assert_eq!(back.price_vs_entry_pct, None);
-    }
-
-    #[test]
-    fn aggregate_preserves_stop_loss_take_profit_and_price_vs_entry_pct() {
-        let mut first = instance("btcusdt", 100.0, 101.0, 0, 0.0, 0.0, 0);
-        first.statistics.stop_loss_pct = Some(0.4);
-        first.statistics.take_profit_pct = Some(0.8);
-        first.statistics.price_vs_entry_pct = Some(2.0);
-        let mut second = instance("ethusdt", 100.0, 100.0, 0, 0.0, 0.0, 0);
-        second.statistics.stop_loss_pct = Some(0.6);
-        second.statistics.take_profit_pct = Some(1.2);
-        second.statistics.price_vs_entry_pct = Some(-1.0);
-        // Instances without an open position report None and are skipped.
-        let third = instance("solusdt", 100.0, 100.0, 0, 0.0, 0.0, 0);
-        let instances = [first, second, third];
-        let mut history = Vec::new();
-        let mut starting_equity = 0.0;
-        let stats = aggregate_instances(&instances, &mut history, &mut starting_equity);
-        assert!((stats.stop_loss_pct.unwrap() - 0.5).abs() < 1e-12);
-        assert!((stats.take_profit_pct.unwrap() - 1.0).abs() < 1e-12);
-        assert!((stats.price_vs_entry_pct.unwrap() - 0.5).abs() < 1e-12);
-    }
-
-    #[test]
-    fn instance_detail_table_shows_bracket_and_price_vs_entry_columns() {
-        let mut item = instance("btcusdt", 10_000.0, 10_000.0, 1, 0.5, 1.0, 1);
-        item.statistics.stop_loss_pct = Some(0.5);
-        item.statistics.take_profit_pct = Some(1.0);
-        item.statistics.price_vs_entry_pct = Some(2.5);
-        item.statistics.status = Some("enabled".into());
-        let snapshot = DashboardSnapshot {
-            timestamp: None,
-            aggregate: Statistics::default(),
-            aggregate_equity_history: Vec::new(),
-            instances: vec![item],
-        };
-        let backend = ratatui::backend::TestBackend::new(160, 44);
-        let mut terminal = ratatui::Terminal::new(backend).unwrap();
-        terminal
-            .draw(|frame| render(frame, &snapshot, Some(0), None, None))
-            .unwrap();
-        let buffer = terminal.backend().buffer();
-        let mut screen = String::new();
-        for y in 0..buffer.area.height {
-            for x in 0..buffer.area.width {
-                screen.push_str(buffer[(x, y)].symbol());
-            }
-        }
-        assert!(screen.contains("SL%"), "missing SL% column:\n{screen}");
-        assert!(screen.contains("TP%"), "missing TP% column:\n{screen}");
-        assert!(screen.contains("PvE%"), "missing PvE% column:\n{screen}");
-        assert!(screen.contains("0.50%"), "missing stop distance:\n{screen}");
-        assert!(screen.contains("1.00%"), "missing target distance:\n{screen}");
-        assert!(screen.contains("2.50%"), "missing price vs entry:\n{screen}");
     }
 }
 
@@ -971,4 +788,186 @@ fn render_instances(
         ),
         chunks[1],
     );
+}
+
+#[cfg(test)]
+mod aggregation_tests {
+    use super::*;
+
+    fn instance(
+        asset: &str,
+        starting: f64,
+        equity: f64,
+        trades: usize,
+        win_rate: f64,
+        rr: f64,
+        rr_trades: usize,
+    ) -> InstanceSnapshot {
+        InstanceSnapshot {
+            strategy_id: "ofmr".into(),
+            asset_id: asset.into(),
+            statistics: Statistics {
+                starting_equity: Some(starting),
+                equity: Some(equity),
+                cash: Some(equity),
+                realized_pnl: Some(equity - starting),
+                unrealized_pnl: Some(0.0),
+                exposure: Some(0.0),
+                trades: Some(trades),
+                win_rate: Some(win_rate),
+                expectancy_rr: Some(rr),
+                expectancy_trades: Some(rr_trades),
+                status: Some("enabled".into()),
+                ..Statistics::default()
+            },
+            equity_history: vec![starting, equity],
+        }
+    }
+
+    #[test]
+    fn aggregates_account_values_and_weights_trade_metrics() {
+        let instances = [
+            instance("btcusdt", 100.0, 110.0, 2, 0.5, 1.0, 2),
+            instance("ethusdt", 200.0, 180.0, 1, 0.0, -2.0, 1),
+        ];
+        let mut history = Vec::new();
+        let mut starting_equity = 0.0;
+        let stats = aggregate_instances(&instances, &mut history, &mut starting_equity);
+        assert_eq!(stats.starting_equity, Some(300.0));
+        assert_eq!(stats.equity, Some(290.0));
+        assert_eq!(stats.absolute_return, Some(-10.0));
+        assert!((stats.cumulative_return.unwrap() + 1.0 / 30.0).abs() < 1e-12);
+        assert_eq!(stats.trades, Some(3));
+        assert!((stats.win_rate.unwrap() - 1.0 / 3.0).abs() < 1e-12);
+        assert_eq!(stats.expectancy_rr, Some(0.0));
+        assert_eq!(history, vec![290.0]);
+        assert_eq!(stats.status.as_deref(), Some("enabled"));
+    }
+
+    #[test]
+    fn aggregate_preserves_worker_operational_telemetry() {
+        let mut item = instance("btcusdt", 100.0, 101.0, 0, 0.0, 0.0, 0);
+        item.statistics.latest_market_data = Some("1792249435161".into());
+        item.statistics.latest_decision = Some("Hold".into());
+        item.statistics.exchange_latency_ms = Some(12.0);
+        item.statistics.processing_latency_ms = Some(0.25);
+        item.statistics.latency_p95_ms = Some(0.4);
+        item.statistics.clock_skew_mean_ms = Some(-3.0);
+        item.statistics.clock_skew_max_ms = Some(5.0);
+        item.statistics.memory_mb = Some(18.0);
+        let mut history = Vec::new();
+        let mut starting_equity = 0.0;
+        let stats = aggregate_instances(&[item], &mut history, &mut starting_equity);
+        assert_eq!(stats.latest_market_data.as_deref(), Some("1792249435161"));
+        assert_eq!(stats.latest_decision.as_deref(), Some("Hold"));
+        assert_eq!(stats.exchange_latency_ms, Some(12.0));
+        assert_eq!(stats.processing_latency_ms, Some(0.25));
+        assert_eq!(stats.latency_p95_ms, Some(0.4));
+        assert_eq!(stats.clock_skew_mean_ms, Some(-3.0));
+        assert_eq!(stats.clock_skew_max_ms, Some(5.0));
+        assert_eq!(stats.memory_mb, Some(18.0));
+    }
+
+    #[test]
+    fn aggregate_drawdown_and_sortino_use_aggregate_curve() {
+        let instances = [instance("btcusdt", 100.0, 90.0, 0, 0.0, 0.0, 0)];
+        let mut history = vec![100.0, 120.0];
+        let mut starting_equity = 100.0;
+        let stats = aggregate_instances(&instances, &mut history, &mut starting_equity);
+        assert_eq!(stats.max_drawdown, Some(0.25));
+        assert!(
+            (stats.sortino.unwrap() - (-0.025 / (0.25_f64.powi(2) / 2.0).sqrt())).abs() < 1e-12
+        );
+    }
+
+    #[test]
+    fn adding_an_instance_rebases_history_without_creating_fake_returns() {
+        let mut history = Vec::new();
+        let mut starting_equity = 0.0;
+        let one = [instance("btcusdt", 100.0, 110.0, 0, 0.0, 0.0, 0)];
+        aggregate_instances(&one, &mut history, &mut starting_equity);
+        let two = [
+            instance("btcusdt", 100.0, 110.0, 0, 0.0, 0.0, 0),
+            instance("ethusdt", 200.0, 200.0, 0, 0.0, 0.0, 0),
+        ];
+        let stats = aggregate_instances(&two, &mut history, &mut starting_equity);
+        assert_eq!(starting_equity, 300.0);
+        assert_eq!(history, vec![310.0, 310.0]);
+        assert_eq!(stats.cumulative_return, Some(10.0 / 300.0));
+        assert_eq!(stats.max_drawdown, Some(0.0));
+    }
+    #[test]
+    fn statistics_serializes_stop_loss_take_profit_and_price_vs_entry_pct() {
+        let stats = Statistics {
+            stop_loss_pct: Some(0.5),
+            take_profit_pct: Some(1.0),
+            price_vs_entry_pct: Some(2.5),
+            ..Statistics::default()
+        };
+        let json = serde_json::to_string(&stats).unwrap();
+        let back: Statistics = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.stop_loss_pct, Some(0.5));
+        assert_eq!(back.take_profit_pct, Some(1.0));
+        assert_eq!(back.price_vs_entry_pct, Some(2.5));
+
+        // Older payloads without the new keys deserialize to None.
+        let back: Statistics = serde_json::from_str("{}" ).unwrap();
+        assert_eq!(back.stop_loss_pct, None);
+        assert_eq!(back.take_profit_pct, None);
+        assert_eq!(back.price_vs_entry_pct, None);
+    }
+
+    #[test]
+    fn aggregate_preserves_stop_loss_take_profit_and_price_vs_entry_pct() {
+        let mut first = instance("btcusdt", 100.0, 101.0, 0, 0.0, 0.0, 0);
+        first.statistics.stop_loss_pct = Some(0.4);
+        first.statistics.take_profit_pct = Some(0.8);
+        first.statistics.price_vs_entry_pct = Some(2.0);
+        let mut second = instance("ethusdt", 100.0, 100.0, 0, 0.0, 0.0, 0);
+        second.statistics.stop_loss_pct = Some(0.6);
+        second.statistics.take_profit_pct = Some(1.2);
+        second.statistics.price_vs_entry_pct = Some(-1.0);
+        // Instances without an open position report None and are skipped.
+        let third = instance("solusdt", 100.0, 100.0, 0, 0.0, 0.0, 0);
+        let instances = [first, second, third];
+        let mut history = Vec::new();
+        let mut starting_equity = 0.0;
+        let stats = aggregate_instances(&instances, &mut history, &mut starting_equity);
+        assert!((stats.stop_loss_pct.unwrap() - 0.5).abs() < 1e-12);
+        assert!((stats.take_profit_pct.unwrap() - 1.0).abs() < 1e-12);
+        assert!((stats.price_vs_entry_pct.unwrap() - 0.5).abs() < 1e-12);
+    }
+
+    #[test]
+    fn instance_detail_table_shows_bracket_and_price_vs_entry_columns() {
+        let mut item = instance("btcusdt", 10_000.0, 10_000.0, 1, 0.5, 1.0, 1);
+        item.statistics.stop_loss_pct = Some(0.5);
+        item.statistics.take_profit_pct = Some(1.0);
+        item.statistics.price_vs_entry_pct = Some(2.5);
+        item.statistics.status = Some("enabled".into());
+        let snapshot = DashboardSnapshot {
+            timestamp: None,
+            aggregate: Statistics::default(),
+            aggregate_equity_history: Vec::new(),
+            instances: vec![item],
+        };
+        let backend = ratatui::backend::TestBackend::new(160, 44);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| render(frame, &snapshot, Some(0), None, None))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let mut screen = String::new();
+        for y in 0..buffer.area.height {
+            for x in 0..buffer.area.width {
+                screen.push_str(buffer[(x, y)].symbol());
+            }
+        }
+        assert!(screen.contains("SL%"), "missing SL% column:\n{screen}");
+        assert!(screen.contains("TP%"), "missing TP% column:\n{screen}");
+        assert!(screen.contains("PvE%"), "missing PvE% column:\n{screen}");
+        assert!(screen.contains("0.50%"), "missing stop distance:\n{screen}");
+        assert!(screen.contains("1.00%"), "missing target distance:\n{screen}");
+        assert!(screen.contains("2.50%"), "missing price vs entry:\n{screen}");
+    }
 }

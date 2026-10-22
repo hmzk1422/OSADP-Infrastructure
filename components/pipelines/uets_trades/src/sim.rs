@@ -110,6 +110,11 @@ impl Book {
         self.capital.get(strategy_id).cloned()
     }
 
+    /// Borrow a capital snapshot without cloning it.
+    pub fn capital_ref(&self, strategy_id: &str) -> Option<&Capital> {
+        self.capital.get(strategy_id)
+    }
+
     /// Merge the latest marks.
     pub fn set_marks(&mut self, marks: &BTreeMap<String, f64>) {
         for (symbol, price) in marks {
@@ -174,6 +179,7 @@ impl Book {
     ///
     /// `entry_barrier` is attached when this fill opens (or adds to) a
     /// position; it defines the initial risk used for R-multiples.
+    #[allow(clippy::too_many_arguments)]
     pub fn apply_fill(
         &mut self,
         strategy_id: &str,
@@ -488,11 +494,10 @@ impl SimEngine {
         let (fill_qty, price) = match request.order_type {
             OrderType::Market => {
                 let mut q = remaining;
-                if filled_so_far == 0.0 {
-                    if let Some(ratio) = self.config.partial_fill_ratio {
+                if filled_so_far == 0.0
+                    && let Some(ratio) = self.config.partial_fill_ratio {
                         q = (remaining * ratio).clamp(EPS, remaining);
                     }
-                }
                 let edge = (self.config.spread_bps / 2.0 + self.config.slippage_bps) / 10_000.0;
                 let px = match request.side {
                     OrderSide::Buy => mark * (1.0 + edge),
@@ -566,11 +571,7 @@ impl SimEngine {
             executed_at: now,
         }));
 
-        if fully_filled {
-            FillOutcome::Filled
-        } else {
-            FillOutcome::Filled
-        }
+        FillOutcome::Filled
     }
 
     /// Mark an order rejected (fill-time validation failure).
@@ -718,6 +719,11 @@ impl SimEngine {
     /// Capital snapshot for a strategy instance.
     pub fn capital(&self, strategy_id: &str) -> Option<Capital> {
         self.book.capital(strategy_id)
+    }
+
+    /// Borrow a capital snapshot without cloning it.
+    pub fn capital_ref(&self, strategy_id: &str) -> Option<&Capital> {
+        self.book.capital_ref(strategy_id)
     }
 }
 

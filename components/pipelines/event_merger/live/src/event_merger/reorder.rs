@@ -157,10 +157,7 @@ impl ReorderBuffer {
         // The heap top is the smallest key, so stop as soon as it is not safe.
         // Copy the key out before popping: peeking borrows `self.heap`
         // immutably, which cannot overlap the `pop` below.
-        loop {
-            let Some(Reverse((key, arrival))) = self.heap.peek().copied() else {
-                break;
-            };
+        while let Some(Reverse((key, arrival))) = self.heap.peek().copied() {
             if key.timestamp_ms > cutoff {
                 break;
             }

@@ -46,21 +46,9 @@ WORKDIR /workspace
 
 # Python deps.
 #
-# The repo vendors no real requirements.txt (the README references one that was
-# never committed), so a stub with a comment lives at the repo root purely so
-# this COPY always resolves -- `COPY requirements.txt` of a missing file fails
-# the build, and a glob that matches nothing fails too.
-#
-# COPY has no shell form: it is exec-form, so a `2>/dev/null || true` guard is
-# parsed as a third *path* and fails with
-# `failed to calculate checksum ... "/2>/dev/null": not found`.
-#
-# The Rust crates need no Python at all, which is why a stub is honest rather
-# than a workaround. Install the research stack into a running container when
-# it is actually wanted.
+# Python playback uses NumPy/Pandas and CryptoL2 Parquet uses PyArrow.
 COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt && \
-    echo "requirements.txt held no installable packages (stub) -- nothing to do"
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Source last: every edit above this line is cached, so iterating on Rust does
 # not re-run apt or pip.

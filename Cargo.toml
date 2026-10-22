@@ -1,0 +1,18 @@
+[workspace]
+# Virtual workspace so `cargo check --workspace` / `cargo test --workspace`
+# work from the repo root in CI. Only the live-trading ecosystem is included;
+# the standalone `components/rust_components` data-pipeline package (lob_replay,
+# event_merger) is intentionally excluded — it is a separate tool with heavy
+# Arrow/Parquet deps and no path link to `uets`.
+members = [
+    "uets",
+    "components/pipelines/event_merger/live",
+    "components/pipelines/uets_db",
+    "components/pipelines/uets_gui",
+    "components/pipelines/uets_trades",
+    "components/pipelines/uets_manager",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"

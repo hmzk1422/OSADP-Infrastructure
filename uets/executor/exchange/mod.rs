@@ -18,6 +18,7 @@
 //! an `AccountSnapshot` — and never performs one. `crate::connectors`
 //! supplies the transport per venue. Nothing here knows a venue's wire format.
 
+#[allow(clippy::module_inception)]
 pub mod exchange;
 
 pub use exchange::*;

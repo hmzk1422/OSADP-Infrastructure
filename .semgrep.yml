@@ -1,0 +1,153 @@
+rules:
+  # === Rust: Fatal logic bugs & unhandled panics ===========================
+
+  # Panics in production code kill the trading process. Tests are exempt.
+  - id: rust-panic-in-non-test
+    patterns:
+      - pattern-regex: (panic!\(|unreachable!\(|unreachable!|panic!)
+      - focus-regex-rust: 'src/'
+      - not-inside: |
+          #[test]
+          fn ...
+      - not-inside: |
+          #[cfg(test)]
+          mod ...
+    message: "panic!()/unreachable!() found in production code — use Result/Either instead"
+    severity: ERROR
+    languages: [rust]
+
+  # .unwrap() and .expect() on Results/Options in production code cause
+  # process crashes on any exchange error, network timeout, or bad frame.
+  - id: rust-unwrap-expect-in-non-test
+    patterns:
+      - pattern-either:
+          - pattern: $X.unwrap()
+          - pattern: $X.expect(...)
+      - focus-regex-rust: 'src/'
+      - not-inside: |
+          #[test]
+          fn ...
+      - not-inside: |
+          #[cfg(test)]
+          mod ...
+      - not-inside: |
+          fn temp_path(...)
+    message: ".unwrap()/.expect() in production code can crash the live engine on a single bad response"
+    severity: ERROR
+    languages: [rust]
+
+  # Float division by a value that might be zero — silently produces Inf/NaN
+  # which propagates through position sizing and can cause phantom large orders.
+  - id: rust-float-division-no-check
+    patterns:
+      - pattern-either:
+          - pattern: $A / $B
+          - pattern: $A % $B
+      - metavariable-regex:
+          metavariable: $B
+          regex: ".*(leverage|equity|price|qty|mark|tick)"
+      - not-pattern-regex: "(0\\.0|<= 0\\.0|is_zero|is_finite|!= 0\\.0|> 0\\.0)"
+    message: "Float division without a zero/guard check — NaN/Inf can cascade into phantom order sizes"
+    severity: WARNING
+    languages: [rust]
+
+  # Using INFINITY or NAN in float computations without is_finite() guards.
+  - id: rust-bare-infinity-or-nan
+    patterns:
+      - pattern-either:
+          - pattern: f64::INFINITY
+          - pattern: f64::NEG_INFINITY
+          - pattern: f64::NAN
+      - not-pattern-either:
+          - pattern: if ... .is_finite() ...
+    message: "Bare f64::INFINITY/NAN used without is_finite() guard — check callers handle it"
+    severity: WARNING
+    languages: [rust]
+
+  # State-machine deadlock: acquiring a second Mutex while holding one.
+  - id: rust-nested-mutex-lock
+    pattern-either:
+      - pattern: $LOCK_A.lock()...$LOCK_B.lock()
+      - pattern: $MUTEX_A.lock().unwrap()...$MUTEX_B.lock().unwrap()
+    message: "Nested Mutex lock may deadlock — acquire locks in consistent order"
+    severity: WARNING
+    languages: [rust]
+
+  # Mutex held across an await point — stalls async tasks under load.
+  - id: rust-lock-across-await
+    patterns:
+      - pattern-either:
+          - pattern: $MUTEX.lock()...await...$DROP
+          - pattern: $GUARD...await
+    message: "Mutex guard held across await — under load this serializes all tasks and causes stagnation"
+    severity: ERROR
+    languages: [rust]
+
+  # Risk limit bypass: order validation skipped before routing to a venue.
+  - id: rust-order-validate-before-send
+    patterns:
+      - pattern-either:
+          - pattern: $REQUEST.send(...)
+          - pattern: $SELF.submit(...)
+          - pattern: $CONN.execute(...)
+      - not-pattern-either:
+          - pattern: $REQUEST.validate(...)
+          - pattern: $SELF.validate(...)
+      - not-inside: |
+          fn submit(...)
+    message: "Order routed to venue without validate() call — risk limit bypass"
+    severity: ERROR
+    languages: [rust]
+
+  # === Python: Float errors & unhandled exceptions =========================
+
+  - id: python-division-by-zero-risk
+    patterns:
+      - pattern-either:
+          - pattern: $A / $B
+          - pattern: $A // $B
+          - pattern: $A % $B
+      - metavariable-regex:
+          metavariable: $B
+          regex: ".*(leverage|equity|price|qty|mark|capital|notional|exposure)"
+    message: "Python: float division without zero guard — NaN/Inf can corrupt position sizing"
+    severity: WARNING
+    languages: [python]
+
+  - id: python-bare-nan-inf-in-arithmetic
+    patterns:
+      - pattern-either:
+          - pattern: float('inf')
+          - pattern: float('-inf')
+          - pattern: float('nan')
+          - pattern: np.inf
+          - pattern: np.nan
+      - not-pattern-either:
+          - pattern: if ... not np.isfinite(...) ...
+          - pattern: if ... np.isfinite(...) ...
+          - pattern: ... if ... not np.isfinite(...)
+    message: "Python: bare inf/nan in arithmetic without isfinite() guard"
+    severity: WARNING
+    languages: [python]
+
+  - id: python-bare-except
+    patterns:
+      - pattern: except:
+      - not-pattern: except Exception as $E:
+    message: "Python: bare 'except:' catches SystemExit/KeyboardInterrupt — can mask live-trading halt"
+    severity: WARNING
+    languages: [python]
+
+  - id: python-silent-order-bypass
+    patterns:
+      - pattern-either:
+          - pattern: order.submit(...)
+          - pattern: send_order(...)
+          - pattern: place_order(...)
+      - not-pattern: try:
+      - not-pattern-either:
+          - pattern: validate(...)
+          - pattern: risk_check(...)
+    message: "Python: order sent without validation or risk check — risk limit bypass"
+    severity: ERROR
+    languages: [python]

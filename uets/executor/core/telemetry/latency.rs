@@ -22,7 +22,7 @@ pub struct LatencySnapshot {
 }
 
 impl LatencySnapshot {
-    pub fn to_json(&self) -> String {
+    pub fn to_json(self) -> String {
         fn opt(value: Option<i64>) -> String {
             value.map_or_else(|| "null".to_string(), |v| v.to_string())
         }

@@ -133,6 +133,7 @@ fn print_help() {
          \x20                         (default DIR: uets/out/live)\n\
          \x20 strategies               list compiled vs on-disk strategy bundles\n\
          \x20 strategy <strategy>@<asset> run one strategy socket consumer\n\
+         \x20 playback [--config PATH] run offline evaluation from the UETS YAML settings\n\
          \x20 db [SESSION [STRAT@ASSET]]  inspect live_db contents (trades + portfolio)\n\
          \x20 user-stream             REST listen-key lifecycle (needs API key)\n\
          \x20 user-stream-ws          account/order update stream (needs API key)\n\
@@ -172,6 +173,32 @@ fn parse_strategy_instance(value: &str) -> Result<(String, String), String> {
         ));
     }
     Ok((strategy.to_ascii_lowercase(), asset.to_ascii_lowercase()))
+}
+
+fn run_playback(args: &[String]) -> ExitCode {
+    let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace_root = manifest_dir.parent().unwrap_or(manifest_dir);
+    let python = std::env::var_os("PYTHON").unwrap_or_else(|| {
+        if cfg!(windows) {
+            "python".into()
+        } else {
+            "python3".into()
+        }
+    });
+    match std::process::Command::new(python)
+        .arg("-m")
+        .arg("uets.playback")
+        .args(args)
+        .current_dir(workspace_root)
+        .status()
+    {
+        Ok(status) if status.success() => ExitCode::SUCCESS,
+        Ok(status) => ExitCode::from(status.code().unwrap_or(1).clamp(1, 255) as u8),
+        Err(error) => {
+            eprintln!("could not start Python playback runner: {error}");
+            ExitCode::FAILURE
+        }
+    }
 }
 
 #[cfg(unix)]
@@ -734,14 +761,12 @@ mod record {
             // rewind book levels the seed has superseded. A re-seed lands
             // directly on the merger, so diffs waiting in the reorder buffer
             // can become covered at any moment -- checked here for both paths.
-            if let MarketEvent::Diff(frame) = &event {
-                if let Some(last) = self.merger.state().last_update_id {
-                    if frame.final_update_id <= last {
+            if let MarketEvent::Diff(frame) = &event
+                && let Some(last) = self.merger.state().last_update_id
+                    && frame.final_update_id <= last {
                         self.covered_dropped += 1;
                         return Ok(0);
                     }
-                }
-            }
             let (row, outcome) = self.merger.merge_event(event);
             if outcome.needs_reseed {
                 // Visible, not silent: the book is wrong until the seed
@@ -1592,16 +1617,16 @@ fn cmd_db(args: &[String]) -> Result<(), String> {
             .strategy(strategy)
             .asset(asset);
         let trades_db =
-            UetsDb::open(&root.join("trades").join(sid)).map_err(|e| format!("open trades: {e}"))?;
-        let portfolio_db = UetsDb::open(&root.join("portfolio").join(sid))
+            UetsDb::open(root.join("trades").join(sid)).map_err(|e| format!("open trades: {e}"))?;
+        let portfolio_db = UetsDb::open(root.join("portfolio").join(sid))
             .map_err(|e| format!("open portfolio: {e}"))?;
         print_instance(&trades_db, &portfolio_db, sid, &filter)?;
     } else if let Some(sid) = session {
         // Whole session: both strategy instances.
         let filter = QueryFilter::new().session(sid);
         let trades_db =
-            UetsDb::open(&root.join("trades").join(sid)).map_err(|e| format!("open trades: {e}"))?;
-        let portfolio_db = UetsDb::open(&root.join("portfolio").join(sid))
+            UetsDb::open(root.join("trades").join(sid)).map_err(|e| format!("open trades: {e}"))?;
+        let portfolio_db = UetsDb::open(root.join("portfolio").join(sid))
             .map_err(|e| format!("open portfolio: {e}"))?;
         print_session(&trades_db, &portfolio_db, sid, &filter)?;
     } else {
@@ -1617,11 +1642,10 @@ fn list_session_dirs(root: &std::path::Path, stage: &str) -> Vec<String> {
     let mut out = Vec::new();
     if let Ok(entries) = std::fs::read_dir(&stage_dir) {
         for entry in entries.flatten() {
-            if entry.path().is_dir() {
-                if let Some(name) = entry.file_name().to_str() {
+            if entry.path().is_dir()
+                && let Some(name) = entry.file_name().to_str() {
                     out.push(name.to_string());
                 }
-            }
         }
     }
     out
@@ -1642,8 +1666,8 @@ fn print_all_sessions(root: &std::path::Path) -> Result<(), String> {
     println!("sessions:");
     for sid in &all {
         let trades_db =
-            UetsDb::open(&root.join("trades").join(sid)).map_err(|e| format!("open trades: {e}"))?;
-        let portfolio_db = UetsDb::open(&root.join("portfolio").join(sid))
+            UetsDb::open(root.join("trades").join(sid)).map_err(|e| format!("open trades: {e}"))?;
+        let portfolio_db = UetsDb::open(root.join("portfolio").join(sid))
             .map_err(|e| format!("open portfolio: {e}"))?;
         let trades = trades_db
             .query_trades(&QueryFilter::new().session(sid))
@@ -1774,6 +1798,7 @@ fn main() -> ExitCode {
                 }
             };
         }
+        "playback" => return run_playback(&rest),
         "feed" => {
             if rest.len() < 2 {
                 eprintln!("usage: dev_test feed <symbol> <strategy>@<asset> [...]");

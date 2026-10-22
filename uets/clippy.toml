@@ -1,0 +1,21 @@
+# Clippy configuration for the UETS executor and strategy engine.
+# These lints guard the live-trading boundary where a logic bug is a loss.
+
+# Order routing and risk checks have many parameters.
+too-many-arguments-threshold = 12
+
+# Feature computation kernels are naturally large.
+type-complexity-threshold = 500
+
+# The executor's hot path is deliberately terse.
+# (single_match_else is suppressed via #[allow] where intentional.)
+
+# Floating-point position math needs explicit handling.
+# (Configure epsilon inline with #[clippy::float_cmp(epsilon = ...)] on specific lints.)
+
+# Risk: reject unwrap/expect in the executor crate.
+# (Applied via lint attribute in Cargo.toml or RUSTFLAGS.)
+avoid-breaking-exported-api = false
+
+# Warn on large enum variants — trading state machines should be tight.
+enum-variant-size-threshold = 100

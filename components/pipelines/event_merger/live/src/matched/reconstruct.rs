@@ -263,9 +263,11 @@ impl Reconstructor {
                             skipped = 1;
                         }
                         for gap in (open + 1)..(open + 1 + skipped) {
-                            let mut empty = Bar::default();
-                            empty.close_ms = gap * len_ms;
-                            empty.empty = true;
+                            let empty = Bar {
+                                close_ms: gap * len_ms,
+                                empty: true,
+                                ..Default::default()
+                            };
                             completed.push(empty);
                         }
                         self.reset(Some(bucket));
@@ -394,7 +396,6 @@ mod tests {
             bid_amount: 1.0,
             ask_price: Some(price + 0.5),
             ask_amount: 2.0,
-            ..Sample::default()
         }
     }
 

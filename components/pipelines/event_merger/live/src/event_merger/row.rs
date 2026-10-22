@@ -21,7 +21,7 @@ pub const FIELD_COUNT: usize = 128;
 /// The 128 column names, in emission order. Built once; not a hot path.
 pub fn schema() -> &'static [&'static str] {
     static LEAKED: OnceLock<&'static [&'static str]> = OnceLock::new();
-    *LEAKED.get_or_init(|| Box::leak(build_schema().into_boxed_slice()))
+    LEAKED.get_or_init(|| Box::leak(build_schema().into_boxed_slice()))
 }
 
 fn intern(value: String) -> &'static str {

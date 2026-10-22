@@ -138,6 +138,25 @@ impl RollingWindow {
     }
 }
 
+/// Aggregate a slice in chronological order.
+///
+/// The single reduction shared by [`RollingWindow::aggregate`] and
+/// `compute.rs`, so the summation order — and therefore the floating-point
+/// result — is identical in both places.
+pub fn aggregate(values: &[f64], aggregation: Aggregation) -> f64 {
+    if values.is_empty() {
+        return f64::NAN;
+    }
+    match aggregation {
+        Aggregation::Mean => values.iter().sum::<f64>() / values.len() as f64,
+        Aggregation::Sum => values.iter().sum(),
+        Aggregation::Min => values.iter().copied().fold(f64::INFINITY, f64::min),
+        Aggregation::Max => values.iter().copied().fold(f64::NEG_INFINITY, f64::max),
+        Aggregation::Last => values[values.len() - 1],
+        Aggregation::Std => std_dev(values),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -195,21 +214,4 @@ mod tests {
         assert!(RollingWindow::new(0, Aggregation::Mean).is_err());
     }
 }
-/// Aggregate a slice in chronological order.
-///
-/// The single reduction shared by [`RollingWindow::aggregate`] and
-/// `compute.rs`, so the summation order â€” and therefore the floating-point
-/// result â€” is identical in both places.
-pub fn aggregate(values: &[f64], aggregation: Aggregation) -> f64 {
-    if values.is_empty() {
-        return f64::NAN;
-    }
-    match aggregation {
-        Aggregation::Mean => values.iter().sum::<f64>() / values.len() as f64,
-        Aggregation::Sum => values.iter().sum(),
-        Aggregation::Min => values.iter().copied().fold(f64::INFINITY, f64::min),
-        Aggregation::Max => values.iter().copied().fold(f64::NEG_INFINITY, f64::max),
-        Aggregation::Last => values[values.len() - 1],
-        Aggregation::Std => std_dev(values),
-    }
-}
+

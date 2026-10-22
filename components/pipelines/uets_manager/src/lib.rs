@@ -13,6 +13,7 @@ use uets_trades::backend::{BackendError, ExecutionBackend};
 use uets_trades::live_test::LiveTestBackend;
 use uets_trades::live_trade::LiveTradeBackend;
 use uets_trades::playback::PlaybackBackend;
+use uets_trades::playback::evaluation::PlaybackSettings;
 use uets_trades::sim::SimConfig;
 use uets_trades::types::{
     Capital, ExecutionEvent, FillEvent, Order, OrderId, OrderRequest, TradeIntent,
@@ -29,6 +30,7 @@ pub enum ExecutionMode {
     Playback {
         config: SimConfig,
         acceleration: f64,
+        evaluation: PlaybackSettings,
     },
 }
 
@@ -49,6 +51,10 @@ pub enum ConfigError {
     InvalidFeeBps(String),
     #[error("invalid starting_capital: {0}")]
     InvalidStartingCapital(String),
+    #[error("invalid playback settings: {0}")]
+    InvalidPlaybackSettings(String),
+    #[error("could not read settings file: {0}")]
+    Io(#[from] std::io::Error),
     #[error("yaml deserialization failed: {0}")]
     Yaml(#[from] serde_yaml::Error),
 }
@@ -96,6 +102,9 @@ pub struct ExecutionSettings {
     /// Capital allocated to strategies with no explicit allocation.
     #[serde(default)]
     pub starting_capital: Option<f64>,
+    /// Evaluation method and limits used when playback is run as a backtest.
+    #[serde(default)]
+    pub playback: PlaybackSettings,
 }
 
 fn default_acceleration() -> f64 {
@@ -105,39 +114,42 @@ fn default_acceleration() -> f64 {
 impl ExecutionSettings {
     /// Validate numeric fields and return `Ok(())` when all are within range.
     pub fn validate(&self) -> Result<(), ConfigError> {
+        self.playback
+            .validate()
+            .map_err(|error| ConfigError::InvalidPlaybackSettings(error.to_string()))?;
         if !self.acceleration.is_finite() || self.acceleration <= 0.0 {
             return Err(ConfigError::InvalidAcceleration(format!(
                 "acceleration must be finite and positive, got {}",
                 self.acceleration
             )));
         }
-        if let Some(v) = self.spread_bps {
-            if !v.is_finite() || v < 0.0 {
-                return Err(ConfigError::InvalidSpreadBps(format!(
-                    "spread_bps must be finite and nonnegative, got {v}"
-                )));
-            }
+        if let Some(v) = self.spread_bps
+            && (!v.is_finite() || v < 0.0)
+        {
+            return Err(ConfigError::InvalidSpreadBps(format!(
+                "spread_bps must be finite and nonnegative, got {v}"
+            )));
         }
-        if let Some(v) = self.slippage_bps {
-            if !v.is_finite() || v < 0.0 {
-                return Err(ConfigError::InvalidSlippageBps(format!(
-                    "slippage_bps must be finite and nonnegative, got {v}"
-                )));
-            }
+        if let Some(v) = self.slippage_bps
+            && (!v.is_finite() || v < 0.0)
+        {
+            return Err(ConfigError::InvalidSlippageBps(format!(
+                "slippage_bps must be finite and nonnegative, got {v}"
+            )));
         }
-        if let Some(v) = self.fee_bps {
-            if !v.is_finite() || v < 0.0 {
-                return Err(ConfigError::InvalidFeeBps(format!(
-                    "fee_bps must be finite and nonnegative, got {v}"
-                )));
-            }
+        if let Some(v) = self.fee_bps
+            && (!v.is_finite() || v < 0.0)
+        {
+            return Err(ConfigError::InvalidFeeBps(format!(
+                "fee_bps must be finite and nonnegative, got {v}"
+            )));
         }
-        if let Some(v) = self.starting_capital {
-            if !v.is_finite() || v <= 0.0 {
-                return Err(ConfigError::InvalidStartingCapital(format!(
-                    "starting_capital must be finite and positive, got {v}"
-                )));
-            }
+        if let Some(v) = self.starting_capital
+            && (!v.is_finite() || v <= 0.0)
+        {
+            return Err(ConfigError::InvalidStartingCapital(format!(
+                "starting_capital must be finite and positive, got {v}"
+            )));
         }
         Ok(())
     }
@@ -173,6 +185,7 @@ impl ExecutionSettings {
             ExecutionModeSetting::Playback => Ok(ExecutionMode::Playback {
                 config,
                 acceleration: self.acceleration,
+                evaluation: self.playback,
             }),
         }
     }
@@ -184,9 +197,7 @@ impl ExecutionSettings {
 
     /// Load execution settings from a YAML file.
     pub fn from_yaml_file(path: &std::path::Path) -> Result<Self, ConfigError> {
-        let contents = std::fs::read_to_string(path).map_err(|e| {
-            ConfigError::Yaml(serde_yaml::Error::custom(e.to_string()))
-        })?;
+        let contents = std::fs::read_to_string(path)?;
         Self::from_yaml_str(&contents)
     }
 }
@@ -208,10 +219,15 @@ impl ManagerEngine {
 /// Owns the selected backend and exposes the shared trading interface.
 pub struct ManagerEngine {
     backend: Box<dyn ExecutionBackend>,
+    playback_settings: PlaybackSettings,
 }
 
 impl ManagerEngine {
     pub fn new(mode: ExecutionMode) -> Self {
+        let playback_settings = match &mode {
+            ExecutionMode::Playback { evaluation, .. } => evaluation.clone(),
+            _ => PlaybackSettings::default(),
+        };
         let backend: Box<dyn ExecutionBackend> = match mode {
             ExecutionMode::LiveTest { config } => Box::new(LiveTestBackend::with_config(config)),
             ExecutionMode::LiveTrade { router } => {
@@ -220,9 +236,13 @@ impl ManagerEngine {
             ExecutionMode::Playback {
                 config,
                 acceleration,
+                ..
             } => Box::new(PlaybackBackend::with_config(config, acceleration)),
         };
-        Self { backend }
+        Self {
+            backend,
+            playback_settings,
+        }
     }
 
     pub fn live_test(config: SimConfig) -> Self {
@@ -235,7 +255,12 @@ impl ManagerEngine {
         Self::new(ExecutionMode::Playback {
             config,
             acceleration,
+            evaluation: PlaybackSettings::default(),
         })
+    }
+
+    pub fn playback_settings(&self) -> &PlaybackSettings {
+        &self.playback_settings
     }
 
     pub fn backend(&self) -> &dyn ExecutionBackend {
@@ -400,16 +425,20 @@ mod tests {
     fn live_trade_without_router_returns_error() {
         let yaml = "mode: live_trade";
         let settings = ExecutionSettings::from_yaml_str(yaml).unwrap();
-        let err = settings.into_mode(None).unwrap_err();
+        let err = settings.into_mode(None).err().unwrap();
         assert!(matches!(err, ConfigError::LiveTradeMissingRouter));
     }
 
     #[test]
     fn valid_yaml_selects_playback() {
-        let yaml = "mode: playback\nacceleration: 100";
+        let yaml = "mode: playback\nacceleration: 100\nplayback:\n  method: cpcv\n  max_abs_correlation: 0.5";
         let settings = ExecutionSettings::from_yaml_str(yaml).unwrap();
         assert_eq!(settings.mode, ExecutionModeSetting::Playback);
         assert_eq!(settings.acceleration, 100.0);
+        assert_eq!(
+            settings.playback.method,
+            uets_trades::playback::evaluation::PlaybackMethod::Cpcv
+        );
         let mode = settings.into_mode(None).unwrap();
         assert!(matches!(
             mode,
@@ -429,6 +458,10 @@ mod tests {
         assert!(settings.slippage_bps.is_none());
         assert!(settings.fee_bps.is_none());
         assert!(settings.starting_capital.is_none());
+        assert_eq!(
+            settings.playback.method,
+            uets_trades::playback::evaluation::PlaybackMethod::PurgedWalkForward
+        );
     }
 
     #[test]
@@ -467,7 +500,7 @@ mod tests {
     fn invalid_acceleration_is_rejected() {
         let yaml = "mode: playback\nacceleration: 0";
         let settings = ExecutionSettings::from_yaml_str(yaml).unwrap();
-        let err = settings.into_mode(None).unwrap_err();
+        let err = settings.into_mode(None).err().unwrap();
         assert!(matches!(err, ConfigError::InvalidAcceleration(_)));
     }
 
@@ -475,7 +508,7 @@ mod tests {
     fn negative_acceleration_is_rejected() {
         let yaml = "mode: playback\nacceleration: -5";
         let settings = ExecutionSettings::from_yaml_str(yaml).unwrap();
-        let err = settings.into_mode(None).unwrap_err();
+        let err = settings.into_mode(None).err().unwrap();
         assert!(matches!(err, ConfigError::InvalidAcceleration(_)));
     }
 
@@ -483,7 +516,7 @@ mod tests {
     fn negative_spread_bps_is_rejected() {
         let yaml = "mode: live_test\nspread_bps: -1";
         let settings = ExecutionSettings::from_yaml_str(yaml).unwrap();
-        let err = settings.into_mode(None).unwrap_err();
+        let err = settings.into_mode(None).err().unwrap();
         assert!(matches!(err, ConfigError::InvalidSpreadBps(_)));
     }
 
@@ -491,7 +524,7 @@ mod tests {
     fn negative_starting_capital_is_rejected() {
         let yaml = "mode: live_test\nstarting_capital: 0";
         let settings = ExecutionSettings::from_yaml_str(yaml).unwrap();
-        let err = settings.into_mode(None).unwrap_err();
+        let err = settings.into_mode(None).err().unwrap();
         assert!(matches!(err, ConfigError::InvalidStartingCapital(_)));
     }
 
@@ -499,7 +532,7 @@ mod tests {
     fn negative_fee_bps_is_rejected() {
         let yaml = "mode: live_test\nfee_bps: -0.5";
         let settings = ExecutionSettings::from_yaml_str(yaml).unwrap();
-        let err = settings.into_mode(None).unwrap_err();
+        let err = settings.into_mode(None).err().unwrap();
         assert!(matches!(err, ConfigError::InvalidFeeBps(_)));
     }
 
@@ -507,16 +540,20 @@ mod tests {
     fn from_settings_returns_result_for_live_trade_missing_router() {
         let yaml = "mode: live_trade";
         let settings = ExecutionSettings::from_yaml_str(yaml).unwrap();
-        let err = ManagerEngine::from_settings(settings, None).unwrap_err();
+        let err = ManagerEngine::from_settings(settings, None).err().unwrap();
         assert!(matches!(err, ConfigError::LiveTradeMissingRouter));
     }
 
     #[test]
     fn from_settings_succeeds_for_playback_without_router() {
-        let yaml = "mode: playback\nacceleration: 10";
+        let yaml = "mode: playback\nacceleration: 10\nplayback:\n  method: parametric_monte_carlo";
         let settings = ExecutionSettings::from_yaml_str(yaml).unwrap();
         let engine = ManagerEngine::from_settings(settings, None).unwrap();
         assert_eq!(engine.acceleration(), 10.0);
+        assert_eq!(
+            engine.playback_settings().method,
+            uets_trades::playback::evaluation::PlaybackMethod::ParametricMonteCarlo
+        );
     }
 
     #[test]

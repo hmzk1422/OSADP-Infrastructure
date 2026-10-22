@@ -82,6 +82,7 @@ impl<C: ExecutionConnector + Send + Sync> VenueConnector for UetsExecutionConnec
                     },
                     request.qty,
                     price,
+                    0.0,
                 )
             }
         }

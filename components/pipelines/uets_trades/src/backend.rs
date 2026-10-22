@@ -5,7 +5,8 @@
 //! through this trait, and the backend decides how to handle them.
 
 use crate::types::{
-    Capital, ExecutionEvent, FillEvent, Order, OrderId, OrderRequest, OrderSide, TradeIntent,
+    Capital, ExecutionEvent, FillEvent, Order, OrderId, OrderRequest, OrderSide, OrderType,
+    TradeIntent,
 };
 use chrono::{DateTime, Utc};
 
@@ -76,9 +77,6 @@ pub trait ExecutionBackend: Send + Sync {
     // The strategy calls `long`/`short`/`exit`; the selected backend
     // decides how each action is handled (simulated vs venue-routed).
 
-    /// Go long: submits a market order with the attached barrier.
-    // ---- Strategy action interface (supporting Market & Limit/Maker entries) ----
-
     /// Go long: submits a Market or Limit (Maker) buy order with the attached triple barrier.
     fn long(
         &mut self,
@@ -122,34 +120,6 @@ pub trait ExecutionBackend: Send + Sync {
     }
 
     /// Exit the open position for (strategy, symbol): opposite side, full quantity.
-    fn exit(&mut self, ctx: &ActionContext) -> Result<OrderId, BackendError> {
-        let Some(qty) = self.position_qty(&ctx.strategy_id, &ctx.symbol) else {
-            return Err(BackendError::Internal(format!(
-                "no open position to exit for {}/{}",
-                ctx.strategy_id, ctx.symbol
-            )));
-        };
-        if qty == 0.0 {
-            return Err(BackendError::Internal(format!(
-                "no open position to exit for {}/{}",
-                ctx.strategy_id, ctx.symbol
-            )));
-        }
-        let side = if qty > 0.0 { OrderSide::Sell } else { OrderSide::Buy };
-        let request = OrderRequest::new(
-            ctx.order_id.clone(),
-            ctx.symbol.clone(),
-            side,
-            qty.abs(),
-            ctx.strategy_id.clone(),
-            ctx.asset_id.clone(),
-        )
-        .reducing();
-        self.submit_order(request)
-    }
-
-    /// Exit the open position for (strategy, symbol): opposite side, full
-    /// quantity, no barrier. Errors when there is nothing to exit.
     fn exit(&mut self, ctx: &ActionContext) -> Result<OrderId, BackendError> {
         let Some(qty) = self.position_qty(&ctx.strategy_id, &ctx.symbol) else {
             return Err(BackendError::Internal(format!(

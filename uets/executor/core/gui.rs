@@ -366,10 +366,7 @@ impl GuiBridge {
     /// error is returned either way.
     pub fn take_command(&self) -> io::Result<Option<Result<DashboardCommand, CommandError>>> {
         let path = self.command_path();
-        let taken = match self.read_command() {
-            Ok(taken) => taken,
-            Err(e) => return Err(e),
-        };
+        let taken = self.read_command()?;
         match (taken, fs::remove_file(&path)) {
             (Some(command), Ok(())) => Ok(Some(command)),
             (Some(command), Err(e)) if e.kind() == io::ErrorKind::NotFound => Ok(Some(command)),
@@ -671,6 +668,7 @@ mod tests {
 }
 
 /// One trade as a JSON line.
+#[allow(clippy::items_after_test_module)]
 fn trade_json(trade: &super::pnl::Trade) -> String {
     format!(
         concat!(

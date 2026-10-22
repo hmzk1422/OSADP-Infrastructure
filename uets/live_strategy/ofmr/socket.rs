@@ -86,6 +86,7 @@ enum ExecutionMode {
     Paper,
     Testnet,
     Live,
+    Playback,
 }
 
 #[cfg(any(unix, test))]
@@ -96,6 +97,7 @@ struct ExecutionConfig {
 
 #[cfg(any(unix, test))]
 impl ExecutionConfig {
+    #[allow(dead_code)]
     fn load() -> Result<Self, String> {
         let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("config/execution.yaml");
         let content = std::fs::read_to_string(&path)
@@ -106,22 +108,28 @@ impl ExecutionConfig {
     fn parse(content: &str) -> Result<Self, String> {
         let mut mode = None;
         let mut allow_live_trading = None;
-        let mut in_execution = false;
+        let mut section = "";
         for (line_number, raw_line) in content.lines().enumerate() {
             let line = raw_line.split('#').next().unwrap_or_default().trim();
             if line.is_empty() {
                 continue;
             }
-            if line.ends_with(':')
-                && raw_line
-                    .chars()
-                    .next()
-                    .is_some_and(|character| !character.is_whitespace())
-            {
-                in_execution = line == "execution:";
+            let indented = raw_line
+                .chars()
+                .next()
+                .is_some_and(char::is_whitespace);
+            if !indented && line.ends_with(':') {
+                section = match line {
+                    "execution:" => "execution",
+                    "playback:" | "ofmr:" => "settings",
+                    _ => "",
+                };
                 continue;
             }
-            if !in_execution {
+            if section == "settings" {
+                continue;
+            }
+            if indented && section.is_empty() {
                 continue;
             }
             let Some((key, value)) = line.split_once(':') else {
@@ -137,6 +145,7 @@ impl ExecutionConfig {
                         "paper" => ExecutionMode::Paper,
                         "testnet" => ExecutionMode::Testnet,
                         "live" => ExecutionMode::Live,
+                        "playback" => ExecutionMode::Playback,
                         _ => return Err(format!("invalid execution mode {value:?}")),
                     });
                 }
@@ -145,11 +154,14 @@ impl ExecutionConfig {
                         format!("allow_live_trading must be true or false, got {value:?}")
                     })?);
                 }
-                other => return Err(format!("unknown execution config key {other:?}")),
+                other if section == "execution" => {
+                    return Err(format!("unknown execution config key {other:?}"))
+                }
+                _ => {}
             }
         }
         Ok(Self {
-            mode: mode.ok_or_else(|| "execution.mode is required".to_string())?,
+            mode: mode.ok_or_else(|| "mode is required".to_string())?,
             allow_live_trading: allow_live_trading.unwrap_or(false),
         })
     }
@@ -159,12 +171,19 @@ impl ExecutionConfig {
 impl OrderExecutor {
     fn from_env(settings: &Settings) -> Result<Self, String> {
         let config = ExecutionConfig::load()?;
+        if config.mode == ExecutionMode::Playback {
+            return Err(
+                "playback is offline; run `python -m uets.playback` from the repository root"
+                    .into(),
+            );
+        }
         let api_key = std::env::var("BINANCE_API_KEY").ok();
         let secret_key = std::env::var("BINANCE_API_SECRET").ok();
         let mode = match config.mode {
             ExecutionMode::Paper => "paper",
             ExecutionMode::Testnet => "testnet",
             ExecutionMode::Live => "live",
+            ExecutionMode::Playback => "playback",
         }
         .to_string();
         let connector = match config.mode {
@@ -191,6 +210,7 @@ impl OrderExecutor {
                     Some(secret_key),
                 ))
             }
+            ExecutionMode::Playback => unreachable!("playback rejected before connector setup"),
         };
         if !settings.trade.max_position_usd.is_finite()
             || settings.trade.max_position_usd <= 0.0
@@ -358,9 +378,11 @@ struct StrategyAccount {
     entry_risk_per_unit: Option<f64>,
     /// Absolute stop-loss price of the open position (if any), used for the
     /// GUI stop-loss % readout.
+    #[allow(dead_code)]
     stop_price: Option<f64>,
     /// Absolute take-profit price of the open position (if any), used for the
     /// GUI take-profit % readout.
+    #[allow(dead_code)]
     target_price: Option<f64>,
     r_multiple_sum: f64,
     r_trades: usize,
@@ -457,6 +479,7 @@ impl StrategyAccount {
         }
     }
 
+    #[allow(dead_code)]
     fn equity_history(&self) -> &[f64] {
         self.portfolio.ledger().equity_curve()
     }
@@ -1193,5 +1216,15 @@ mod tests {
         assert!(!config.allow_live_trading);
         assert!(ExecutionConfig::parse("execution:\n  mode: live\n").is_ok());
         assert!(ExecutionConfig::parse("execution:\n  mode: unsafe\n").is_err());
+    }
+
+    #[test]
+    fn unified_yaml_selects_playback_without_live_order_routing() {
+        let config = ExecutionConfig::parse(
+            "mode: playback\nallow_live_trading: false\nplayback:\n  method: cpcv\nofmr:\n  trade:\n    max_position_usd: 1000\n",
+        )
+        .unwrap();
+        assert_eq!(config.mode, ExecutionMode::Playback);
+        assert!(!config.allow_live_trading);
     }
 }

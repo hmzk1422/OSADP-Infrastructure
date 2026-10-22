@@ -8,6 +8,7 @@ use std::{fs, path::{Path, PathBuf}};
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(default, deny_unknown_fields)]
+#[derive(Default)]
 pub struct Settings {
     pub model: ModelSettings,
     pub feature: FeatureSettings,
@@ -61,11 +62,6 @@ pub struct TradeSettings {
     pub take_profit_bps: f64,
 }
 
-impl Default for Settings {
-    fn default() -> Self {
-        Self { model: ModelSettings::default(), feature: FeatureSettings::default(), trade: TradeSettings::default() }
-    }
-}
 impl Default for ModelSettings {
     fn default() -> Self { Self { path: "uets/models/ofmr/trader.txt".into(), threshold: 0.50, trade_direction: "long".into() } }
 }
@@ -99,8 +95,19 @@ impl Settings {
         let path = Self::find_path()?;
         let source = fs::read_to_string(&path)
             .map_err(|e| format!("read OFMR settings {}: {e}", path.display()))?;
-        let settings: Self = serde_yaml::from_str(&source)
-            .map_err(|e| format!("parse OFMR settings {}: {e}", path.display()))?;
+        let settings: Self = if path.file_name().is_some_and(|name| name == "execution.yaml") {
+            let document: serde_yaml::Value = serde_yaml::from_str(&source)
+                .map_err(|e| format!("parse UETS settings {}: {e}", path.display()))?;
+            match document.get("ofmr") {
+                Some(value) => serde_yaml::from_value(value.clone())
+                    .map_err(|e| format!("parse OFMR settings in {}: {e}", path.display()))?,
+                None => serde_yaml::from_str(&source)
+                    .map_err(|e| format!("parse OFMR settings {}: {e}", path.display()))?,
+            }
+        } else {
+            serde_yaml::from_str(&source)
+                .map_err(|e| format!("parse OFMR settings {}: {e}", path.display()))?
+        };
         settings.validate().map_err(|e| format!("invalid OFMR settings {}: {e}", path.display()))?;
         eprintln!("[ofmr] loaded settings from {}", path.display());
         Ok(settings)
@@ -114,11 +121,7 @@ impl Settings {
         }
         let root = Path::new(env!("CARGO_MANIFEST_DIR"));
         let candidates = [
-            root.join("models/ofmr/settings.yaml"),
-            root.join("live_strategy/ofmr/settings.yaml"),
-            root.join("config/ofmr/settings.yaml"),
-            root.join("settings.yaml"),
-            root.join("uets/models/ofmr/settings.yaml"),
+            root.join("config/execution.yaml"),
         ];
         candidates.iter().find(|p| p.is_file()).cloned().ok_or_else(|| {
             format!("settings.yaml not found; checked: {} (or set OFMR_SETTINGS_PATH)",
@@ -174,6 +177,17 @@ impl Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unified_execution_yaml_contains_loadable_ofmr_settings() {
+        let document: serde_yaml::Value =
+            serde_yaml::from_str(include_str!("../../config/execution.yaml")).unwrap();
+        let settings: Settings = serde_yaml::from_value(document["ofmr"].clone()).unwrap();
+        settings.validate().unwrap();
+        assert_eq!(settings.trade.max_position_usd, 10_000.0);
+        assert_eq!(settings.feature.ltf_timeframe_secs, 1);
+    }
+
     #[test]
     fn parses_the_supplied_yaml_schema() {
         let yaml = r#"
