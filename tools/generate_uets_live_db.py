@@ -1,6 +1,6 @@
-import sys
+from pathlib import Path
 
-path = r'c:\Users\Himaska\Documents\Projects\Business_Projects\intraday-momentum-composite\uets\live_strategy\live_db.rs'
+path = Path(__file__).resolve().parents[1] / "uets" / "live_strategy" / "live_db.rs"
 
 part1 = r'''//! live_db: live engine -> RocksDB via `uets_db`.
 //! Physical layout:
@@ -164,7 +164,7 @@ impl LiveDb {
     }
 '''
 
-with open(path, 'w') as f:
+with open(path, 'w', encoding="utf-8") as f:
     f.write(part1)
 
 part2 = r'''
@@ -264,7 +264,7 @@ part2 = r'''
     }
 '''
 
-with open(path, 'a') as f:
+with open(path, 'a', encoding="utf-8") as f:
     f.write(part2)
 
 part3 = r'''
@@ -314,7 +314,7 @@ part3 = r'''
 }
 '''
 
-with open(path, 'a') as f:
+with open(path, 'a', encoding="utf-8") as f:
     f.write(part3)
 
 part4 = r'''
@@ -381,7 +381,7 @@ fn portfolio_record_to_snapshot(record: &uets_db::PortfolioRecord) -> LivePortfo
 }
 '''
 
-with open(path, 'a') as f:
+with open(path, 'a', encoding="utf-8") as f:
     f.write(part4)
 
 part5 = r'''
@@ -473,7 +473,7 @@ mod tests {
 }
 '''
 
-with open(path, 'a') as f:
+with open(path, 'a', encoding="utf-8") as f:
     f.write(part5)
 
 print('part5 ok')

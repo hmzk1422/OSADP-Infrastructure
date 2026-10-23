@@ -11,6 +11,7 @@
 
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::io::{IsTerminal, Write};
 
 use uets::connectors::binance::websocket::{diagnostic, live, monitor, reader};
 use uets::live_strategy::{self, ComputeFeatures, LiveStrategy, StateBuilder};
@@ -62,7 +63,7 @@ impl StrategySwitch {
     }
 
     /// Strategies compiled into this binary.
-    fn available(&self) -> Vec<&'static str> {
+    fn available(&self) -> Vec<String> {
         live_strategy::available_strategies()
     }
 
@@ -133,6 +134,8 @@ fn print_help() {
          \x20                         (default DIR: uets/out/live)\n\
          \x20 strategies               list compiled vs on-disk strategy bundles\n\
          \x20 strategy <strategy>@<asset> run one strategy socket consumer\n\
+         \x20 run <strategy>@pwf|mc|cpcv ... run offline research evaluations\n\
+         \x20                         research runs before any requested live instances\n\
          \x20 playback [--config PATH] run offline evaluation from the UETS YAML settings\n\
          \x20 db [SESSION [STRAT@ASSET]]  inspect live_db contents (trades + portfolio)\n\
          \x20 user-stream             REST listen-key lifecycle (needs API key)\n\
@@ -175,11 +178,18 @@ fn parse_strategy_instance(value: &str) -> Result<(String, String), String> {
     Ok((strategy.to_ascii_lowercase(), asset.to_ascii_lowercase()))
 }
 
-fn run_playback(args: &[String]) -> ExitCode {
+fn execute_playback(args: &[String]) -> (ExitCode, String) {
     let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let workspace_root = manifest_dir.parent().unwrap_or(manifest_dir);
     let python = std::env::var_os("PYTHON").unwrap_or_else(|| {
-        if cfg!(windows) {
+        let venv_python = if cfg!(windows) {
+            workspace_root.join("venv").join("Scripts").join("python.exe")
+        } else {
+            workspace_root.join("venv").join("bin").join("python")
+        };
+        if venv_python.is_file() {
+            venv_python.into_os_string()
+        } else if cfg!(windows) {
             "python".into()
         } else {
             "python3".into()
@@ -190,15 +200,257 @@ fn run_playback(args: &[String]) -> ExitCode {
         .arg("uets.playback")
         .args(args)
         .current_dir(workspace_root)
-        .status()
+        .output()
     {
-        Ok(status) if status.success() => ExitCode::SUCCESS,
-        Ok(status) => ExitCode::from(status.code().unwrap_or(1).clamp(1, 255) as u8),
+        Ok(output) => {
+            let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            if !stderr.trim().is_empty() {
+                eprint!("{stderr}");
+            }
+            let code = if output.status.success() {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::from(output.status.code().unwrap_or(1).clamp(1, 255) as u8)
+            };
+            (code, stdout)
+        }
         Err(error) => {
             eprintln!("could not start Python playback runner: {error}");
-            ExitCode::FAILURE
+            (ExitCode::FAILURE, String::new())
         }
     }
+}
+
+fn result_directory(stdout: &str) -> Option<PathBuf> {
+    stdout
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("[results] saved to "))
+        .map(PathBuf::from)
+}
+
+fn run_playback_results_tui(result_dirs: &[PathBuf]) -> Result<(), String> {
+    use uets_gui::{DashboardSnapshot, Monitor, SnapshotSource, Statistics};
+
+    let mut metrics = Vec::new();
+    let mut summaries = Vec::new();
+    let mut paths = std::collections::BTreeMap::<usize, Vec<(usize, f64)>>::new();
+    let mut path_offset = 0usize;
+    for path in result_dirs {
+        let summary_path = path.join("summary.json");
+        let summary: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(&summary_path).map_err(|error| format!("read {}: {error}", summary_path.display()))?,
+        ).map_err(|error| format!("parse {}: {error}", summary_path.display()))?;
+        summaries.push(summary);
+        let metrics_path = path.join("metrics.csv");
+        for (line_number, line) in std::fs::read_to_string(&metrics_path)
+            .map_err(|error| format!("read {}: {error}", metrics_path.display()))?
+            .lines().enumerate()
+        {
+            if line_number == 0 || line.trim().is_empty() { continue; }
+            let fields: Vec<_> = line.split(',').collect();
+            if fields.len() >= 5 {
+                metrics.push((
+                    fields[0].parse::<f64>().unwrap_or_default(),
+                    fields[1].parse::<f64>().unwrap_or_default(),
+                    fields[2].parse::<f64>().unwrap_or_default(),
+                    fields[3].parse::<f64>().unwrap_or_default(),
+                    fields[4].parse::<usize>().unwrap_or_default(),
+                ));
+            }
+        }
+        let equity_path = path.join("equity_paths.csv");
+        for (line_number, line) in std::fs::read_to_string(&equity_path)
+            .map_err(|error| format!("read {}: {error}", equity_path.display()))?
+            .lines().enumerate()
+        {
+            if line_number == 0 || line.trim().is_empty() { continue; }
+            let fields: Vec<_> = line.split(',').collect();
+            if fields.len() != 3 { continue; }
+            if let (Ok(path_index), Ok(step), Ok(value)) = (
+                fields[0].parse::<usize>(), fields[1].parse::<usize>(), fields[2].parse::<f64>(),
+            ) {
+                paths.entry(path_offset + path_index).or_default().push((step, value));
+            }
+        }
+        path_offset += summaries.last().and_then(|value| value.get("paths_run"))
+            .and_then(|value| value.as_u64()).unwrap_or(0) as usize;
+    }
+    if metrics.is_empty() || summaries.is_empty() {
+        return Err("playback results contain no paths".into());
+    }
+    let total_trades: usize = metrics.iter().map(|item| item.4).sum();
+    let expectancy = if total_trades > 0 {
+        metrics.iter().map(|item| item.1 * item.4 as f64).sum::<f64>() / total_trades as f64
+    } else {
+        0.0
+    };
+    let starting_equity = 10_000.0;
+    let cumulative_return = metrics.iter().map(|item| item.0).sum::<f64>()
+        / metrics.len().max(1) as f64;
+    let equity_paths = paths.into_values().map(|mut points| {
+        points.sort_by_key(|point| point.0);
+        points.into_iter().map(|point| point.1).collect::<Vec<_>>()
+    }).collect();
+    let mut snapshot = DashboardSnapshot {
+        timestamp: summaries.last().and_then(|summary| summary.get("created_at_utc"))
+            .and_then(|value| value.as_str()).map(str::to_string),
+        aggregate_title: Some(format!(
+            "Completed playback · {} methods · {} paths",
+            summaries.len(), metrics.len(),
+        )),
+        aggregate: Statistics {
+            starting_equity: Some(starting_equity),
+            equity: Some(starting_equity * (1.0 + cumulative_return)),
+            cash: Some(starting_equity * (1.0 + cumulative_return)),
+            cumulative_return: Some(cumulative_return),
+            absolute_return: Some(starting_equity * cumulative_return),
+            expectancy_rr: Some(expectancy),
+            expectancy_trades: Some(total_trades),
+            max_drawdown: Some(metrics.iter().map(|item| item.2).sum::<f64>() / metrics.len().max(1) as f64),
+            sortino: Some(metrics.iter().map(|item| item.3).sum::<f64>() / metrics.len().max(1) as f64),
+            trades: Some(total_trades),
+            status: Some("completed playback · q to close".into()),
+            ..Statistics::default()
+        },
+        aggregate_equity_paths: equity_paths,
+        ..DashboardSnapshot::default()
+    };
+    if snapshot.aggregate_equity_paths.is_empty() {
+        snapshot.aggregate_equity_history = vec![1.0, 1.0 + cumulative_return];
+    }
+    struct PlaybackSnapshot(DashboardSnapshot);
+    impl SnapshotSource for PlaybackSnapshot {
+        fn snapshot(&mut self) -> DashboardSnapshot {
+            self.0.clone()
+        }
+    }
+    Monitor::new(PlaybackSnapshot(snapshot))
+        .run()
+        .map_err(|error| format!("playback TUI failed: {error}"))
+}
+
+fn run_playback(args: &[String]) -> ExitCode {
+    let (code, stdout) = execute_playback(args);
+    print!("{stdout}");
+    let _ = std::io::stdout().flush();
+    if code == ExitCode::SUCCESS && std::io::stdout().is_terminal() {
+        if let Some(path) = result_directory(&stdout) {
+            if let Err(error) = run_playback_results_tui(&[path]) {
+                eprintln!("{error}");
+                return ExitCode::FAILURE;
+            }
+        }
+    }
+    code
+}
+
+fn research_method(selector: &str) -> Option<&'static str> {
+    match selector.to_ascii_lowercase().as_str() {
+        "pwf" => Some("purged_walk_forward"),
+        "mc" => Some("parametric_monte_carlo"),
+        "cpcv" => Some("cpcv"),
+        _ => None,
+    }
+}
+
+fn run_research_batch(requested: &[String]) -> ExitCode {
+    let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let strategies = live_strategy::available_strategies();
+    let mut succeeded = 0;
+    let mut result_dirs = Vec::new();
+
+    for identity in requested {
+        let Some((strategy, selector)) = identity.split_once('@') else {
+            eprintln!("invalid research selector '{identity}'; expected strategy@pwf, strategy@mc, or strategy@cpcv");
+            continue;
+        };
+        let strategy = strategy.to_ascii_lowercase();
+        let Some(method) = research_method(selector) else {
+            eprintln!("unknown research method '{selector}' in '{identity}'");
+            continue;
+        };
+        if !strategies.iter().any(|name| name == &strategy) {
+            eprintln!(
+                "unknown strategy folder '{strategy}'; discovered: {:?}",
+                strategies
+            );
+            continue;
+        }
+        if let Err(error) = live_strategy::load_strategy(&strategy) {
+            eprintln!("{error}");
+            continue;
+        }
+
+        // execution.yaml is the mode and data-source authority. The @pwf/@mc/
+        // @cpcv suffix selects only the evaluation method.
+        let config_path = manifest_dir.join("config").join("execution.yaml");
+        let args = vec![
+            "--config".to_string(),
+            config_path.display().to_string(),
+            "--method".to_string(),
+            method.to_string(),
+            "--strategy".to_string(),
+            strategy,
+        ];
+        println!("\nRunning {identity} using {}", config_path.display());
+        let (status, stdout) = execute_playback(&args);
+        print!("{stdout}");
+        if status == ExitCode::SUCCESS {
+            succeeded += 1;
+            if let Some(path) = result_directory(&stdout) {
+                result_dirs.push(path);
+            }
+        }
+    }
+
+    println!("SUCCESS {succeeded}/{}", requested.len());
+    let _ = std::io::stdout().flush();
+    if succeeded == requested.len() && !requested.is_empty() {
+        if std::io::stdout().is_terminal() {
+            if !result_dirs.is_empty() {
+                if let Err(error) = run_playback_results_tui(&result_dirs) {
+                    eprintln!("{error}");
+                    return ExitCode::FAILURE;
+                }
+            }
+        }
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    }
+}
+
+fn configured_execution_mode() -> Result<(String, Vec<String>), String> {
+    let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let config_path = manifest_dir.join("config").join("execution.yaml");
+    let content = std::fs::read_to_string(&config_path)
+        .map_err(|error| format!("read execution config {}: {error}", config_path.display()))?;
+    let config: serde_yaml::Value = serde_yaml::from_str(&content)
+        .map_err(|error| format!("parse execution config {}: {error}", config_path.display()))?;
+    let mode = config.get("mode").and_then(serde_yaml::Value::as_str)
+        .unwrap_or("live-test").to_ascii_lowercase().replace('_', "-");
+    let strategies = config.get("playback").and_then(|value| value.get("playback_strategies"))
+        .and_then(serde_yaml::Value::as_sequence)
+        .map(|values| values.iter().filter_map(serde_yaml::Value::as_str).map(str::to_string).collect())
+        .unwrap_or_default();
+    Ok((mode, strategies))
+}
+
+fn split_run_requests(requested: &[String]) -> (Vec<String>, Vec<String>) {
+    let mut research = Vec::new();
+    let mut live = Vec::new();
+    for identity in requested {
+        if identity
+            .split_once('@')
+            .is_some_and(|(_, selector)| research_method(selector).is_some())
+        {
+            research.push(identity.clone());
+        } else {
+            live.push(identity.clone());
+        }
+    }
+    (research, live)
 }
 
 #[cfg(unix)]
@@ -231,6 +483,26 @@ fn run_live_system(requested: &[String]) -> Result<(), String> {
     let executable = std::env::current_exe().map_err(|error| error.to_string())?;
     let log_dir = root.join("logs").join("uets");
     std::fs::create_dir_all(&log_dir).map_err(|error| error.to_string())?;
+
+    // Read default tickers from execution.yaml
+    let exec_config_path = root.join("uets").join("config").join("execution.yaml");
+    let exec_config: serde_yaml::Value = if exec_config_path.is_file() {
+        let content = std::fs::read_to_string(&exec_config_path)
+            .map_err(|error| format!("read execution config {error}"))?;
+        serde_yaml::from_str(&content).unwrap_or_default()
+    } else {
+        serde_yaml::Value::Mapping(Default::default())
+    };
+    let default_tickers: Vec<String> = exec_config
+        .get("tickers")
+        .and_then(|v| v.as_sequence())
+        .map(|seq| {
+            seq.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+
     let mut dashboard = LiveDashboard {
         snapshots,
         gui_socket,
@@ -240,10 +512,16 @@ fn run_live_system(requested: &[String]) -> Result<(), String> {
         instances: std::collections::BTreeMap::new(),
     };
 
-    for argument in requested {
-        let disabled = argument.starts_with("disabled:");
-        let identity = argument.strip_prefix("disabled:").unwrap_or(argument);
-        let (strategy, asset) = parse_strategy_instance(identity)?;
+    let tickers_to_use = if requested.is_empty() {
+        default_tickers.clone()
+    } else {
+        requested.iter().cloned().collect()
+    };
+
+    for identity in &tickers_to_use {
+        let disabled = identity.starts_with("disabled:");
+        let clean_id = identity.strip_prefix("disabled:").unwrap_or(identity);
+        let (strategy, asset) = parse_strategy_instance(clean_id)?;
         let canonical_identity = format!("{strategy}@{asset}");
         dashboard.add(canonical_identity.clone())?;
         if !disabled {
@@ -251,7 +529,12 @@ fn run_live_system(requested: &[String]) -> Result<(), String> {
         }
     }
 
-    eprintln!("UETS monitor ready: j/k select, a add, e enable/disable, x delete, q quit");
+    if requested.is_empty() && default_tickers.is_empty() {
+        eprintln!("No tickers configured. Add tickers to uets/config/execution.yaml or pass them as arguments.");
+    } else if requested.is_empty() {
+        eprintln!("UETS monitor ready: j/k select, a add, e enable/disable, x delete, q quit");
+    }
+
     Monitor::new(dashboard)
         .run()
         .map_err(|error| format!("UETS monitor failed: {error}"))
@@ -290,7 +573,8 @@ impl LiveDashboard {
     fn add(&mut self, value: String) -> Result<(), String> {
         use uets_gui::{InstanceSnapshot, Statistics, publish_instance};
         let (strategy, asset) = parse_strategy_instance(&value)?;
-        if strategy != "ofmr" {
+        // Allow ofmr@pwf, ofmr@mc, ofmr@cpcv in addition to ofmr@btcusdt etc.
+        if strategy != "ofmr" && !strategy.starts_with("ofmr@") {
             return Err(format!("'{strategy}' has no live UDS consumer yet"));
         }
         let identity = format!("{strategy}@{asset}");
@@ -316,6 +600,7 @@ impl LiveDashboard {
                     ..Statistics::default()
                 },
                 equity_history: Vec::new(),
+                equity_paths: Vec::new(),
             },
         )
         .map_err(|error| format!("publish disabled status for {identity}: {error}"))?;
@@ -1284,14 +1569,14 @@ mod strategy_tests {
     fn the_executor_knows_both_strategies_on_disk_and_in_the_binary() {
         let switch = StrategySwitch::new();
         let available = switch.available();
-        assert!(available.contains(&"ofmr"));
-        assert!(available.contains(&"strategy2"));
+        assert!(available.iter().any(|name| name == "ofmr"));
+        assert!(available.iter().any(|name| name == "strategy2"));
         let discovered = switch.discovered();
         assert!(discovered.contains(&"ofmr".to_string()));
         assert!(discovered.contains(&"strategy2".to_string()));
         for dir in &discovered {
             assert!(
-                available.contains(&dir.as_str()),
+                available.iter().any(|name| name == dir),
                 "folder {dir} has no compiled module"
             );
         }
@@ -1790,7 +2075,29 @@ fn main() -> ExitCode {
             return run_record(&rest);
         }
         "run" => {
-            return match run_live_system(&rest) {
+            let (mode, configured_playbacks) = match configured_execution_mode() {
+                Ok(config) => config,
+                Err(error) => {
+                    eprintln!("{error}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            if mode == "playback" {
+                let requested = if rest.is_empty() { configured_playbacks } else { rest.clone() };
+                if requested.is_empty() {
+                    eprintln!("mode is playback but playback.playback_strategies is empty");
+                    return ExitCode::FAILURE;
+                }
+                return run_research_batch(&requested);
+            }
+            let (research, live) = split_run_requests(&rest);
+            if !research.is_empty() {
+                let result = run_research_batch(&research);
+                if result != ExitCode::SUCCESS || live.is_empty() {
+                    return result;
+                }
+            }
+            return match run_live_system(&live) {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(error) => {
                     eprintln!("UETS runtime failed: {error}");
@@ -1936,7 +2243,7 @@ fn main() -> ExitCode {
 
 #[cfg(test)]
 mod strategy_instance_tests {
-    use super::parse_strategy_instance;
+    use super::{parse_strategy_instance, split_run_requests};
 
     #[test]
     fn parses_canonical_identity_case_insensitively() {
@@ -1951,5 +2258,24 @@ mod strategy_instance_tests {
         assert!(parse_strategy_instance("ofmr").is_err());
         assert!(parse_strategy_instance("@btcusdt").is_err());
         assert!(parse_strategy_instance("ofmr@../../tmp").is_err());
+    }
+
+    #[test]
+    fn separates_live_assets_from_research_selectors() {
+        let requested = vec![
+            "ofmr@btcusdt".to_string(),
+            "ofmr@pwf".to_string(),
+            "ofmr@ethusdt".to_string(),
+            "ofmr@cpcv".to_string(),
+        ];
+        let (research, live) = split_run_requests(&requested);
+        assert_eq!(
+            research,
+            vec!["ofmr@pwf".to_string(), "ofmr@cpcv".to_string()]
+        );
+        assert_eq!(
+            live,
+            vec!["ofmr@btcusdt".to_string(), "ofmr@ethusdt".to_string()]
+        );
     }
 }

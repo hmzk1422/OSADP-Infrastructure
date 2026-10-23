@@ -1,0 +1,36 @@
+allow_live_trading: false
+mode: playback
+playback:
+  cryptol2:
+    chunk_size: 10000
+    path_glob: market_data/ingest_parquet/{symbol}/merged/**/*.parquet
+    root: market_data/ingest_parquet
+    symbol: BTCUSDT
+  cryptol2_offline:
+    path_glob: market_data/matched/{symbol}/merged_*.parquet
+    root: market_data/matched
+    symbol: BTCUSDT
+  fee_bps: 4.0
+  max_abs_correlation: 0.5
+  max_paths: 50
+  method: parametric_monte_carlo
+  n_bars: 500
+  n_bootstrap: 20
+  n_splits: 6
+  n_test_splits: 2
+  periods_per_year: 252.0
+  purge_bars: 5
+  source: synthetic
+  starting_capital: 10000.0
+  strategy:
+    entry_threshold: 0.001
+    lookback_bars: 20
+    type: momentum
+  synthetic:
+    bar_seconds: 1.0
+    generator: synth2
+    n_bars: 500
+    paths: 64
+    seed: 84
+    symbol: SYNTH
+  workers: 0

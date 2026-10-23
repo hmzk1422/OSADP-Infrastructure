@@ -42,6 +42,7 @@ fn publish_status(
             ..Statistics::default()
         },
         equity_history: Vec::new(),
+        equity_paths: Vec::new(),
     };
     publish_instance(path, &instance)?;
     Ok(())

@@ -1,10 +1,13 @@
 //! OFMR runtime configuration.
 //!
-//! Loads `settings.yaml` instead of silently using hard-coded values. Search order:
+//! Loads `ofmr.yaml` instead of silently using hard-coded values. Search order:
 //! `OFMR_SETTINGS_PATH`, then the known repository-relative locations below.
 
 use serde::Deserialize;
-use std::{fs, path::{Path, PathBuf}};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -27,7 +30,7 @@ pub struct ModelSettings {
 #[serde(default, deny_unknown_fields)]
 pub struct FeatureSettings {
     /// Macro grid: seconds per higher-timeframe bar. Mirrors research
-    /// `BAR_FREQ = f"{timeframe_barrier_secs}s"` (config/portfolio.json).
+    /// `BAR_FREQ = f"{timeframe_barrier_secs}s"` (strategy_system/config/portfolio.json).
     pub htf_timeframe_secs: u64,
     /// Micro grid: seconds per lower-timeframe bar. Mirrors research
     /// `micro_barrier_secs` (the 1-second decision grid).
@@ -52,36 +55,67 @@ pub struct TradeSettings {
     pub max_position_usd: f64,
     pub min_order_size: f64,
     pub max_hold_seconds: u64,
+    pub label_horizon_seconds: u64,
+    pub embargo_seconds: u64,
     pub lockout_seconds: f64,
     pub max_trades_per_hour: u32,
+    pub rsi_filter_threshold: f64,
+    pub min_barrier_pct: f64,
+    pub max_barrier_pct: f64,
     /// Fixed stop-loss width, in basis points of entry price (mirrors
-    /// `config.py` `STOP_LOSS_BPS` / `config/portfolio.json`).
+    /// `config.py` `STOP_LOSS_BPS` / `strategy_system/config/portfolio.json`).
     pub stop_loss_bps: f64,
     /// Fixed take-profit width, in basis points of entry price (mirrors
-    /// `config.py` `TAKE_PROFIT_BPS` / `config/portfolio.json`).
+    /// `config.py` `TAKE_PROFIT_BPS` / `strategy_system/config/portfolio.json`).
     pub take_profit_bps: f64,
 }
 
 impl Default for ModelSettings {
-    fn default() -> Self { Self { path: "uets/models/ofmr/trader.txt".into(), threshold: 0.50, trade_direction: "long".into() } }
+    fn default() -> Self {
+        Self {
+            path: "uets/models/ofmr/trader.txt".into(),
+            threshold: 0.50,
+            trade_direction: "long".into(),
+        }
+    }
 }
 impl Default for FeatureSettings {
-    fn default() -> Self { Self {
-        htf_timeframe_secs: 300, ltf_timeframe_secs: 1,
-        rsi_14_window: 14, rsi_2_window: 2, sma_14_window: 14, ma_slope_window: 5,
-        price_roc_window_3: 3, price_roc_window_5: 5, rsi_z_window: 20,
-        deeplob_z_window: 10, orderflow_z_window: 10, rsi_roc_window_3: 3,
-        rsi_roc_window_5: 5, barrier_vol_bar_window: 20,
-    } }
+    fn default() -> Self {
+        Self {
+            htf_timeframe_secs: 300,
+            ltf_timeframe_secs: 1,
+            rsi_14_window: 14,
+            rsi_2_window: 2,
+            sma_14_window: 14,
+            ma_slope_window: 5,
+            price_roc_window_3: 3,
+            price_roc_window_5: 5,
+            rsi_z_window: 20,
+            deeplob_z_window: 10,
+            orderflow_z_window: 10,
+            rsi_roc_window_3: 3,
+            rsi_roc_window_5: 5,
+            barrier_vol_bar_window: 20,
+        }
+    }
 }
 impl Default for TradeSettings {
-    fn default() -> Self { Self {
-        max_position_usd: 10_000.0, min_order_size: 0.001,
-        max_hold_seconds: 300, lockout_seconds: 1000.0,
-        max_trades_per_hour: 300,
-        stop_loss_bps: 5.0,
-        take_profit_bps: 5.0,
-    } }
+    fn default() -> Self {
+        Self {
+            max_position_usd: 10_000.0,
+            min_order_size: 0.001,
+            max_hold_seconds: 300,
+            lockout_seconds: 1000.0,
+            label_horizon_seconds: 6000,
+            embargo_seconds: 6000,
+            max_trades_per_hour: 300,
+            rsi_filter_threshold: 30.0,
+            min_barrier_pct: 0.00015,
+            max_barrier_pct: 0.05,
+            stop_loss_bps: 5.0,
+            take_profit_bps: 5.0,
+        }
+    }
 }
 
 impl Settings {
@@ -95,20 +129,21 @@ impl Settings {
         let path = Self::find_path()?;
         let source = fs::read_to_string(&path)
             .map_err(|e| format!("read OFMR settings {}: {e}", path.display()))?;
-        let settings: Self = if path.file_name().is_some_and(|name| name == "execution.yaml") {
-            let document: serde_yaml::Value = serde_yaml::from_str(&source)
-                .map_err(|e| format!("parse UETS settings {}: {e}", path.display()))?;
-            match document.get("ofmr") {
-                Some(value) => serde_yaml::from_value(value.clone())
-                    .map_err(|e| format!("parse OFMR settings in {}: {e}", path.display()))?,
-                None => serde_yaml::from_str(&source)
-                    .map_err(|e| format!("parse OFMR settings {}: {e}", path.display()))?,
-            }
-        } else {
-            serde_yaml::from_str(&source)
-                .map_err(|e| format!("parse OFMR settings {}: {e}", path.display()))?
-        };
-        settings.validate().map_err(|e| format!("invalid OFMR settings {}: {e}", path.display()))?;
+        let mut settings: Self = serde_yaml::from_str(&source)
+            .map_err(|e| format!("parse OFMR settings {}: {e}", path.display()))?;
+        // Offline research uses the same threshold as ml_state_optimized's
+        // CONFIDENCE_THRESHOLD (0.20 by default). Keep this override scoped to
+        // the playback child process so live execution retains ofmr.yaml.
+        if let Some(value) = std::env::var_os("OFMR_CONFIDENCE_THRESHOLD") {
+            let value = value
+                .to_string_lossy()
+                .parse::<f64>()
+                .map_err(|error| format!("invalid OFMR_CONFIDENCE_THRESHOLD: {error}"))?;
+            settings.model.threshold = value;
+        }
+        settings
+            .validate()
+            .map_err(|e| format!("invalid OFMR settings {}: {e}", path.display()))?;
         eprintln!("[ofmr] loaded settings from {}", path.display());
         Ok(settings)
     }
@@ -116,22 +151,39 @@ impl Settings {
     fn find_path() -> Result<PathBuf, String> {
         if let Some(value) = std::env::var_os("OFMR_SETTINGS_PATH") {
             let path = PathBuf::from(value);
-            if path.is_file() { return Ok(path); }
-            return Err(format!("OFMR_SETTINGS_PATH points to missing file {}", path.display()));
+            if path.is_file() {
+                return Ok(path);
+            }
+            return Err(format!(
+                "OFMR_SETTINGS_PATH points to missing file {}",
+                path.display()
+            ));
         }
         let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-        let candidates = [
-            root.join("config/execution.yaml"),
-        ];
-        candidates.iter().find(|p| p.is_file()).cloned().ok_or_else(|| {
-            format!("settings.yaml not found; checked: {} (or set OFMR_SETTINGS_PATH)",
-                candidates.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", "))
-        })
+        let candidates = [root.join("config/ofmr.yaml")];
+        candidates
+            .iter()
+            .find(|p| p.is_file())
+            .cloned()
+            .ok_or_else(|| {
+                format!(
+                    "ofmr.yaml not found; checked: {} (or set OFMR_SETTINGS_PATH)",
+                    candidates
+                        .iter()
+                        .map(|p| p.display().to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            })
     }
 
     pub fn validate(&self) -> Result<(), String> {
-        if self.feature.htf_timeframe_secs == 0 { return Err("feature.htf_timeframe_secs must be > 0".into()); }
-        if self.feature.ltf_timeframe_secs == 0 { return Err("feature.ltf_timeframe_secs must be > 0".into()); }
+        if self.feature.htf_timeframe_secs == 0 {
+            return Err("feature.htf_timeframe_secs must be > 0".into());
+        }
+        if self.feature.ltf_timeframe_secs == 0 {
+            return Err("feature.ltf_timeframe_secs must be > 0".into());
+        }
         if self.feature.ltf_timeframe_secs > self.feature.htf_timeframe_secs {
             return Err(format!(
                 "feature.ltf_timeframe_secs ({}) must be <= feature.htf_timeframe_secs ({})",
@@ -143,21 +195,42 @@ impl Settings {
             ("feature.rsi_2_window", self.feature.rsi_2_window),
             ("feature.sma_14_window", self.feature.sma_14_window),
             ("feature.ma_slope_window", self.feature.ma_slope_window),
-            ("feature.price_roc_window_3", self.feature.price_roc_window_3),
-            ("feature.price_roc_window_5", self.feature.price_roc_window_5),
+            (
+                "feature.price_roc_window_3",
+                self.feature.price_roc_window_3,
+            ),
+            (
+                "feature.price_roc_window_5",
+                self.feature.price_roc_window_5,
+            ),
             ("feature.rsi_z_window", self.feature.rsi_z_window),
             ("feature.deeplob_z_window", self.feature.deeplob_z_window),
-            ("feature.orderflow_z_window", self.feature.orderflow_z_window),
+            (
+                "feature.orderflow_z_window",
+                self.feature.orderflow_z_window,
+            ),
             ("feature.rsi_roc_window_3", self.feature.rsi_roc_window_3),
             ("feature.rsi_roc_window_5", self.feature.rsi_roc_window_5),
-            ("feature.barrier_vol_bar_window", self.feature.barrier_vol_bar_window),
+            (
+                "feature.barrier_vol_bar_window",
+                self.feature.barrier_vol_bar_window,
+            ),
         ];
-        for (name, value) in positive_windows { if value == 0 { return Err(format!("{name} must be > 0")); } }
-        if self.model.path.trim().is_empty() { return Err("model.path must not be empty".into()); }
+        for (name, value) in positive_windows {
+            if value == 0 {
+                return Err(format!("{name} must be > 0"));
+            }
+        }
+        if self.model.path.trim().is_empty() {
+            return Err("model.path must not be empty".into());
+        }
         if !self.model.threshold.is_finite() || !(0.0..=1.0).contains(&self.model.threshold) {
             return Err("model.threshold must be finite and between 0 and 1".into());
         }
-        if !matches!(self.model.trade_direction.as_str(), "long" | "short" | "both") {
+        if !matches!(
+            self.model.trade_direction.as_str(),
+            "long" | "short" | "both"
+        ) {
             return Err("model.trade_direction must be 'long', 'short', or 'both'".into());
         }
         if !self.trade.max_position_usd.is_finite() || self.trade.max_position_usd <= 0.0 {
@@ -169,7 +242,24 @@ impl Settings {
         if !self.trade.lockout_seconds.is_finite() || self.trade.lockout_seconds < 0.0 {
             return Err("trade.lockout_seconds must be finite and >= 0".into());
         }
-        if self.trade.max_trades_per_hour == 0 { return Err("trade.max_trades_per_hour must be > 0".into()); }
+        if self.trade.max_trades_per_hour == 0 {
+            return Err("trade.max_trades_per_hour must be > 0".into());
+        }
+        if self.trade.label_horizon_seconds == 0 {
+            return Err("trade.label_horizon_seconds must be > 0".into());
+        }
+        if !self.trade.rsi_filter_threshold.is_finite()
+            || !(0.0..=100.0).contains(&self.trade.rsi_filter_threshold)
+        {
+            return Err("trade.rsi_filter_threshold must be between 0 and 100".into());
+        }
+        if !self.trade.min_barrier_pct.is_finite()
+            || self.trade.min_barrier_pct <= 0.0
+            || !self.trade.max_barrier_pct.is_finite()
+            || self.trade.max_barrier_pct < self.trade.min_barrier_pct
+        {
+            return Err("trade barrier percentage bounds are invalid".into());
+        }
         Ok(())
     }
 }
@@ -179,10 +269,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn unified_execution_yaml_contains_loadable_ofmr_settings() {
-        let document: serde_yaml::Value =
-            serde_yaml::from_str(include_str!("../../config/execution.yaml")).unwrap();
-        let settings: Settings = serde_yaml::from_value(document["ofmr"].clone()).unwrap();
+    fn ofmr_yaml_contains_loadable_settings() {
+        let settings: Settings =
+            serde_yaml::from_str(include_str!("../../config/ofmr.yaml")).unwrap();
         settings.validate().unwrap();
         assert_eq!(settings.trade.max_position_usd, 10_000.0);
         assert_eq!(settings.feature.ltf_timeframe_secs, 1);

@@ -3,7 +3,7 @@ from typing import List, Tuple, Union
 import numpy as np
 import pandas as pd
 
-from config.research import moe as cfg
+from strategy_system.config.research import moe as cfg
 from pathlib import Path
 
 # Coexistence trick: make `...vdc.features.<name>` resolve to the

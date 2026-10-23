@@ -138,9 +138,11 @@ impl SnapshotSource for SocketSnapshotSource {
                 .duration_since(UNIX_EPOCH)
                 .ok()
                 .map(|elapsed| format!("{} ms UTC", elapsed.as_millis())),
+            aggregate_title: None,
             instances,
             aggregate,
             aggregate_equity_history: self.aggregate_equity_history.clone(),
+            aggregate_equity_paths: Vec::new(),
         }
     }
 }

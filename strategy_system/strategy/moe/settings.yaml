@@ -90,56 +90,35 @@ ood:                       # causal temporal regime discovery
 
   fit_rows: 0.7            # NEW: fit encoder+segmenter on first 70% only (match --train-frac)
 
-gp:                        # bounded state-conditioned genetic programming
-  enabled: false           # explicit offline retraining switch; never run per live observation
-  feature_library_path: null # optional persisted, validated expression library
-  evaluation_models: [ridge] # [ridge, ols, tree, neural_network]
-  target_columns:          # supervised objectives from outcome.forward_returns
-    - future_return__1s
-    - future_return__5s
-    - future_return__10s
-    - future_mfe_long__5s
-    - future_mae_long__5s
-    - future_mfe_short__5s
-    - future_mae_short__5s
-    - future_mfe_long__10s
-    - future_mae_long__10s
-    - future_mfe_short__10s
-    - future_mae_short__10s
+gp:                        # target-free feature search in the native Rust crate
+  enabled: true
   input_columns: null      # null -> numeric causal feature columns from compute_features
   normalization_window: 500
   normalization_min_periods: 50
   clip_z: 8.0
-  train_fraction: 0.70     # chronological prefix; selected labels are purged at boundary
-  purge_rows: 0            # fallback only when target timestamp columns are unavailable
-  max_height: 5
-  population_size: 16
-  generations: 3
-  tournament_size: 4
-  elite_count: 2
-  mutation_rate: 0.30
-  crossover_rate: 0.70
-  temporal_windows: [2, 4, 8, 16]
-  max_features_per_state_target: 2
-  min_state_samples: 60
-  include_null: false      # optional explicit offline research on accumulated unknown-state rows
-  min_null_samples: 60
-  max_states: 10
-  complexity_penalty: 0.0005
-  block_count: 5
-  min_block_samples: 20
-  min_valid_blocks: 3
-  require_block_sign_agreement: true
-  block_std_penalty: 0.5
-  min_train_ic: 0.03
-  min_validation_ic: 0.02
-  min_train_tstat: 2.0
-  min_validation_tstat: 1.96
-  multiple_testing_alpha: 0.05
-  validation_ic_retention: 0.25
-  correlation_threshold: 0.98
-  immigrant_fraction: 0.10
+  train_fraction: 0.70     # chronological prefix used for feature discovery
+  windows: [5, 10, 20]
+  unary: [sin, cos, sqrt, pow2, pow3]
+  binary: [add, sub, mul, div]
+  temporal: [lag, diff, deriv, rollmean, rollstd]
+  partial: true
+  levels: 3
+  max_height: 6
+  max_nesting: 2
+  metric: mixed
+  threshold: 0.90          # novelty metric threshold
+  smooth: 30
+  candidates_per_level: 12000
+  max_new_per_level: 150
+  max_archive: 1500
+  evo_generations: 0
+  evo_children: 2000
+  verify_rows: 6000
+  sig_rows: 512
+  min_valid: 0.8
+  correlation_threshold: 0.5
   seed: 7
+  threads: 0
 
 outcome:
   forward_returns:        # regression targets; labels stay out of live features
@@ -241,5 +220,3 @@ policy:                   # orderflow prediction policy (the rules)
   step: 600
   top_n: 5
   spearman_block_size: 32
-
-

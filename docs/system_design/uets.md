@@ -354,7 +354,8 @@ The canonical form is `strategy <strategy>@<asset>`; the legacy form is
 this socket consumer; another identity is rejected rather than silently running
 OFMR. The exchange-side fan-out must connect to and stream length-prefixed
 frames there. The OFMR consumer computes decisions and can submit USD-M
-Futures market orders under the mode in `uets/config/execution.yaml`. The Rust `run`
+Futures market orders under the mode in `uets/config/execution.yaml`; OFMR
+strategy parameters are in `uets/config/ofmr.yaml`. The Rust `run`
 command above remains a development launcher, not a production supervisor.
 
 ## Current integration boundary

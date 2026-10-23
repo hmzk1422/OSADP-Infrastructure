@@ -1,7 +1,6 @@
-"""OFMR scalp MoE pipeline: strategy() sequences run_ood -> run_gp -> run_tb.
+"""OFMR scalp MoE pipeline: Rust GP -> OOD -> horizon models -> TB.
 
-All dataframe work, fitting and serialization live in helper modules
-(gp_stage.py, tb_stage.py, export_models.py); this file only wires the stages.
+The GP search/evaluation is native Rust; this Python module wires strategy stages.
 Output: moe/models/{regime/, latent_<id>/, manifest.json}  (the Rust contract).
 
     python -m strategy_system.strategy.moe.strategy [settings.yaml]
@@ -25,7 +24,12 @@ from .ops.export import (
     models_dir_from_cfg,
     verify_regime_contract,
 )
-from .gp.gp_stage import GPStage, fit_latent_gp
+from components.pipelines.gp.gp_stage import (
+    GPFeatures,
+    GPStage as RustGPStage,
+    fit_gp_features,
+    fit_horizon_models,
+)
 from .ops.settings import load_settings
 from .ood import OODSystem
 from .outcome.tb_stage import ERR_RULE, build_tb_base_frame, fit_latent_tb, tb_params
@@ -33,75 +37,53 @@ from .outcome.tb_stage import ERR_RULE, build_tb_base_frame, fit_latent_tb, tb_p
 
 class StrategyResult(NamedTuple):
     regimes: pd.DataFrame      # filter with regimes[regimes["latent_id"] == "1"]
-    gp: GPStage
+    gp: RustGPStage
     tb_report: pd.DataFrame    # one row per latent: exported / skipped + reason
     manifest_path: object      # Path | None
 
 
-def run_ood(df: pd.DataFrame, cfg: dict) -> tuple[pd.DataFrame, OODSystem]:
-    """
-    ood
+def run_gp_new(df: pd.DataFrame, cfg: dict) -> GPFeatures:
+    """Run the native Rust GP before OOD and persist its formula/tree library."""
+    gpf = fit_gp_features(df, cfg)
+    gpf.feature_set.save(models_dir_from_cfg(cfg) / "gp" / "library.json")
+    return gpf
 
-    hypothesis:
-    Previously observed market states recur with stable temporal structure, so a
-    causal encoder + segmenter can label every row with a latent state, or abstain
-    ("null") when no known prototype is close enough.
 
-    assumptions:
-    One causal online pass over the stream: later rows never change earlier labels.
-    cfg["ood"] fully configures OODSystem. The regime encoder + metadata are
-    replay-verified and exported to models/regime/ (encoder.onnx,
-    regime_metadata.json) before anything else is built on these labels.
-
-    args:
-    =================================
-    df: raw table from load_L2.
-    cfg: full settings mapping (reads "ood", "moe").
-    returns: (regimes, detector); regimes["latent_id"] is the per-row latent label.
-    =================================
-    """
-    detector = OODSystem(**cfg.get("ood", {}))
-    regimes = detector.detect(df)
-    verify_regime_contract(detector, df, regimes)
+def run_ood(df: pd.DataFrame, gpf: GPFeatures, cfg: dict) -> tuple[pd.DataFrame, OODSystem]:
+    """Fit OOD on Rust-GP features, not on raw market columns."""
+    ood_cfg = dict(cfg.get("ood", {}))
+    ts_col = ood_cfg.get("timestamp_col") or "timestamp"
+    ood_cfg["primitive_columns"] = list(gpf.features.columns)
+    frame = gpf.features.copy()
+    if ts_col in df:
+        if isinstance(frame.index, pd.DatetimeIndex):
+            frame[ts_col] = frame.index
+        elif frame.index.isin(df.index).all():
+            frame[ts_col] = df[ts_col].reindex(frame.index).to_numpy()
+        else:
+            raise ValueError("cannot align raw timestamps to Rust GP feature rows")
+    detector = OODSystem(**ood_cfg)
+    regimes = detector.detect(frame)
+    verify_regime_contract(detector, frame, regimes)
     export_regime_bundle(models_dir_from_cfg(cfg), detector)
     return regimes, detector
 
 
-def run_gp(df: pd.DataFrame, regimes: pd.DataFrame, cfg: dict) -> GPStage:
-    """
-    gp
-
-    hypothesis:
-    Within one latent state, causal expression features predict forward returns
-    at t+1 ... t+n well enough to feed a barrier model, and they stay stable
-    whenever that latent recurs.
-
-    assumptions:
-    Offline only. Training rows = ALL episodes of every latent (see
-    select_training_rows in gp_stage.py, the single place to swap the training
-    mechanism). With no holdout the GP validation veto is skipped. Search runs on
-    a thread pool over (latent, target) pairs with numba nogil kernels
-    (gp/jit_kernels.py). The t+1..t+n linreg is refit on the same rows, and its
-    features + weights + expression formulas are written per latent to
-    models/latent_<id>/gp_features.json for Rust.
-
-    args:
-    =================================
-    df: raw table from load_L2.
-    regimes: run_ood output.
-    cfg: full settings mapping (reads "features", "outcome", "gp", "ood").
-    returns: GPStage (gp result, per-latent horizon models, predictions, targets).
-    =================================
-    """
-    stage = fit_latent_gp(df, regimes, cfg)
+def run_horizon(
+    df: pd.DataFrame, gpf: GPFeatures, regimes: pd.DataFrame, cfg: dict
+) -> RustGPStage:
+    """Fit downstream return predictors from the globally selected Rust features."""
+    stage = fit_horizon_models(df, gpf, regimes, cfg)
     models_dir = models_dir_from_cfg(cfg)
     for latent, horizon_model in stage.horizon_models.items():
-        export_gp_features(models_dir, latent, stage.gp.model, horizon_model,
-                           stage.terminal_names, stage.horizons)
+        export_gp_features(
+            models_dir, latent, stage.gp, horizon_model,
+            stage.terminal_names, stage.horizons,
+        )
     return stage
 
 
-def run_tb(df: pd.DataFrame, gp_stage: GPStage, cfg: dict) -> tuple[pd.DataFrame, object]:
+def run_tb(df: pd.DataFrame, gp_stage: RustGPStage, cfg: dict) -> tuple[pd.DataFrame, object]:
     """
     tb
 
@@ -184,8 +166,9 @@ def run_tb(df: pd.DataFrame, gp_stage: GPStage, cfg: dict) -> tuple[pd.DataFrame
 
 def strategy(df: pd.DataFrame, settings: dict | None = None) -> StrategyResult:
     cfg = load_settings() if settings is None else settings
-    regimes, _ = run_ood(df, cfg)
-    gp_stage = run_gp(df, regimes, cfg)
+    gp_features = run_gp_new(df, cfg)
+    regimes, _ = run_ood(df, gp_features, cfg)
+    gp_stage = run_horizon(df, gp_features, regimes, cfg)
     report, manifest = run_tb(df, gp_stage, cfg)
     return StrategyResult(regimes, gp_stage, report, manifest)
 

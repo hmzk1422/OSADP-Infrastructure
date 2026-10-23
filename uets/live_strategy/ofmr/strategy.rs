@@ -13,7 +13,6 @@ use crate::live_strategy::ofmr::settings::Settings;
 use crate::live_strategy::StateBuilder;
 
 const N_FEATURES: usize = 15;
-const HIGHER_TIMEFRAME_MINUTES: f64 = 5.0;
 const BARRIER_MULTIPLIER: f64 = 0.3;
 const REWARD_RISK_RATIO: f64 = 10.0;
 const MIN_VOLATILITY_FRACTION: f64 = 0.001;
@@ -22,25 +21,18 @@ const MIN_VOLATILITY_FRACTION: f64 = 0.001;
 // when that split was trained with MissingType::Zero.
 const LIGHTGBM_ZERO_THRESHOLD: f64 = 1.0e-35;
 
-/// Convert one-minute close-return volatility to the trained five-minute
-/// barrier scale and return (stop-loss fraction, take-profit fraction).
+/// Convert trained timeframe close-return volatility to stop and target
+/// fractions, matching the research label builder.
 ///
-/// The 0.001 fallback is the volatility-scale fallback described by the
-/// original training-label comment; the stop is then multiplied by 0.3.
-pub fn barrier_fractions(volatility_1m: Option<f64>) -> (f64, f64) {
-    let volatility_5m = match volatility_1m.filter(|v| v.is_finite() && *v >= 0.0) {
-        Some(volatility) => {
-            let scaled = volatility * HIGHER_TIMEFRAME_MINUTES.sqrt();
-            if scaled.is_finite() {
-                scaled.max(MIN_VOLATILITY_FRACTION)
-            } else {
-                MIN_VOLATILITY_FRACTION
-            }
-        }
-        None => MIN_VOLATILITY_FRACTION,
-    };
-
-    let stop = volatility_5m * BARRIER_MULTIPLIER;
+/// `bar_vol_std` is already calculated on the configured higher-timeframe
+/// closes (300 seconds by default); scaling it by sqrt(5) again would make
+/// playback barriers wider than the research labels.
+pub fn barrier_fractions(bar_vol_std: Option<f64>) -> (f64, f64) {
+    let volatility = bar_vol_std
+        .filter(|value| value.is_finite() && *value >= 0.0)
+        .unwrap_or(MIN_VOLATILITY_FRACTION)
+        .max(MIN_VOLATILITY_FRACTION);
+    let stop = volatility * BARRIER_MULTIPLIER;
     (stop, stop * REWARD_RISK_RATIO)
 }
 
@@ -48,7 +40,7 @@ pub fn barrier_fractions(volatility_1m: Option<f64>) -> (f64, f64) {
 /// feature produced by feature computation.
 ///
 /// `bar_vol_std` must match the training pipeline's rolling population
-/// standard deviation of one-minute close-to-close percentage returns.
+/// standard deviation of configured higher-timeframe close returns.
 pub fn barrier_fractions_from_features(features: &FeatureRow) -> (f64, f64) {
     barrier_fractions(features.get("bar_vol_std"))
 }
@@ -522,6 +514,22 @@ impl OfmrStrategy {
         }
     }
 
+    /// Construct OFMR only when its configured LightGBM model can be loaded.
+    /// Offline playback uses this to avoid reporting a successful all-Hold
+    /// backtest when model loading failed.
+    pub fn try_with_settings(settings: Settings) -> Result<Self, String> {
+        let model = LightGBMModel::load(&settings.model.path)?;
+        let threshold = settings.model.threshold;
+        if !threshold.is_finite() || !(0.0..=1.0).contains(&threshold) {
+            return Err(format!("invalid OFMR model threshold: {threshold}"));
+        }
+        Ok(Self {
+            model: Some(model),
+            settings,
+            threshold,
+        })
+    }
+
     /// Build the model input in Column_0 .. Column_14 order.
     /// Missing and non-finite values are rejected rather than guessed.
     fn features_from_row(row: &FeatureRow) -> Option<[f64; N_FEATURES]> {
@@ -676,9 +684,9 @@ mod tests {
     }
 
     #[test]
-    fn barriers_scale_one_minute_volatility_to_five_minutes_and_ten_to_one_rr() {
+    fn barriers_match_research_timeframe_volatility_and_ten_to_one_rr() {
         let (stop, target) = barrier_fractions(Some(0.002));
-        let expected_stop = 0.002 * 5.0_f64.sqrt() * 0.3;
+        let expected_stop = 0.002 * 0.3;
         assert!((stop - expected_stop).abs() < 1e-12);
         assert!((target / stop - 10.0).abs() < 1e-12);
     }
