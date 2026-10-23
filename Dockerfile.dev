@@ -46,7 +46,7 @@ WORKDIR /workspace
 
 # Python deps.
 #
-# Python playback uses NumPy/Pandas and CryptoL2 Parquet uses PyArrow.
+# Python research uses NumPy/Pandas/Polars and CryptoL2 Parquet uses PyArrow.
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 

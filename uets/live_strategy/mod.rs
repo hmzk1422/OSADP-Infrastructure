@@ -24,18 +24,27 @@ pub use runner::{StrategyRunner, discover_strategy_dirs};
 pub use traits::{ComputeFeatures, LiveStrategy, StateBuilder};
 
 /// Strategies compiled into this binary.
-pub fn available_strategies() -> Vec<&'static str> {
-    vec!["ofmr", "strategy2"]
+pub fn available_strategies() -> Vec<String> {
+    discover_strategy_dirs()
 }
 
 /// Build a fresh bundle by name (independent state per call).
 pub fn load_strategy(name: &str) -> Result<LiveStrategy, String> {
-    match name {
-        "ofmr" => ofmr::load(),
+    let base = name.split_once('@').map_or(name, |(strategy, _)| strategy);
+    if !available_strategies().iter().any(|available| available == base) {
+        return Err(format!(
+            "unknown strategy folder '{base}' (discovered: {:?})",
+            available_strategies()
+        ));
+    }
+
+    match base {
+        "ofmr" => {
+            ofmr::load()
+        }
         "strategy2" => strategy2::load(),
         other => Err(format!(
-            "unknown strategy '{other}' (available: {:?})",
-            available_strategies()
+            "strategy folder '{other}' has no compiled loader; add its module to live_strategy"
         )),
     }
 }
@@ -54,7 +63,7 @@ mod tests {
     #[test]
     fn known_strategies_load() {
         for name in available_strategies() {
-            assert!(load_strategy(name).is_ok(), "loads {name}");
+            assert!(load_strategy(&name).is_ok(), "loads {name}");
         }
     }
 
@@ -66,8 +75,8 @@ mod tests {
     #[test]
     fn discovery_lists_strategy_folders() {
         let dirs = discover_strategy_dirs();
-        assert!(dirs.contains(&"ofmr".to_string()), "got {dirs:?}");
-        assert!(dirs.contains(&"strategy2".to_string()), "got {dirs:?}");
+        assert!(available_strategies().contains(&"ofmr".to_string()), "got {dirs:?}");
+        assert!(available_strategies().contains(&"strategy2".to_string()), "got {dirs:?}");
     }
 
     #[test]

@@ -14,8 +14,13 @@ repository virtual environment with `python -m pip install -r requirements.txt`.
 Run from the repository root. The playback command runs directly in Python;
 Docker commands require the Docker Desktop Linux engine to be running:
 
+Master Command: `docker compose -f docker-compose.dev.yml --profile live run --rm uets-live run strategy@ticker`
+- uets/live_strategy/config/execution.yaml to change the mode.
+- Testnet/live-test/live-trade: strategy@ticker
+- Playback: strategy@method (with master command)
+
 ```bash
-python -m uets.playback # Run configured playback now and print its report
+python -m uets.playback # Run the configured offline research analysis
 docker compose -f docker-compose.dev.yml config --quiet # Validate Docker Compose configuration without starting containers
 docker compose -f docker-compose.dev.yml build uets-dev # Build the Linux Rust/Python development image
 docker compose -f docker-compose.dev.yml run --rm uets-dev cargo check --workspace --all-targets # Compile UETS and all workspace components in Linux
@@ -24,8 +29,12 @@ docker compose -f docker-compose.dev.yml run --rm uets-dev cargo clippy --worksp
 docker compose -f docker-compose.dev.yml run --rm uets-dev cargo run --manifest-path uets/Cargo.toml --bin dev_test -- help # Show UETS CLI help
 docker compose -f docker-compose.dev.yml run --rm uets-dev cargo run --manifest-path uets/Cargo.toml --bin dev_test -- playback # Run selected playback method from the YAML
 docker compose -f docker-compose.dev.yml run --rm uets-dev python tests/test_playback_runner.py # Verify all playback modes; prints SUCCESSFUL
-docker compose -f docker-compose.dev.yml --profile live run --rm uets-live run ofmr@btcusdt # Start OFMR workers; set execution.yaml to paper, testnet, or live first
+# Master command to open the TUI and start trading:
+#   - Docker (live profile):       docker compose -f docker-compose.dev.yml --profile live run --rm uets-live run ofmr@btcusdt
+#   - Docker (multiple workers):    docker compose -f docker-compose.dev.yml --profile live run --rm uets-live run ofmr@btcusdt ofmr@ethusdt
+#   - Local Rust:                   cargo run --release --manifest-path uets/Cargo.toml --bin dev_test -- run ofmr@btcusdt ofmr@ethusdt
 docker compose -f docker-compose.dev.yml --profile live run --rm uets-live run ofmr@btcusdt ofmr@ethusdt # Start multiple OFMR workers; configure execution.yaml first
+docker compose -f docker-compose.dev.yml --profile live run --rm uets-live run ofmr@pwf ofmr@cpcv # Run two offline research jobs; prints SUCCESS 2/2
 ```
 
 For an interactive development container:
@@ -53,10 +62,20 @@ testnet; run it only after setting all `UETS_BYBIT_TESTNET_*` variables and
 confirming the configured symbol and order size:
 `python tests/bybit_testnet_order_smoke.py`.
 
-Before starting an OFMR worker, set `mode: paper` in
-[execution.yaml](./uets/config/execution.yaml) for a non-live dry run. Testnet
-and live modes require API credentials; live additionally requires
-`allow_live_trading: true`. Workers run until stopped with `q` or Ctrl+C.
+Before starting an OFMR worker, set `mode: live-test` in
+[execution.yaml](./uets/config/execution.yaml) to use exchange market data with
+simulated orders and no exchange order connection. `testnet` routes orders to
+the exchange test network. `live-trade` routes real orders and requires API
+credentials plus `allow_live_trading: true`. Workers run until stopped with
+`q` or Ctrl+C.
+
+## Pre-loaded tickers
+
+Set `tickers: [` ofmr@btcusdt, ofmr@ethusdt `]` in
+[execution.yaml](./uets/config/execution.yaml) to automatically start the TUI
+with those strategy@asset instances already loaded. If no tickers are configured
+and none are passed on the command line, the TUI will start with a prompt to
+configure tickers.
 
 The TUI supports adding/disabling workers; press `q` to stop. Logs are written
 under `logs/uets/`. See [uets/README.md](./uets/README.md) for CLI commands and
@@ -64,18 +83,26 @@ TUI controls.
 
 ## Configuration and playback status
 
-UETS mode and playback settings are in
+UETS execution mode and offline research settings are in
 [uets/config/execution.yaml](./uets/config/execution.yaml); OFMR model, feature,
 and trade settings are separate in [uets/config/ofmr.yaml](./uets/config/ofmr.yaml).
-Set `mode: playback` and choose `playback.method`: `parametric_monte_carlo` (synthetic paths),
+Choose `playback.method`: `parametric_monte_carlo` (synthetic paths),
 `purged_walk_forward` (single asset), or `cpcv` (CryptoL2 Parquet; multiple
-symbols supported). Configure synthetic generation, data paths/symbols,
+symbols supported). Analysis selectors such as `run ofmr@pwf ofmr@cpcv`
+discover strategy folders under `uets/live_strategy/`, run offline without
+connecting to an exchange, and save reports/equity paths in
+`market_data/live_db/playback/`. The path chart is rendered in the terminal.
+Configure synthetic generation, data paths/symbols,
 correlation threshold, purging, strategy, and workers in that file. Playback
-is offline and cannot route live orders. For testnet/live, use their modes,
-credentials from environment variables, and require `allow_live_trading: true`
-for production live orders.
+analysis is independent of the selected order mode and cannot route live orders.
+CryptoL2 scans project only the required price/signal columns and aggregate each
+Parquet file to `bar_seconds` before collecting it, rather than keeping raw event
+rows from the full dataset in memory. When live asset instances and research
+selectors are supplied together, research runs first and the live dashboard
+starts afterward so the two workloads do not overlap.
 
-Playback is runnable via the `dev_test playback` command and prints a report
+Research is runnable via `dev_test playback` or `run <strategy>@pwf|mc|cpcv`
+and prints a report
 with mean cumulative return, per-trade expectancy, MDD, Sortino, and CVaR05/95.
 Its current built-in strategy is a vectorized momentum baseline, **not the
 trained OFMR model**; use results accordingly. The Python end-to-end smoke test

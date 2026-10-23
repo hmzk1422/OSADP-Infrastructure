@@ -129,8 +129,18 @@ impl Settings {
         let path = Self::find_path()?;
         let source = fs::read_to_string(&path)
             .map_err(|e| format!("read OFMR settings {}: {e}", path.display()))?;
-        let settings: Self = serde_yaml::from_str(&source)
+        let mut settings: Self = serde_yaml::from_str(&source)
             .map_err(|e| format!("parse OFMR settings {}: {e}", path.display()))?;
+        // Offline research uses the same threshold as ml_state_optimized's
+        // CONFIDENCE_THRESHOLD (0.20 by default). Keep this override scoped to
+        // the playback child process so live execution retains ofmr.yaml.
+        if let Some(value) = std::env::var_os("OFMR_CONFIDENCE_THRESHOLD") {
+            let value = value
+                .to_string_lossy()
+                .parse::<f64>()
+                .map_err(|error| format!("invalid OFMR_CONFIDENCE_THRESHOLD: {error}"))?;
+            settings.model.threshold = value;
+        }
         settings
             .validate()
             .map_err(|e| format!("invalid OFMR settings {}: {e}", path.display()))?;

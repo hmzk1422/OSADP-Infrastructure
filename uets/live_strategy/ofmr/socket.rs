@@ -1,3 +1,16 @@
+//! uets live strategy OFMR socket consumer
+//!
+//! This module handles the IPC Unix socket communication for the OFMR strategy.
+//! It supports playback mode (ofmr@pwf, ofmr@mc, ofmr@cpcv) where tick data
+//! is received via Unix domain socket from parquet data instead of connecting
+//! to the live Binance exchange.
+//!,
+//! Framing: `u32` LE length prefix + payload (max 1 MB). Each frame carries a
+//! per-symbol tick row; we decode it into a `FeatureRow`, run `compute` +
+//! `decide`, then submit resulting orders through the USD-M Futures connector.
+//!,
+//! On win32 (`cfg(not(unix))`) this is a compile-time stub so the crate
+//! builds everywhere; the live loop only runs on Unix.
 //! OFMR socket consumer — IPC Unix socket (`sockets/strategies/ofmr.sock`).
 //!
 //! Framing: `u32` LE length prefix + payload (max 1 MB). Each frame carries a
@@ -83,10 +96,9 @@ struct OrderExecutor {
 #[cfg(any(unix, test))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ExecutionMode {
-    Paper,
+    LiveTest,
     Testnet,
-    Live,
-    Playback,
+    LiveTrade,
 }
 
 #[cfg(any(unix, test))]
@@ -142,10 +154,9 @@ impl ExecutionConfig {
             match key.trim() {
                 "mode" => {
                     mode = Some(match value {
-                        "paper" => ExecutionMode::Paper,
+                        "live-test" => ExecutionMode::LiveTest,
                         "testnet" => ExecutionMode::Testnet,
-                        "live" => ExecutionMode::Live,
-                        "playback" => ExecutionMode::Playback,
+                        "live-trade" => ExecutionMode::LiveTrade,
                         _ => return Err(format!("invalid execution mode {value:?}")),
                     });
                 }
@@ -171,46 +182,57 @@ impl ExecutionConfig {
 impl OrderExecutor {
     fn from_env(settings: &Settings) -> Result<Self, String> {
         let config = ExecutionConfig::load()?;
-        if config.mode == ExecutionMode::Playback {
-            return Err(
-                "playback is offline; run `python -m uets.playback` from the repository root"
-                    .into(),
-            );
-        }
         let api_key = std::env::var("BINANCE_API_KEY").ok();
         let secret_key = std::env::var("BINANCE_API_SECRET").ok();
-        let mode = match config.mode {
-            ExecutionMode::Paper => "paper",
-            ExecutionMode::Testnet => "testnet",
-            ExecutionMode::Live => "live",
-            ExecutionMode::Playback => "playback",
-        }
-        .to_string();
-        let connector = match config.mode {
-            ExecutionMode::Paper => None,
-            ExecutionMode::Testnet => {
-                let (Some(api_key), Some(secret_key)) = (api_key, secret_key) else {
-                    return Err(
-                        "testnet execution requires BINANCE_API_KEY and BINANCE_API_SECRET".into(),
-                    );
-                };
-                Some(BinanceFuturesTrade::new(Some(api_key), Some(secret_key)))
+
+        // Detect playback strategies: ofmr@pwf, ofmr@mc, ofmr@cpcv
+        let strategy_name = std::env::var("UETS_STRATEGY_NAME").unwrap_or_default();
+        let is_playback = strategy_name.starts_with("ofmr@")
+            && matches!(
+                strategy_name.split_once('@').map(|(_, selector)| selector),
+                Some("pwf") | Some("mc") | Some("cpcv")
+            );
+
+        let mode = if is_playback {
+            "playback".to_string()
+        } else {
+            match config.mode {
+                ExecutionMode::LiveTest => "live-test",
+                ExecutionMode::Testnet => "testnet",
+                ExecutionMode::LiveTrade => "live-trade",
             }
-            ExecutionMode::Live => {
-                if !config.allow_live_trading {
-                    return Err("live execution requires allow_live_trading: true in uets/config/execution.yaml".into());
+            .to_string()
+        };
+        let connector = if is_playback {
+            // Playback mode: no Binance connector needed.
+            // Data flows through Unix domain socket from local parquet files.
+            None
+        } else {
+            match config.mode {
+                ExecutionMode::LiveTest => None,
+                ExecutionMode::Testnet => {
+                    let (Some(api_key), Some(secret_key)) = (api_key, secret_key) else {
+                        return Err(
+                            "testnet execution requires BINANCE_API_KEY and BINANCE_API_SECRET".into(),
+                        );
+                    };
+                    Some(BinanceFuturesTrade::new(Some(api_key), Some(secret_key)))
                 }
-                let (Some(api_key), Some(secret_key)) = (api_key, secret_key) else {
-                    return Err(
-                        "live execution requires BINANCE_API_KEY and BINANCE_API_SECRET".into(),
-                    );
-                };
-                Some(BinanceFuturesTrade::production(
-                    Some(api_key),
-                    Some(secret_key),
-                ))
+                ExecutionMode::LiveTrade => {
+                    if !config.allow_live_trading {
+                        return Err("live-trade execution requires allow_live_trading: true in uets/config/execution.yaml".into());
+                    }
+                    let (Some(api_key), Some(secret_key)) = (api_key, secret_key) else {
+                        return Err(
+                            "live execution requires BINANCE_API_KEY and BINANCE_API_SECRET".into(),
+                        );
+                    };
+                    Some(BinanceFuturesTrade::production(
+                        Some(api_key),
+                        Some(secret_key),
+                    ))
+                }
             }
-            ExecutionMode::Playback => unreachable!("playback rejected before connector setup"),
         };
         if !settings.trade.max_position_usd.is_finite()
             || settings.trade.max_position_usd <= 0.0
@@ -342,7 +364,8 @@ impl OrderExecutor {
             Ok(fills)
         } else {
             println!(
-                "OFMR simulated mode=paper symbol={symbol} decision={decision:?} qty={}",
+                "OFMR simulated mode={} symbol={symbol} decision={decision:?} qty={}",
+                self.mode,
                 request.qty
             );
             let fill = Fill::new(
@@ -1211,20 +1234,20 @@ mod tests {
 
     #[test]
     fn execution_config_requires_mode_and_defaults_live_guard_to_false() {
-        let config = ExecutionConfig::parse("execution:\n  mode: paper\n").unwrap();
-        assert_eq!(config.mode, ExecutionMode::Paper);
+        let config = ExecutionConfig::parse("execution:\n  mode: live-test\n").unwrap();
+        assert_eq!(config.mode, ExecutionMode::LiveTest);
         assert!(!config.allow_live_trading);
-        assert!(ExecutionConfig::parse("execution:\n  mode: live\n").is_ok());
+        assert!(ExecutionConfig::parse("execution:\n  mode: live-trade\n").is_ok());
         assert!(ExecutionConfig::parse("execution:\n  mode: unsafe\n").is_err());
     }
 
     #[test]
-    fn unified_yaml_selects_playback_without_live_order_routing() {
+    fn research_settings_do_not_define_an_execution_mode() {
         let config = ExecutionConfig::parse(
-            "mode: playback\nallow_live_trading: false\nplayback:\n  method: cpcv\n",
+            "mode: live-test\nallow_live_trading: false\nplayback:\n  method: cpcv\n",
         )
         .unwrap();
-        assert_eq!(config.mode, ExecutionMode::Playback);
+        assert_eq!(config.mode, ExecutionMode::LiveTest);
         assert!(!config.allow_live_trading);
     }
 }

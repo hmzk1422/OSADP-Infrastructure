@@ -65,6 +65,8 @@ pub struct InstanceSnapshot {
     pub asset_id: String,
     pub statistics: Statistics,
     pub equity_history: Vec<f64>,
+    #[serde(default)]
+    pub equity_paths: Vec<Vec<f64>>,
 }
 
 impl InstanceSnapshot {
@@ -76,8 +78,10 @@ impl InstanceSnapshot {
 #[derive(Clone, Debug, Default)]
 pub struct DashboardSnapshot {
     pub timestamp: Option<String>,
+    pub aggregate_title: Option<String>,
     pub aggregate: Statistics,
     pub aggregate_equity_history: Vec<f64>,
+    pub aggregate_equity_paths: Vec<Vec<f64>>,
     pub instances: Vec<InstanceSnapshot>,
 }
 
@@ -445,20 +449,22 @@ fn render(
             .as_ref(),
         )
         .split(frame.area());
-    let (identity, stats, equity) = selected
+    let (identity, stats, equity, equity_paths) = selected
         .and_then(|i| snapshot.instances.get(i))
         .map(|instance| {
             (
                 instance.identity(),
                 &instance.statistics,
                 &instance.equity_history,
+                instance.equity_paths.as_slice(),
             )
         })
         .unwrap_or_else(|| {
             (
-                "Portfolio aggregate".to_string(),
+                snapshot.aggregate_title.clone().unwrap_or_else(|| "Portfolio aggregate".to_string()),
                 &snapshot.aggregate,
                 &snapshot.aggregate_equity_history,
+                snapshot.aggregate_equity_paths.as_slice(),
             )
         });
     render_chart(
@@ -466,6 +472,7 @@ fn render(
         areas[0],
         &identity,
         equity,
+        equity_paths,
         snapshot.timestamp.as_deref(),
     );
     render_statistics(frame, areas[1], stats, &identity);
@@ -523,16 +530,18 @@ fn render_chart(
     area: ratatui::layout::Rect,
     identity: &str,
     equity: &[f64],
+    equity_paths: &[Vec<f64>],
     timestamp: Option<&str>,
 ) {
-    let points: Vec<(f64, f64)> = equity
+    let paths: Vec<&[f64]> = if equity_paths.is_empty() {
+        vec![equity]
+    } else {
+        equity_paths.iter().map(Vec::as_slice).collect()
+    };
+    let x_max = paths.iter().map(|path| path.len()).max().unwrap_or(0).saturating_sub(1).max(1) as f64;
+    let (y_min, y_max) = paths
         .iter()
-        .enumerate()
-        .map(|(i, value)| (i as f64, *value))
-        .collect();
-    let x_max = points.last().map(|p| p.0.max(1.0)).unwrap_or(1.0);
-    let (y_min, y_max) = equity
-        .iter()
+        .flat_map(|path| path.iter())
         .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), v| {
             (lo.min(*v), hi.max(*v))
         });
@@ -541,17 +550,26 @@ fn render_chart(
     } else {
         (0.0, 1.0)
     };
-    let dataset = Dataset::default()
-        .name("Equity")
-        .marker(symbols::Marker::Braille)
-        .graph_type(GraphType::Line)
-        .style(Style::default().fg(Color::Cyan))
-        .data(&points);
+    let colors = [Color::Cyan, Color::Green, Color::Yellow, Color::Magenta, Color::Blue, Color::Red];
+    let data: Vec<Vec<(f64, f64)>> = paths
+        .iter()
+        .map(|path| path.iter().enumerate().map(|(i, value)| (i as f64, *value)).collect())
+        .collect();
+    let datasets: Vec<Dataset<'_>> = data
+        .iter()
+        .enumerate()
+        .map(|(index, points)| Dataset::default()
+            .name(format!("Path {}", index + 1))
+            .marker(symbols::Marker::Braille)
+            .graph_type(GraphType::Line)
+            .style(Style::default().fg(colors[index % colors.len()]))
+            .data(points))
+        .collect();
     let title = format!(
         " {identity} · Equity{} ",
         timestamp.map(|t| format!(" · {t}")).unwrap_or_default()
     );
-    let chart = Chart::new(vec![dataset])
+    let chart = Chart::new(datasets)
         .block(Block::default().title(title).borders(Borders::ALL))
         .x_axis(
             Axis::default()
@@ -563,7 +581,7 @@ fn render_chart(
             Line::from(format!("{:.2}", bounds.1)),
         ]));
     frame.render_widget(chart, area);
-    if equity.is_empty() {
+    if paths.iter().all(|path| path.is_empty()) {
         let empty = ratatui::layout::Rect::new(
             area.x.saturating_add(2),
             area.y.saturating_add(area.height / 2),
@@ -821,6 +839,7 @@ mod aggregation_tests {
                 ..Statistics::default()
             },
             equity_history: vec![starting, equity],
+            equity_paths: Vec::new(),
         }
     }
 
@@ -947,8 +966,10 @@ mod aggregation_tests {
         item.statistics.status = Some("enabled".into());
         let snapshot = DashboardSnapshot {
             timestamp: None,
+            aggregate_title: None,
             aggregate: Statistics::default(),
             aggregate_equity_history: Vec::new(),
+            aggregate_equity_paths: Vec::new(),
             instances: vec![item],
         };
         let backend = ratatui::backend::TestBackend::new(160, 44);
@@ -969,5 +990,26 @@ mod aggregation_tests {
         assert!(screen.contains("0.50%"), "missing stop distance:\n{screen}");
         assert!(screen.contains("1.00%"), "missing target distance:\n{screen}");
         assert!(screen.contains("2.50%"), "missing price vs entry:\n{screen}");
+    }
+
+    #[test]
+    fn playback_instance_renders_many_equity_paths_in_shared_chart() {
+        let mut item = instance("pwf", 10_000.0, 10_150.0, 12, 0.58, 0.27, 12);
+        item.equity_paths = (0..64)
+            .map(|path| {
+                (0..80)
+                    .map(|step| 1.0 + (path as f64 - 32.0) * step as f64 / 50_000.0)
+                    .collect()
+            })
+            .collect();
+        let snapshot = DashboardSnapshot {
+            instances: vec![item],
+            ..DashboardSnapshot::default()
+        };
+        let backend = ratatui::backend::TestBackend::new(160, 44);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| render(frame, &snapshot, Some(0), None, None))
+            .unwrap();
     }
 }
