@@ -2,7 +2,7 @@
 
 Platform-level constants — paths, data-source selection, session bounds, the
 universal walk-forward fold scheme, shared sampling defaults — live in
-`config/platform.json` (plain JSON, previously `config/platform.py`), the
+`strategy_system/config/platform.json` (plain JSON, previously `config/platform.py`), the
 single source of truth for EVERY strategy. New code should read that file.
 
 This module loads the platform JSON once and re-exports its values as module
@@ -17,7 +17,7 @@ PROJECT_ROOT = os.path.abspath(
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..")
 )
 
-with open(os.path.join(PROJECT_ROOT, "config", "platform.json"),
+with open(os.path.join(PROJECT_ROOT, "strategy_system", "config", "platform.json"),
           "r", encoding="utf-8-sig") as _pf:
     _PLATFORM = json.load(_pf)
 
@@ -44,7 +44,7 @@ USE_MATCHED_DB = os.environ.get("OFMR_USE_MATCHED_DB", "1").strip().lower() not 
     "0", "false", "no", "off", "")
 MATCHED_TAG = None            # e.g. "2025-06-30" to ingest one day; None = all
 MATCHED_SESSION_ID = 0
-# NOTE: MATCHED_SYMBOL is defined after the `from config import ...` block
+# NOTE: MATCHED_SYMBOL is defined after the strategy config import block
 # below — TICKER only exists from that point on.
 
 REGIME_FOLD_MODE = _PLATFORM["regime_fold_mode"]
@@ -63,7 +63,7 @@ def ensure_dir(path: str) -> str:
     os.makedirs(path, exist_ok=True)
     return path
 
-from config import (
+from strategy_system.strategy.ofmr.config import (
     LOOKAHEAD_SECONDS, BARRIER_MULTIPLIER, RSI_FILTER_COLUMN, RSI_FILTER_THRESHOLD,
     ENABLE_RSI_ACCEL_FILTER,
     RR_RATIO, TRADE_DIRECTION, TIMEFRAME_BARRIER, SYMBOL, TICKER,
@@ -75,14 +75,14 @@ from config import (
 )
 
 try:
-    from config import BARRIER_VOL_BAR_WINDOW
+    from strategy_system.strategy.ofmr.config import BARRIER_VOL_BAR_WINDOW
 except ImportError:
     BARRIER_VOL_BAR_WINDOW = 20
 
 MATCHED_SYMBOL = TICKER.upper()  # e.g. "BTCUSDT" dir under market_data/matched
 
 # ============================================================================
-# OFMR-SPECIFIC CONSTANTS (platform paths/sessions/folds live in config/platform)
+# OFMR-SPECIFIC CONSTANTS (platform paths/sessions/folds live in strategy_system/config/platform)
 # ============================================================================
 SYMBOL_HIST = TICKER.upper()  # btcusdt -> BTCUSDT (historical data-file prefix)
 BAR_FREQ = f"{TIMEFRAME_BARRIER}s"

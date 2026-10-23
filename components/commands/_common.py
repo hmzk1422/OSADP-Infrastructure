@@ -167,7 +167,7 @@ def clone_sources(root: str | Path, symbol: str, date: str) -> list[Path]:
     Canonical ``ingest_parquet`` files are only ever read. Returns the cloned
     paths — 26 per complete day.
     """
-    # Imported lazily so `--help` does not drag in config/ingestion.
+    # Imported lazily so `--help` does not drag in strategy_system/config/ingestion.
     from components.pipelines.event_merger.matched.parquet import fetch_source_data
 
     try:
@@ -228,4 +228,3 @@ def run_stage(
                 logger.error("[%s] %s failed: %s", date, label, exc)
                 raise
     return results
-

@@ -43,7 +43,7 @@ import polars as pl
 import components.pipelines.ingestion.CryptoL2.datapaths as paths
 from components.pipelines.event_merger.matched import lob as _lob
 from components.pipelines.event_merger.matched.parquet import pipeline_source_dir, pipeline_work_dir
-from config.ingestion import config as cfg
+from strategy_system.config.ingestion import config as cfg
 
 
 SNAPSHOT_BOOK_STATE_DIRNAME = "book_state"
@@ -310,4 +310,3 @@ def main(argv: Optional[list[str]] = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

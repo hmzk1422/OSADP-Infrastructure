@@ -30,7 +30,7 @@ from typing import Iterable, Sequence
 
 import polars as pl
 
-from config.ingestion import config as cfg
+from strategy_system.config.ingestion import config as cfg
 
 
 # ===========================================================
@@ -113,7 +113,7 @@ def _repo_root() -> Path:
     """
     Repo root derived from this file's location.
 
-    ``config.ingestion.config.DATA_ROOT`` is a *relative* ``Path("market_data")``,
+    ``strategy_system.config.ingestion.config.DATA_ROOT`` is a *relative* ``Path("market_data")``,
     so every path built from it silently depends on the current working
     directory. Anchoring here makes the defaults work from anywhere.
     """

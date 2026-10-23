@@ -1,12 +1,12 @@
 """Legacy compatibility shim for the strategy configuration.
 
-The canonical, single source of truth is ``config/portfolio.json``: its
+The canonical, single source of truth is ``strategy_system/config/portfolio.json``: its
 ``_strategy_defaults`` block carries every strategy parameter (snake_case,
 mirroring ``engine::StrategyConfig``) and is read DIRECTLY by the Rust engine.
 This shim maps those JSON keys onto the old UPPER_CASE module constants so
 older modules that still do ``from uets_legacy.config import *`` keep working
 unchanged. Nothing here duplicates a parameter value — edit
-``config/portfolio.json`` instead.
+``strategy_system/config/portfolio.json`` instead.
 """
 
 import json as _json
@@ -15,7 +15,7 @@ import os as _os
 with open(
     _os.path.join(
         _os.path.dirname(_os.path.abspath(__file__)),
-        "..", "..", "..", "config", "portfolio.json",
+        "..", "..", "config", "portfolio.json",
     ),
     "r", encoding="utf-8-sig",
 ) as _fh:

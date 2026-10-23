@@ -3,7 +3,7 @@ allow_live_trading: false
 
 playback:
   method: purged_walk_forward # purged_walk_forward | parametric_monte_carlo | cpcv
-  source: synthetic # synthetic | cryptol2; CPCV requires cryptol2
+  source: state_space # state_space | synthetic | cryptol2; CPCV requires cryptol2
   max_abs_correlation: 0.5
   n_splits: 6
   n_test_splits: 2
@@ -11,7 +11,7 @@ playback:
   max_paths: 100000
   workers: 0 # 0 uses all available CPU cores
   starting_capital: 10000.0
-  fee_bps: 4.0
+  fee_bps: 0.0 # per fill; entry and exit fees are charged separately
   periods_per_year: 252.0
 
   synthetic:
@@ -26,37 +26,13 @@ playback:
     path_glob: market_data/ingest_parquet/{symbol}/merged/**/*.parquet
     all_assets_glob: market_data/ingest_parquet/*/merged/**/*.parquet
     symbols: [BTCUSDT]
+    walk_forward:
+      model_catalog: build/walkforward_models/catalog.json # exported by the OFMR research walk-forward
+
+  state_space:
+    path: strategy_system/strategy/ofmr/models/state_space_btcusdt_720files.parquet
+    walk_forward:
+      model_catalog: build/walkforward_models/catalog.json
 
   strategy:
-    type: momentum
-    lookback_bars: 5
-    entry_threshold: 0.0
-
-ofmr:
-  model:
-    path: uets/models/ofmr/trader.txt
-    threshold: 0.50
-    trade_direction: long
-  feature:
-    htf_timeframe_secs: 300
-    ltf_timeframe_secs: 1
-    rsi_14_window: 14
-    rsi_2_window: 2
-    sma_14_window: 14
-    ma_slope_window: 5
-    price_roc_window_3: 3
-    price_roc_window_5: 5
-    rsi_z_window: 20
-    deeplob_z_window: 10
-    orderflow_z_window: 10
-    rsi_roc_window_3: 3
-    rsi_roc_window_5: 5
-    barrier_vol_bar_window: 20
-  trade:
-    max_position_usd: 10000.0
-    min_order_size: 0.001
-    stop_loss_bps: 5.0
-    take_profit_bps: 5.0
-    max_hold_seconds: 300
-    lockout_seconds: 1000.0
-    max_trades_per_hour: 300
+    type: ofmr # Rust OFMR playback over research features and purged fold models

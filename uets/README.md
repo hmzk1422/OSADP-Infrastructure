@@ -45,7 +45,9 @@ relevant log. On Windows, use the Linux Docker profile documented in
 
 The OFMR socket worker now submits USD-M Futures market orders after a strategy
 decision. Choose `paper`, `testnet`, or `live` in
-`uets/config/execution.yaml`; the checked-in default is `paper`. Testnet/live
+`uets/config/execution.yaml`; the checked-in default is `playback`, so live
+workers reject startup until you choose an order-routing mode. OFMR model,
+feature, and trade parameters are in `uets/config/ofmr.yaml`. Testnet/live
 require `BINANCE_API_KEY` and `BINANCE_API_SECRET`. Live also requires
 `allow_live_trading: true` in that config file. Provide only the credentials
 through environment variables or Docker Compose secrets.
@@ -60,15 +62,20 @@ RocksDB session writer are not yet connected to this process.
 
 Edit `uets/config/execution.yaml`, set `mode: playback`, and choose
 `playback.method` (`parametric_monte_carlo`, `purged_walk_forward`, or `cpcv`).
-Run `cargo run --manifest-path uets/Cargo.toml --bin dev_test -- playback`;
-on Windows run it in the `uets-dev` Docker container. Monte Carlo reads the
-configured Synth1/2/3 generator, walk-forward accepts one synthetic or CryptoL2
-asset, and CPCV reads configured CryptoL2 merged Parquet files/symbols through
-the existing Rust CryptoL2 decoder and mark-carry-forward playback normalizer.
-Correlation masks are prepared before strategy simulation and paths run on a
-thread pool. The report includes CVaR05/CVaR95 and standard metrics.
+Run `python -m uets.playback`; on Windows this command works from the repository
+root. The checked-in playback config uses the research state-space Parquet and
+the exported fold models to run Rust OFMR on the exact 5-minute feature rows
+used by purged chronological walk-forward. It verifies each fold's start/end,
+test-row count, and purged training-row count against the model catalog before
+reporting results. To use raw CryptoL2 instead, set `playback.source: cryptol2`
+and configure its merged Parquet paths; OFMR requires a single symbol and
+catalogued models whose test dates match that tape. Monte Carlo reads the
+configured Synth1/2/3 generator, while CPCV reads configured CryptoL2 merged
+Parquet files/symbols. Correlation masks are prepared before strategy
+simulation and paths run on a thread pool. The report includes CVaR05/CVaR95
+and standard metrics; OFMR expectancy is trade-count-weighted net R, and
+Sortino is annualized from daily equity returns.
 
-The built-in strategy is currently a vectorized momentum baseline, not the
-trained OFMR model. Run `python tests/test_playback_runner.py` to execute all
-three methods against generated synthetic data and temporary Parquet fixtures;
-success prints `SUCCESSFUL`.
+Run `python tests/test_playback_runner.py` to execute all three methods plus
+OFMR playback against state-space and CryptoL2 fixtures; success prints
+`SUCCESSFUL`.

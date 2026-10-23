@@ -7,7 +7,7 @@ from typing import Iterable, Iterator, Sequence
 
 import pandas as pd
 
-from config.ingestion import config as cfg
+from strategy_system.config.ingestion import config as cfg
 
 
 PathLike = str | os.PathLike[str] | Path
@@ -35,7 +35,7 @@ def _default_path() -> Path:
     """
     Resolve the default matched path without depending on the CWD.
 
-    ``config.ingestion.config.MATCHED_PATH`` is built from a *relative*
+    ``strategy_system.config.ingestion.config.MATCHED_PATH`` is built from a *relative*
     ``DATA_ROOT`` (``Path("market_data")``). Running an interpreter from
     ``market_data/matched/<TICKER>`` therefore resolved it to a
     non-existent nested path, ``list_parquet()`` returned ``[]`` and callers
@@ -475,4 +475,3 @@ def fetch_source_data(
             f"under {paths.parquet_root(root_p) / symbol}"
         )
     return sorted(materialized)
-

@@ -28,6 +28,8 @@ services:
       # compile, and it is the right one for a dev loop.
       - ./uets:/workspace/uets
       - ./components:/workspace/components
+      - ./strategy_system:/workspace/strategy_system
+      - ./tests:/workspace/tests
       - ./tools:/workspace/tools
       - ./market_data:/workspace/market_data
       - ./uets/out:/workspace/uets/out
@@ -72,6 +74,7 @@ services:
     volumes:
       - ./uets:/workspace/uets
       - ./components:/workspace/components
+      - ./strategy_system:/workspace/strategy_system
       - ./market_data:/workspace/market_data
       - ./logs:/workspace/logs
       - cargo-registry:/usr/local/cargo/registry

@@ -121,7 +121,7 @@ impl ExecutionConfig {
             if !indented && line.ends_with(':') {
                 section = match line {
                     "execution:" => "execution",
-                    "playback:" | "ofmr:" => "settings",
+                    "playback:" => "settings",
                     _ => "",
                 };
                 continue;
@@ -1221,7 +1221,7 @@ mod tests {
     #[test]
     fn unified_yaml_selects_playback_without_live_order_routing() {
         let config = ExecutionConfig::parse(
-            "mode: playback\nallow_live_trading: false\nplayback:\n  method: cpcv\nofmr:\n  trade:\n    max_position_usd: 1000\n",
+            "mode: playback\nallow_live_trading: false\nplayback:\n  method: cpcv\n",
         )
         .unwrap();
         assert_eq!(config.mode, ExecutionMode::Playback);
