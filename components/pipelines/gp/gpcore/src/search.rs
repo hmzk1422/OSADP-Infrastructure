@@ -250,7 +250,7 @@ impl Search {
             sh.truncate(by.len());
             null.push(similarity_bins(&bx, &sh));
         }
-        null.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        null.sort_by(f64::total_cmp);
         let k = ((self.cfg.gate.mi_quantile * null.len() as f64).ceil() as usize).clamp(1, null.len()) - 1;
         (stat > null[k] && stat > 0.0, stat)
     }
@@ -366,7 +366,7 @@ impl Search {
                 let u: f64 = self.rng.gen::<f64>().max(1e-12);
                 (u.ln() / self.recipe_weight(&r).max(1e-9), r)
             }).collect();
-            keyed.sort_by(|x, y| y.0.partial_cmp(&x.0).unwrap());
+            keyed.sort_by(|x, y| y.0.total_cmp(&x.0));
             keyed.truncate(budget);
             return keyed.into_iter().map(|x| x.1).collect();
         }
@@ -511,7 +511,7 @@ impl Search {
                 }
             }
             // ---- phase 2: admit best-first (gate-passers, then most novel) with exact re-check ----
-            scored.sort_by(|a, b| b.2.cmp(&a.2).then(a.1.partial_cmp(&b.1).unwrap()));
+            scored.sort_by(|a, b| b.2.cmp(&a.2).then_with(|| a.1.total_cmp(&b.1)));
             let mut pos = 0usize;
             let mut tad = 0u64;
             while pos < scored.len() && self.feats.len() - admitted_before < self.cfg.max_new_per_level && self.feats.len() < self.cfg.max_archive {
@@ -633,7 +633,7 @@ impl Search {
         out
     }
 
-    pub fn library_json(&self) -> String {
+    pub fn library_json(&self) -> Result<String, serde_json::Error> {
         #[derive(Serialize)]
         struct Item<'a> { id: usize, name: String, formula: String, tree: &'a Node, level: u32, size: u32, height: u32,
             novelty: f64, persistence: f64, mi_stat: f64 }
@@ -644,7 +644,7 @@ impl Search {
             items.push(Item { id: i, name: format!("gp_{:04}", i), formula: f.node.formula(&self.names), tree: &f.node,
                 level: f.level, size: f.node.size(), height: f.props.height, novelty: f.novelty, persistence: f.persistence, mi_stat: f.mi_stat });
         }
-        serde_json::to_string(&Lib { schema_version: 2, terminals: &self.names, cfg: &self.cfg, stats: &self.stats, features: items }).unwrap()
+        serde_json::to_string(&Lib { schema_version: 2, terminals: &self.names, cfg: &self.cfg, stats: &self.stats, features: items })
     }
 
     /// Dedupe-only entry point: admitted indices of the supplied columns (in order).
@@ -664,7 +664,11 @@ impl Search {
         }
         for i in 0..self.cols.len() {
             let fv = match &fvs[i] { Some(f) => f, None => continue };
-            let dup = kept.par_iter().any(|&k| similarity(self.cfg.metric, fv, fvs[k].as_ref().unwrap()) >= self.cfg.threshold);
+            let dup = kept.par_iter().any(|&k| {
+                fvs.get(k)
+                    .and_then(Option::as_ref)
+                    .is_some_and(|other| similarity(self.cfg.metric, fv, other) >= self.cfg.threshold)
+            });
             if !dup { kept.push(i); }
         }
         kept

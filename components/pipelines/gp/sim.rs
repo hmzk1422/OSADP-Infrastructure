@@ -44,7 +44,7 @@ pub struct FeatVec {
 pub fn frac_ranks(v: &[f32]) -> Vec<f32> {
     let idx: Vec<usize> = (0..v.len()).filter(|&i| v[i].is_finite()).collect();
     let mut order = idx.clone();
-    order.sort_unstable_by(|&a, &b| v[a].partial_cmp(&v[b]).unwrap());
+    order.sort_unstable_by(|&a, &b| v[a].total_cmp(&v[b]));
     let m = order.len();
     let mut out = vec![f32::NAN; v.len()];
     let mut i = 0;
