@@ -15,9 +15,11 @@ fn cols_of(m: &PyReadonlyArray2<f64>) -> Vec<Vec<f32>> {
     (0..a.ncols()).map(|j| a.column(j).iter().map(|&v| v as f32).collect()).collect()
 }
 
-fn pool(threads: usize) -> rayon::ThreadPool {
+fn pool(threads: usize) -> PyResult<rayon::ThreadPool> {
     let b = rayon::ThreadPoolBuilder::new();
-    (if threads > 0 { b.num_threads(threads) } else { b }).build().unwrap()
+    (if threads > 0 { b.num_threads(threads) } else { b })
+        .build()
+        .map_err(|error| PyValueError::new_err(format!("build GP thread pool: {error}")))
 }
 
 fn parse_cfg(s: &str) -> PyResult<Cfg> {
@@ -249,8 +251,8 @@ fn prepare_terminals<'py>(
 }
 
 #[pyfunction]
-fn default_config_json() -> String {
-    serde_json::to_string(&Cfg::default()).expect("serializing the default GP config cannot fail")
+fn default_config_json() -> PyResult<String> {
+    serde_json::to_string(&Cfg::default()).map_err(|error| PyValueError::new_err(error.to_string()))
 }
 
 /// search(terminals[n x p] float64, names, cfg_json, target=None) -> library_json
@@ -265,8 +267,8 @@ fn run_search(py: Python<'_>, terminals: PyReadonlyArray2<f64>, names: Vec<Strin
     let threads = cfg.threads;
     py.allow_threads(move || {
         let mut s = Search::new(cols, names, tgt, cfg).map_err(PyValueError::new_err)?;
-        pool(threads).install(|| s.run()).map_err(PyValueError::new_err)?;
-        Ok(s.library_json())
+        pool(threads)?.install(|| s.run()).map_err(PyValueError::new_err)?;
+        s.library_json().map_err(|error| PyValueError::new_err(error.to_string()))
     })
 }
 
@@ -281,10 +283,12 @@ fn transform<'py>(py: Python<'py>, terminals: PyReadonlyArray2<f64>, library_jso
         .iter().map(|f| serde_json::from_value::<Node>(f["tree"].clone()).map_err(|e| PyValueError::new_err(e.to_string())))
         .collect::<Result<_, _>>()?;
     let k = trees.len();
-    let out: Vec<Vec<f32>> = py.allow_threads(|| pool(threads).install(|| trees.par_iter().map(|t| expr::eval(t, &cols)).collect()));
+    let out: Vec<Vec<f32>> = py.allow_threads(|| pool(threads).map(|pool| pool.install(|| trees.par_iter().map(|t| expr::eval(t, &cols)).collect())))?;
     let mut flat = vec![0f32; n * k];
     for (j, col) in out.iter().enumerate() { for i in 0..n { flat[i * k + j] = col[i]; } }
-    Ok(numpy::ndarray::Array2::from_shape_vec((n, k), flat).unwrap().into_pyarray_bound(py))
+    let array = numpy::ndarray::Array2::from_shape_vec((n, k), flat)
+        .map_err(|error| PyValueError::new_err(format!("build transformed array: {error}")))?;
+    Ok(array.into_pyarray_bound(py))
 }
 
 /// eval_tree(tree_json, terminals) -> float64 vector (used to cross-check against the legacy evaluator)
@@ -301,10 +305,10 @@ fn eval_tree<'py>(py: Python<'py>, tree_json: &str, terminals: PyReadonlyArray2<
 fn eval_trees(py: Python<'_>, trees: Vec<String>, terminals: PyReadonlyArray2<f64>, threads: usize) -> PyResult<f64> {
     let cols = cols_of(&terminals);
     let nodes: Vec<Node> = trees.iter().map(|t| serde_json::from_str(t).map_err(|e| PyValueError::new_err(e.to_string()))).collect::<Result<_, _>>()?;
-    Ok(py.allow_threads(|| pool(threads).install(|| nodes.par_iter().map(|t| {
+    py.allow_threads(|| pool(threads).map(|pool| pool.install(|| nodes.par_iter().map(|t| {
         let v = expr::eval(t, &cols);
         v.iter().filter(|x| x.is_finite()).map(|&x| x as f64).sum::<f64>()
-    }).sum())))
+    }).sum())) )
 }
 
 /// sample_trees(names, n_trees, depth, cfg_json, seed) -> list of tree JSON strings
@@ -315,7 +319,8 @@ fn sample_trees(n_vars: usize, count: usize, depth: u32, cfg_json: &str) -> PyRe
     let cols: Vec<Vec<f32>> = (0..n_vars).map(|j| (0..n).map(|i| ((i * (j + 3)) % 17) as f32 + 1.0).collect()).collect();
     let names: Vec<String> = (0..n_vars).map(|j| format!("x{j}")).collect();
     let mut s = Search::new(cols, names, None, cfg).map_err(PyValueError::new_err)?;
-    Ok(s.sample_trees(count, depth).iter().map(|t| serde_json::to_string(t).unwrap()).collect())
+    s.sample_trees(count, depth).iter().map(serde_json::to_string).collect::<Result<Vec<_>, _>>()
+        .map_err(|error| PyValueError::new_err(error.to_string()))
 }
 
 /// dedupe(matrix[n x K], cfg_json) -> (kept_indices, exact_reference_indices_or_empty, stats_json)
@@ -331,10 +336,11 @@ fn dedupe(py: Python<'_>, values: PyReadonlyArray2<f64>, cfg_json: &str) -> PyRe
     let threads = cfg.threads;
     py.allow_threads(move || {
         let mut s = Search::new(cols, names, None, cfg).map_err(PyValueError::new_err)?;
-        pool(threads).install(|| s.run()).map_err(PyValueError::new_err)?;
+        pool(threads)?.install(|| s.run()).map_err(PyValueError::new_err)?;
         let kept = s.admitted_terminal_ids();
         let reference = if want_ref { s.exact_reference_ids() } else { Vec::new() };
-        Ok((kept, reference, serde_json::to_string(&s.stats).unwrap()))
+        let stats = serde_json::to_string(&s.stats).map_err(|error| PyValueError::new_err(error.to_string()))?;
+        Ok((kept, reference, stats))
     })
 }
 

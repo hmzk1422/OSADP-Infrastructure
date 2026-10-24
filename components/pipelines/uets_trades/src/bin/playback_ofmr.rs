@@ -268,6 +268,9 @@ fn evaluate_state_space_fold(
     fee_bps: f64,
     periods_per_year: f64,
 ) -> Result<PathMetrics, Box<dyn std::error::Error>> {
+    if !starting_capital.is_finite() || starting_capital <= 0.0 {
+        return Err("starting capital must be positive and finite".into());
+    }
     let fold_candidates: Vec<_> = candidates
         .iter()
         .filter(|(timestamp_ms, _)| fold.start_ms <= *timestamp_ms && *timestamp_ms <= fold.end_ms)
@@ -426,16 +429,23 @@ fn evaluate_state_space_fold(
     for trade in &trades {
         let entry_price = rows[trade.entry_index].price;
         let exit_price = rows[trade.exit_index].price;
-        let net_return = trade.side * (exit_price / entry_price - 1.0) - 2.0 * fee_rate;
+        let price_return = checked_relative_return(exit_price, entry_price, "trade price")?;
+        if !trade.risk_fraction.is_finite() || trade.risk_fraction <= 0.0 {
+            return Err("trade risk fraction must be positive and finite".into());
+        }
+        let net_return = trade.side * price_return - 2.0 * fee_rate;
         trade_returns.push(net_return / trade.risk_fraction);
     }
     let mut active_side = 0.0;
     let mut trade_cursor = 0;
     let mut previous_price = rows[first_index].price;
+    if !previous_price.is_finite() || previous_price <= 0.0 {
+        return Err(format!("invalid state-space price at row {first_index}").into());
+    }
     for index in first_index + 1..=last_index {
         let day = rows[index].timestamp_ms.div_euclid(86_400_000);
         if day != current_day {
-            daily_returns.push(equity / day_start_equity - 1.0);
+            daily_returns.push(checked_relative_return(equity, day_start_equity, "daily equity")?);
             day_start_equity = equity;
             current_day = day;
         }
@@ -451,7 +461,7 @@ fn evaluate_state_space_fold(
             return Err(format!("invalid state-space price at row {index}").into());
         }
         let asset_return = if active_side != 0.0 {
-            active_side * (price / previous_price - 1.0)
+            active_side * checked_relative_return(price, previous_price, "market price")?
         } else {
             0.0
         };
@@ -469,7 +479,7 @@ fn evaluate_state_space_fold(
     if active_side != 0.0 {
         equity *= 1.0 - fee_rate;
     }
-    daily_returns.push(equity / day_start_equity - 1.0);
+    daily_returns.push(checked_relative_return(equity, day_start_equity, "daily equity")?);
     let downside_square_sum: f64 = daily_returns
         .iter()
         .map(|daily_return| daily_return.min(0.0).powi(2))
@@ -489,12 +499,27 @@ fn evaluate_state_space_fold(
         trade_returns.iter().sum::<f64>() / trade_returns.len() as f64
     };
     Ok(PathMetrics {
-        cumulative_return: equity / starting_capital - 1.0,
+        cumulative_return: checked_relative_return(equity, starting_capital, "starting capital")?,
         expectancy_per_trade: expectancy,
         max_drawdown,
         sortino,
         trades: trade_returns.len(),
     })
+}
+
+fn checked_relative_return(
+    value: f64,
+    base: f64,
+    label: &str,
+) -> Result<f64, Box<dyn std::error::Error>> {
+    if !value.is_finite() || value <= 0.0 || !base.is_finite() || base <= 0.0 {
+        return Err(format!("{label} numerator and denominator must be positive and finite").into());
+    }
+    let result = value / base - 1.0;
+    if !result.is_finite() {
+        return Err(format!("{label} return is not finite").into());
+    }
+    Ok(result)
 }
 
 fn run_state_space(
@@ -768,6 +793,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
             let second = row.timestamp_ms.div_euclid(1_000);
             if current_second.is_some_and(|previous| previous != second) {
+                let bar_second = current_second
+                    .ok_or("previous bar timestamp missing while closing a bar")?;
                 if let (Some(computed), Some(fold_index)) = (
                     bar_features.take(),
                     current_second.and_then(|ms| fold_at(&models, ms * 1_000)),
@@ -801,7 +828,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                             if entry_allowed && barrier_allowed =>
                         {
                             position = Position::Long;
-                            entry_timestamp_ms = Some(current_second.unwrap() * 1_000);
+                            entry_timestamp_ms = Some(bar_second * 1_000);
                             barriers = Some(ActiveBarriers::new(
                                 bar_mid,
                                 position,
@@ -813,7 +840,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                             if entry_allowed && barrier_allowed =>
                         {
                             position = Position::Short;
-                            entry_timestamp_ms = Some(current_second.unwrap() * 1_000);
+                            entry_timestamp_ms = Some(bar_second * 1_000);
                             barriers = Some(ActiveBarriers::new(
                                 bar_mid,
                                 position,
@@ -838,7 +865,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     println!(
                         "{symbol},{},{},{report_price},{side},{risk}",
                         fold_index + 1,
-                        current_second.unwrap() * 1_000
+                        bar_second * 1_000
                     );
                 } else {
                     position = Position::Flat;

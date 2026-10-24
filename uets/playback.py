@@ -1212,6 +1212,10 @@ def _run_one_path(
         ):
             raise ValueError("risk fractions must match prices and be finite/nonnegative")
     starting_capital = float(settings.get("starting_capital", 10_000.0))
+    if not np.isfinite(starting_capital) or starting_capital <= 0.0:
+        raise ValueError("starting capital must be positive and finite")
+    asset_count = prices.shape[1]
+    capital_per_asset = starting_capital / asset_count
     fee_rate = float(settings.get("fee_bps", 4.0)) / 10_000.0
     asset_returns = _returns(prices)
     prior_positions = np.vstack((np.zeros((1, prices.shape[1])), positions[:-1]))
@@ -1246,7 +1250,11 @@ def _run_one_path(
             if prior_side != 0.0 and entry_index is not None:
                 trade_return = (
                     entry_side
-                    * (prices[bar_index, asset_index] / prices[entry_index, asset_index] - 1.0)
+                    * _checked_relative_return(
+                        prices[bar_index, asset_index],
+                        prices[entry_index, asset_index],
+                        "trade price",
+                    )
                     - 2.0 * fee_rate
                 )
                 if risk_fractions is not None:
@@ -1255,13 +1263,18 @@ def _run_one_path(
                         raise ValueError("OFMR open position has no positive stop-risk fraction")
                     trade_return /= risk
                 else:
-                    trade_return *= starting_capital / prices.shape[1]
+                    trade_return *= capital_per_asset
                 trade_returns.append(trade_return)
             entry_index = bar_index if current_side != 0.0 else None
             entry_side = current_side
         if entry_index is not None and positions[-1, asset_index] != 0.0:
             trade_return = (
-                entry_side * (prices[-1, asset_index] / prices[entry_index, asset_index] - 1.0)
+                entry_side
+                * _checked_relative_return(
+                    prices[-1, asset_index],
+                    prices[entry_index, asset_index],
+                    "open trade price",
+                )
                 - 2.0 * fee_rate
             )
             if risk_fractions is not None:
@@ -1270,7 +1283,7 @@ def _run_one_path(
                     raise ValueError("OFMR open position has no positive stop-risk fraction")
                 trade_return /= risk
             else:
-                trade_return *= starting_capital / prices.shape[1]
+                trade_return *= capital_per_asset
             trade_returns.append(trade_return)
     closed_trades = len(trade_returns)
     expectancy = float(np.mean(trade_returns)) if trade_returns else 0.0
@@ -1291,11 +1304,37 @@ def _run_one_path(
         sortino=sortino,
         trades=int(closed_trades),
         equity_path=(
-            tuple(float(value) for value in _downsample(equity_curve / starting_capital, 80))
+            tuple(
+                float(value)
+                for value in _downsample(
+                    _normalize_by_positive_base(equity_curve, starting_capital), 80
+                )
+            )
             if capture_path
             else ()
         ),
     )
+
+
+def _checked_relative_return(numerator: float, denominator: float, label: str) -> float:
+    """Calculate a price/equity return only after checking both inputs."""
+    if (
+        not np.isfinite(numerator)
+        or numerator <= 0.0
+        or not np.isfinite(denominator)
+        or denominator <= 0.0
+    ):
+        raise ValueError(f"{label} numerator and denominator must be positive and finite")
+    result = numerator / denominator - 1.0
+    if not np.isfinite(result):
+        raise ValueError(f"{label} return is not finite")
+    return result
+
+
+def _normalize_by_positive_base(values: np.ndarray, base: float) -> np.ndarray:
+    if not np.isfinite(base) or base <= 0.0:
+        raise ValueError("normalization base must be positive and finite")
+    return values / base
 
 def _parallel_metrics(
     paths: list[np.ndarray],
