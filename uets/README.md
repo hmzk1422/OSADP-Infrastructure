@@ -42,6 +42,37 @@ and `logs/uets/feed_<asset>.log`; each process start overwrites its own file.
 The GUI displays stale telemetry and process failures with a pointer to the
 relevant log. On Windows, use the Linux Docker profile documented in
 `docs/system_design/uets.md`.
+
+## Runtime cost and scaling
+
+The aggregate monitor reports summed RSS and CPU across workers with current
+samples, plus an arithmetic 100-worker projection from the sampled per-worker
+mean. This projection assumes independent workers with the same workload; it is
+a capacity estimate, not a measurement of 100 workers. RSS is resident memory
+per worker and may count shared pages more than once. CPU is sampled process
+CPU as a percentage of one core, so summed CPU can exceed 100% on a multicore
+host. The worker's `Strategy ms` is its latest compute observation; use latency
+p95/p99 over the rolling histogram to describe typical and tail strategy time.
+For a defensible capacity claim, report the host/container limits, build mode,
+strategy and feed workload, sample duration, worker count, and observed totals
+alongside the projection.
+
+Each `run` also records a one-second telemetry snapshot in its own RocksDB at
+`market_data/live_db/telemetry/<run-id>/`. A snapshot contains total RSS and
+CPU across running strategy worker processes (feed-process overhead is not
+included), per-connection readings, and cumulative
+strategy-compute latency sum, observation count, arithmetic mean, p95, and p99
+since each worker started. RAM and CPU are point-in-time samples; latency stats
+cover all observations accumulated by each worker. Inspect
+the latest samples with:
+
+```sh
+cargo run --manifest-path uets/Cargo.toml --bin dev_test -- db <run-id>
+```
+
+Trade and portfolio records remain in their existing
+stores; workers use run-prefixed per-instance session IDs so their RocksDB
+writers do not contend for the same database lock.
 # Live order modes
 
 The OFMR socket worker supports three execution modes in
@@ -55,8 +86,9 @@ variables or Docker Compose secrets.
 The worker limits entry notional using `trade.max_position_usd` and exits with
 `reduce_only`. Order/transport failures terminate that worker rather than
 silently converting to paper mode. Live routing is not yet production-ready:
-fill/account reconciliation, authoritative portfolio persistence, and the
-RocksDB session writer are not yet connected to this process.
+fill/account reconciliation and authoritative portfolio persistence are not
+connected. Trade, portfolio, and telemetry RocksDB records are best-effort
+development records, not a reconciled account ledger.
 
 # Offline playback
 

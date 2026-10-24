@@ -43,6 +43,7 @@ pub struct LatencyHist {
     buckets: Vec<AtomicU64>,
     overflow: AtomicU64,
     count: AtomicU64,
+    sum_ns: AtomicU64,
 }
 
 impl LatencyHist {
@@ -54,12 +55,14 @@ impl LatencyHist {
             buckets: (0..Self::N).map(|_| AtomicU64::new(0)).collect(),
             overflow: AtomicU64::new(0),
             count: AtomicU64::new(0),
+            sum_ns: AtomicU64::new(0),
         }
     }
 
     /// Hot path: exactly one atomic increment, no locks, no allocation.
     pub fn observe_ns(&self, ns: u64) {
         self.count.fetch_add(1, Ordering::Relaxed);
+        self.sum_ns.fetch_add(ns, Ordering::Relaxed);
         match EDGES.iter().position(|&e| ns <= e) {
             Some(i) => {
                 self.buckets[i].fetch_add(1, Ordering::Relaxed);
@@ -90,6 +93,16 @@ impl LatencyHist {
 
     pub fn count(&self) -> u64 {
         self.count.load(Ordering::Relaxed)
+    }
+
+    /// Arithmetic mean of all observed durations, in nanoseconds.
+    pub fn mean_ns(&self) -> Option<f64> {
+        let count = self.count.load(Ordering::Relaxed);
+        (count > 0).then(|| self.sum_ns.load(Ordering::Relaxed) as f64 / count as f64)
+    }
+
+    pub fn sum_ns(&self) -> u64 {
+        self.sum_ns.load(Ordering::Relaxed)
     }
 }
 
