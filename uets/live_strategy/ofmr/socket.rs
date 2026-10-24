@@ -126,10 +126,7 @@ impl ExecutionConfig {
             if line.is_empty() {
                 continue;
             }
-            let indented = raw_line
-                .chars()
-                .next()
-                .is_some_and(char::is_whitespace);
+            let indented = raw_line.chars().next().is_some_and(char::is_whitespace);
             if !indented && line.ends_with(':') {
                 section = match line {
                     "execution:" => "execution",
@@ -166,7 +163,7 @@ impl ExecutionConfig {
                     })?);
                 }
                 other if section == "execution" => {
-                    return Err(format!("unknown execution config key {other:?}"))
+                    return Err(format!("unknown execution config key {other:?}"));
                 }
                 _ => {}
             }
@@ -213,7 +210,8 @@ impl OrderExecutor {
                 ExecutionMode::Testnet => {
                     let (Some(api_key), Some(secret_key)) = (api_key, secret_key) else {
                         return Err(
-                            "testnet execution requires BINANCE_API_KEY and BINANCE_API_SECRET".into(),
+                            "testnet execution requires BINANCE_API_KEY and BINANCE_API_SECRET"
+                                .into(),
                         );
                     };
                     Some(BinanceFuturesTrade::new(Some(api_key), Some(secret_key)))
@@ -272,7 +270,7 @@ impl OrderExecutor {
         let decision_at = std::time::Instant::now();
         self.sequence = self.sequence.saturating_add(1);
         let client_id = format!("uets-{}-{}", std::process::id(), self.sequence);
-        
+
         let request = match decision {
             Decision::EnterLong | Decision::EnterShort => {
                 if *position != Position::Flat {
@@ -303,8 +301,7 @@ impl OrderExecutor {
                     OrderRequest::limit(symbol, side, qty, limit_px, 0.01) // Added tick_size: 0.01
                         .with_client_order_id(client_id)
                 } else {
-                    OrderRequest::market(symbol, side, qty)
-                        .with_client_order_id(client_id)
+                    OrderRequest::market(symbol, side, qty).with_client_order_id(client_id)
                 }
             }
             Decision::Exit => {
@@ -322,7 +319,7 @@ impl OrderExecutor {
             }
             Decision::Hold => return Ok(Vec::new()),
         };
-        
+
         self.last_decision_to_order_ms = Some(decision_at.elapsed().as_secs_f64() * 1_000.0);
         if let Some(connector) = self.connector.as_mut() {
             let order_submitted_at = std::time::Instant::now();
@@ -365,8 +362,7 @@ impl OrderExecutor {
         } else {
             println!(
                 "OFMR simulated mode={} symbol={symbol} decision={decision:?} qty={}",
-                self.mode,
-                request.qty
+                self.mode, request.qty
             );
             let fill = Fill::new(
                 request.client_order_id.clone().unwrap_or_default(),
@@ -521,8 +517,16 @@ impl ActiveBarriers {
     fn new(entry_price: f64, position: Position, stop_fraction: f64, target_fraction: f64) -> Self {
         let is_long = position == Position::Long;
         Self {
-            stop_price: if is_long { entry_price * (1.0 - stop_fraction) } else { entry_price * (1.0 + stop_fraction) },
-            target_price: if is_long { entry_price * (1.0 + target_fraction) } else { entry_price * (1.0 - target_fraction) },
+            stop_price: if is_long {
+                entry_price * (1.0 - stop_fraction)
+            } else {
+                entry_price * (1.0 + stop_fraction)
+            },
+            target_price: if is_long {
+                entry_price * (1.0 + target_fraction)
+            } else {
+                entry_price * (1.0 - target_fraction)
+            },
             is_long,
         }
     }
@@ -599,14 +603,16 @@ pub fn run(socket_path: &str, symbol: &str) -> Result<(), String> {
     let live_db_root = std::env::var("UETS_LIVE_DB")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|_| crate::live_strategy::live_db::default_live_db_root());
-    let live_db = crate::live_strategy::live_db::LiveDb::open(
-        &live_db_root,
-        &session_id,
-        "ofmr",
-        symbol,
+    let live_db =
+        crate::live_strategy::live_db::LiveDb::open(&live_db_root, &session_id, "ofmr", symbol);
+    eprintln!(
+        "[strategy] live_db session={session_id} persistence={}",
+        if live_db.enabled() {
+            live_db_root.display().to_string()
+        } else {
+            "disabled".to_string()
+        }
     );
-    eprintln!("[strategy] live_db session={session_id} persistence={}",
-        if live_db.enabled() { live_db_root.display().to_string() } else { "disabled".to_string() });
 
     let mut position = Position::Flat;
     let mut active_barriers: Option<ActiveBarriers> = None;
@@ -710,7 +716,8 @@ pub fn run(socket_path: &str, symbol: &str) -> Result<(), String> {
             let previous_position = position;
             let bid_price = row.get("bid_price");
             let ask_price = row.get("ask_price");
-            let fills = executor.act(symbol, decision, &mut position, price, bid_price, ask_price)?;
+            let fills =
+                executor.act(symbol, decision, &mut position, price, bid_price, ask_price)?;
             account.apply_fills_and_mark(&fills, symbol, price);
             // live_db/trades: what the strategy saw (tick + features +
             // decision + fills), keyed by ticker/strategy/session. Fail-open.
@@ -806,7 +813,11 @@ fn portfolio_snapshot(
     // (which contributes zero unrealized — a stale mark is worse).
     let marks = std::collections::BTreeMap::from([(
         asset.clone(),
-        if account.last_mark > 0.0 { account.last_mark } else { price },
+        if account.last_mark > 0.0 {
+            account.last_mark
+        } else {
+            price
+        },
     )]);
     let portfolio = &account.portfolio;
     LivePortfolioSnapshot {
@@ -829,7 +840,11 @@ fn portfolio_snapshot(
         r_multiple_sum: account.r_multiple_sum,
         r_trades: account.r_trades as u64,
         sortino: stats.sortino,
-        win_rate: if stats.trades > 0 { stats.wins as f64 / stats.trades as f64 } else { 0.0 },
+        win_rate: if stats.trades > 0 {
+            stats.wins as f64 / stats.trades as f64
+        } else {
+            0.0
+        },
         cumulative_return: stats.cumulative_return,
         max_drawdown: stats.max_drawdown,
         trades: stats.trades,
@@ -1010,8 +1025,12 @@ impl StrategyTelemetry {
         };
         let (stop_loss_pct, take_profit_pct, price_vs_entry_pct) = if position_open {
             (
-                account.stop_price.map(|stop| (entry - stop).abs() / entry * 100.0),
-                account.target_price.map(|target| (target - entry).abs() / entry * 100.0),
+                account
+                    .stop_price
+                    .map(|stop| (entry - stop).abs() / entry * 100.0),
+                account
+                    .target_price
+                    .map(|target| (target - entry).abs() / entry * 100.0),
                 Some((mark - entry) / entry * 100.0),
             )
         } else {
@@ -1057,6 +1076,9 @@ impl StrategyTelemetry {
             "latest_market_data": self.last_event_time_ms.map(|time| time.to_string()),
             "latest_decision": self.last_decision,
             "processing_latency_ms": self.last_processing_ms,
+            "processing_latency_mean_ms": self.latency.mean_ns().map(|value| value / 1_000_000.0),
+            "latency_sum_ms": self.latency.sum_ns() as f64 / 1_000_000.0,
+            "latency_observations": self.latency.count(),
             "decision_to_order_ms": self.last_decision_to_order_ms,
             "order_to_fill_ms": self.last_order_to_fill_ms,
             "tick_to_trade_ms": tick_to_trade_ms,
@@ -1141,11 +1163,7 @@ fn process_cpu_ticks() -> Option<u64> {
 #[cfg(all(unix, target_os = "linux"))]
 fn process_clock_ticks() -> f64 {
     let ticks = unsafe { libc::sysconf(libc::_SC_CLK_TCK) };
-    if ticks > 0 {
-        ticks as f64
-    } else {
-        100.0
-    }
+    if ticks > 0 { ticks as f64 } else { 100.0 }
 }
 
 /// No procfs on this Unix flavor: CPU% stays n/a.

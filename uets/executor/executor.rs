@@ -9,9 +9,9 @@
 //! it with `maturin develop` (maturin enables the extension-module feature
 //! automatically).
 
+use std::io::{IsTerminal, Write};
 use std::path::PathBuf;
 use std::process::ExitCode;
-use std::io::{IsTerminal, Write};
 
 use uets::connectors::binance::websocket::{diagnostic, live, monitor, reader};
 use uets::live_strategy::{self, ComputeFeatures, LiveStrategy, StateBuilder};
@@ -137,7 +137,7 @@ fn print_help() {
          \x20 run <strategy>@pwf|mc|cpcv ... run offline research evaluations\n\
          \x20                         research runs before any requested live instances\n\
          \x20 playback [--config PATH] run offline evaluation from the UETS YAML settings\n\
-         \x20 db [SESSION [STRAT@ASSET]]  inspect live_db contents (trades + portfolio)\n\
+         \x20 db [SESSION [STRAT@ASSET]]  inspect live_db contents (trades + portfolio + telemetry)\n\
          \x20 user-stream             REST listen-key lifecycle (needs API key)\n\
          \x20 user-stream-ws          account/order update stream (needs API key)\n\
          \x20 help                    show this message\n\
@@ -183,7 +183,10 @@ fn execute_playback(args: &[String]) -> (ExitCode, String) {
     let workspace_root = manifest_dir.parent().unwrap_or(manifest_dir);
     let python = std::env::var_os("PYTHON").unwrap_or_else(|| {
         let venv_python = if cfg!(windows) {
-            workspace_root.join("venv").join("Scripts").join("python.exe")
+            workspace_root
+                .join("venv")
+                .join("Scripts")
+                .join("python.exe")
         } else {
             workspace_root.join("venv").join("bin").join("python")
         };
@@ -239,15 +242,20 @@ fn run_playback_results_tui(result_dirs: &[PathBuf]) -> Result<(), String> {
     for path in result_dirs {
         let summary_path = path.join("summary.json");
         let summary: serde_json::Value = serde_json::from_slice(
-            &std::fs::read(&summary_path).map_err(|error| format!("read {}: {error}", summary_path.display()))?,
-        ).map_err(|error| format!("parse {}: {error}", summary_path.display()))?;
+            &std::fs::read(&summary_path)
+                .map_err(|error| format!("read {}: {error}", summary_path.display()))?,
+        )
+        .map_err(|error| format!("parse {}: {error}", summary_path.display()))?;
         summaries.push(summary);
         let metrics_path = path.join("metrics.csv");
         for (line_number, line) in std::fs::read_to_string(&metrics_path)
             .map_err(|error| format!("read {}: {error}", metrics_path.display()))?
-            .lines().enumerate()
+            .lines()
+            .enumerate()
         {
-            if line_number == 0 || line.trim().is_empty() { continue; }
+            if line_number == 0 || line.trim().is_empty() {
+                continue;
+            }
             let fields: Vec<_> = line.split(',').collect();
             if fields.len() >= 5 {
                 metrics.push((
@@ -262,42 +270,66 @@ fn run_playback_results_tui(result_dirs: &[PathBuf]) -> Result<(), String> {
         let equity_path = path.join("equity_paths.csv");
         for (line_number, line) in std::fs::read_to_string(&equity_path)
             .map_err(|error| format!("read {}: {error}", equity_path.display()))?
-            .lines().enumerate()
+            .lines()
+            .enumerate()
         {
-            if line_number == 0 || line.trim().is_empty() { continue; }
+            if line_number == 0 || line.trim().is_empty() {
+                continue;
+            }
             let fields: Vec<_> = line.split(',').collect();
-            if fields.len() != 3 { continue; }
+            if fields.len() != 3 {
+                continue;
+            }
             if let (Ok(path_index), Ok(step), Ok(value)) = (
-                fields[0].parse::<usize>(), fields[1].parse::<usize>(), fields[2].parse::<f64>(),
+                fields[0].parse::<usize>(),
+                fields[1].parse::<usize>(),
+                fields[2].parse::<f64>(),
             ) {
-                paths.entry(path_offset + path_index).or_default().push((step, value));
+                paths
+                    .entry(path_offset + path_index)
+                    .or_default()
+                    .push((step, value));
             }
         }
-        path_offset += summaries.last().and_then(|value| value.get("paths_run"))
-            .and_then(|value| value.as_u64()).unwrap_or(0) as usize;
+        path_offset += summaries
+            .last()
+            .and_then(|value| value.get("paths_run"))
+            .and_then(|value| value.as_u64())
+            .unwrap_or(0) as usize;
     }
     if metrics.is_empty() || summaries.is_empty() {
         return Err("playback results contain no paths".into());
     }
     let total_trades: usize = metrics.iter().map(|item| item.4).sum();
     let expectancy = if total_trades > 0 {
-        metrics.iter().map(|item| item.1 * item.4 as f64).sum::<f64>() / total_trades as f64
+        metrics
+            .iter()
+            .map(|item| item.1 * item.4 as f64)
+            .sum::<f64>()
+            / total_trades as f64
     } else {
         0.0
     };
     let starting_equity = 10_000.0;
-    let cumulative_return = metrics.iter().map(|item| item.0).sum::<f64>()
-        / metrics.len().max(1) as f64;
-    let equity_paths = paths.into_values().map(|mut points| {
-        points.sort_by_key(|point| point.0);
-        points.into_iter().map(|point| point.1).collect::<Vec<_>>()
-    }).collect();
+    let cumulative_return =
+        metrics.iter().map(|item| item.0).sum::<f64>() / metrics.len().max(1) as f64;
+    let equity_paths = paths
+        .into_values()
+        .map(|mut points| {
+            points.sort_by_key(|point| point.0);
+            points.into_iter().map(|point| point.1).collect::<Vec<_>>()
+        })
+        .collect();
     let mut snapshot = DashboardSnapshot {
-        timestamp: summaries.last().and_then(|summary| summary.get("created_at_utc"))
-            .and_then(|value| value.as_str()).map(str::to_string),
+        timestamp: summaries
+            .last()
+            .and_then(|summary| summary.get("created_at_utc"))
+            .and_then(|value| value.as_str())
+            .map(str::to_string),
         aggregate_title: Some(format!(
             "Completed playback · {} methods · {} paths",
-            summaries.len(), metrics.len(),
+            summaries.len(),
+            metrics.len(),
         )),
         aggregate: Statistics {
             starting_equity: Some(starting_equity),
@@ -307,8 +339,12 @@ fn run_playback_results_tui(result_dirs: &[PathBuf]) -> Result<(), String> {
             absolute_return: Some(starting_equity * cumulative_return),
             expectancy_rr: Some(expectancy),
             expectancy_trades: Some(total_trades),
-            max_drawdown: Some(metrics.iter().map(|item| item.2).sum::<f64>() / metrics.len().max(1) as f64),
-            sortino: Some(metrics.iter().map(|item| item.3).sum::<f64>() / metrics.len().max(1) as f64),
+            max_drawdown: Some(
+                metrics.iter().map(|item| item.2).sum::<f64>() / metrics.len().max(1) as f64,
+            ),
+            sortino: Some(
+                metrics.iter().map(|item| item.3).sum::<f64>() / metrics.len().max(1) as f64,
+            ),
             trades: Some(total_trades),
             status: Some("completed playback · q to close".into()),
             ..Statistics::default()
@@ -362,7 +398,9 @@ fn run_research_batch(requested: &[String]) -> ExitCode {
 
     for identity in requested {
         let Some((strategy, selector)) = identity.split_once('@') else {
-            eprintln!("invalid research selector '{identity}'; expected strategy@pwf, strategy@mc, or strategy@cpcv");
+            eprintln!(
+                "invalid research selector '{identity}'; expected strategy@pwf, strategy@mc, or strategy@cpcv"
+            );
             continue;
         };
         let strategy = strategy.to_ascii_lowercase();
@@ -428,11 +466,23 @@ fn configured_execution_mode() -> Result<(String, Vec<String>), String> {
         .map_err(|error| format!("read execution config {}: {error}", config_path.display()))?;
     let config: serde_yaml::Value = serde_yaml::from_str(&content)
         .map_err(|error| format!("parse execution config {}: {error}", config_path.display()))?;
-    let mode = config.get("mode").and_then(serde_yaml::Value::as_str)
-        .unwrap_or("live-test").to_ascii_lowercase().replace('_', "-");
-    let strategies = config.get("playback").and_then(|value| value.get("playback_strategies"))
+    let mode = config
+        .get("mode")
+        .and_then(serde_yaml::Value::as_str)
+        .unwrap_or("live-test")
+        .to_ascii_lowercase()
+        .replace('_', "-");
+    let strategies = config
+        .get("playback")
+        .and_then(|value| value.get("playback_strategies"))
         .and_then(serde_yaml::Value::as_sequence)
-        .map(|values| values.iter().filter_map(serde_yaml::Value::as_str).map(str::to_string).collect())
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(serde_yaml::Value::as_str)
+                .map(str::to_string)
+                .collect()
+        })
         .unwrap_or_default();
     Ok((mode, strategies))
 }
@@ -483,6 +533,26 @@ fn run_live_system(requested: &[String]) -> Result<(), String> {
     let executable = std::env::current_exe().map_err(|error| error.to_string())?;
     let log_dir = root.join("logs").join("uets");
     std::fs::create_dir_all(&log_dir).map_err(|error| error.to_string())?;
+    let live_db_root = std::env::var("UETS_LIVE_DB")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| live_strategy::live_db::default_live_db_root());
+    let session_id = live_strategy::live_db::new_session_id();
+    let telemetry_path = live_db_root.join("telemetry").join(&session_id);
+    std::fs::create_dir_all(&telemetry_path).map_err(|error| {
+        format!(
+            "create telemetry store {}: {error}",
+            telemetry_path.display()
+        )
+    })?;
+    let telemetry_db =
+        Some(uets_db::UetsDb::open(&telemetry_path).map_err(|error| {
+            format!("open telemetry store {}: {error}", telemetry_path.display())
+        })?);
+    eprintln!(
+        "[live_db] telemetry session={} store={}",
+        session_id,
+        telemetry_path.display()
+    );
 
     // Read default tickers from execution.yaml
     let exec_config_path = root.join("uets").join("config").join("execution.yaml");
@@ -509,6 +579,10 @@ fn run_live_system(requested: &[String]) -> Result<(), String> {
         root,
         executable,
         log_dir,
+        live_db_root,
+        session_id,
+        telemetry_db,
+        last_telemetry_sample: std::time::Instant::now() - std::time::Duration::from_secs(1),
         instances: std::collections::BTreeMap::new(),
     };
 
@@ -530,7 +604,9 @@ fn run_live_system(requested: &[String]) -> Result<(), String> {
     }
 
     if requested.is_empty() && default_tickers.is_empty() {
-        eprintln!("No tickers configured. Add tickers to uets/config/execution.yaml or pass them as arguments.");
+        eprintln!(
+            "No tickers configured. Add tickers to uets/config/execution.yaml or pass them as arguments."
+        );
     } else if requested.is_empty() {
         eprintln!("UETS monitor ready: j/k select, a add, e enable/disable, x delete, q quit");
     }
@@ -556,6 +632,10 @@ struct LiveDashboard {
     root: PathBuf,
     executable: PathBuf,
     log_dir: PathBuf,
+    live_db_root: PathBuf,
+    session_id: String,
+    telemetry_db: Option<uets_db::UetsDb>,
+    last_telemetry_sample: std::time::Instant,
     instances: std::collections::BTreeMap<String, ManagedInstance>,
 }
 
@@ -642,6 +722,16 @@ impl LiveDashboard {
             command
                 .current_dir(&self.root)
                 .env("UETS_GUI_SOCKET", &self.gui_socket)
+                // Each worker owns a RocksDB lock for its trade/portfolio stores.
+                // Retain the run prefix while isolating per-worker sessions.
+                .env(
+                    "UETS_SESSION_ID",
+                    format!(
+                        "{}_{}_{}",
+                        self.session_id, instance.strategy, instance.asset
+                    ),
+                )
+                .env("UETS_LIVE_DB", &self.live_db_root)
                 .arg("strategy")
                 .arg(identity)
                 .stdout(std::process::Stdio::from(
@@ -792,6 +882,68 @@ impl uets_gui::SnapshotSource for LiveDashboard {
                 }
             }
         }
+        if self.last_telemetry_sample.elapsed() >= std::time::Duration::from_secs(1) {
+            use uets_db::{ConnectionTelemetry, SchemaVersion, TelemetryRecord};
+            let connections = snapshot
+                .instances
+                .iter()
+                .filter_map(|item| {
+                    let managed = self.instances.get_mut(&item.identity())?;
+                    let worker_running = managed
+                        .worker
+                        .as_mut()
+                        .is_some_and(|worker| worker.try_wait().is_ok_and(|status| status.is_none()));
+                    if !worker_running {
+                        return None;
+                    }
+                    let stats = &item.statistics;
+                    Some(ConnectionTelemetry {
+                        strategy_id: item.strategy_id.clone(),
+                        asset_id: item.asset_id.clone(),
+                        ram_mb: stats.memory_mb,
+                        cpu_percent: stats.cpu_percent,
+                        latency_mean_ms: stats.processing_latency_mean_ms,
+                        latency_sum_ms: stats.latency_sum_ms.unwrap_or_default(),
+                        latency_observations: stats.latency_observations.unwrap_or(0),
+                        latency_p95_ms: stats.latency_p95_ms,
+                        latency_p99_ms: stats.latency_p99_ms,
+                    })
+                })
+                .collect::<Vec<_>>();
+            let total_ram_mb = connections.iter().filter_map(|c| c.ram_mb).sum();
+            let total_cpu_percent = connections.iter().filter_map(|c| c.cpu_percent).sum();
+            let latency_observations = connections
+                .iter()
+                .map(|c| c.latency_observations)
+                .fold(0u64, u64::saturating_add);
+            let latency_mean_ms = (latency_observations > 0).then(|| {
+                connections.iter().map(|c| c.latency_sum_ms).sum::<f64>()
+                    / latency_observations as f64
+            });
+            let latency_sum_ms = connections.iter().map(|c| c.latency_sum_ms).sum::<f64>();
+            let timestamp_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64;
+            let record = TelemetryRecord {
+                schema: SchemaVersion::default(),
+                session_id: self.session_id.clone(),
+                timestamp_ms,
+                connection_count: connections.len(),
+                total_ram_mb,
+                total_cpu_percent,
+                latency_mean_ms,
+                latency_sum_ms,
+                latency_observations,
+                connections,
+            };
+            if let Some(db) = self.telemetry_db.as_ref() {
+                if let Err(error) = db.write_telemetry(&record) {
+                    eprintln!("[live_db] telemetry write failed: {error}");
+                }
+            }
+            self.last_telemetry_sample = std::time::Instant::now();
+        }
         snapshot
     }
 
@@ -817,6 +969,11 @@ impl uets_gui::SnapshotSource for LiveDashboard {
 #[cfg(unix)]
 impl Drop for LiveDashboard {
     fn drop(&mut self) {
+        if let Some(db) = self.telemetry_db.as_ref() {
+            if let Err(error) = db.flush() {
+                eprintln!("[live_db] telemetry flush failed: {error}");
+            }
+        }
         for instance in self.instances.values_mut() {
             if let Some(mut child) = instance.feed.take() {
                 let _ = child.kill();
@@ -1048,10 +1205,11 @@ mod record {
             // can become covered at any moment -- checked here for both paths.
             if let MarketEvent::Diff(frame) = &event
                 && let Some(last) = self.merger.state().last_update_id
-                    && frame.final_update_id <= last {
-                        self.covered_dropped += 1;
-                        return Ok(0);
-                    }
+                && frame.final_update_id <= last
+            {
+                self.covered_dropped += 1;
+                return Ok(0);
+            }
             let (row, outcome) = self.merger.merge_event(event);
             if outcome.needs_reseed {
                 // Visible, not silent: the book is wrong until the seed
@@ -1914,6 +2072,7 @@ fn cmd_db(args: &[String]) -> Result<(), String> {
         let portfolio_db = UetsDb::open(root.join("portfolio").join(sid))
             .map_err(|e| format!("open portfolio: {e}"))?;
         print_session(&trades_db, &portfolio_db, sid, &filter)?;
+        print_telemetry(&root, sid)?;
     } else {
         // No args: list all sessions from both stage directories.
         print_all_sessions(&root)?;
@@ -1928,9 +2087,10 @@ fn list_session_dirs(root: &std::path::Path, stage: &str) -> Vec<String> {
     if let Ok(entries) = std::fs::read_dir(&stage_dir) {
         for entry in entries.flatten() {
             if entry.path().is_dir()
-                && let Some(name) = entry.file_name().to_str() {
-                    out.push(name.to_string());
-                }
+                && let Some(name) = entry.file_name().to_str()
+            {
+                out.push(name.to_string());
+            }
         }
     }
     out
@@ -1940,9 +2100,9 @@ fn print_all_sessions(root: &std::path::Path) -> Result<(), String> {
     let trades_sessions = list_session_dirs(root, "trades");
     let portfolio_sessions = list_session_dirs(root, "portfolio");
 
-    let mut all: std::collections::BTreeSet<String> =
-        trades_sessions.into_iter().collect();
+    let mut all: std::collections::BTreeSet<String> = trades_sessions.into_iter().collect();
     all.extend(portfolio_sessions);
+    all.extend(list_session_dirs(root, "telemetry"));
 
     if all.is_empty() {
         println!("no sessions found");
@@ -1950,19 +2110,53 @@ fn print_all_sessions(root: &std::path::Path) -> Result<(), String> {
     }
     println!("sessions:");
     for sid in &all {
-        let trades_db =
-            UetsDb::open(root.join("trades").join(sid)).map_err(|e| format!("open trades: {e}"))?;
-        let portfolio_db = UetsDb::open(root.join("portfolio").join(sid))
-            .map_err(|e| format!("open portfolio: {e}"))?;
-        let trades = trades_db
-            .query_trades(&QueryFilter::new().session(sid))
-            .map_err(|e| e.to_string())?
-            .len();
-        let portfolios = portfolio_db
-            .query_portfolio(&QueryFilter::new().session(sid))
-            .map_err(|e| e.to_string())?
-            .len();
-        println!("  {}  trades={} portfolio={}", sid, trades, portfolios);
+        let trades_path = root.join("trades").join(sid);
+        let trades = if trades_path.is_dir() {
+            UetsDb::open(trades_path)
+                .and_then(|db| db.query_trades(&QueryFilter::new().session(sid)))
+                .map_err(|e| e.to_string())?.len()
+        } else { 0 };
+        let portfolio_path = root.join("portfolio").join(sid);
+        let portfolios = if portfolio_path.is_dir() {
+            UetsDb::open(portfolio_path)
+                .and_then(|db| db.query_portfolio(&QueryFilter::new().session(sid)))
+                .map_err(|e| e.to_string())?.len()
+        } else { 0 };
+        let telemetry_path = root.join("telemetry").join(sid);
+        let telemetry = if telemetry_path.is_dir() {
+            UetsDb::open(telemetry_path)
+                .and_then(|db| db.query_telemetry(sid))
+                .map_err(|e| e.to_string())?.len()
+        } else { 0 };
+        println!(
+            "  {}  trades={} portfolio={} telemetry={}",
+            sid, trades, portfolios, telemetry
+        );
+    }
+    Ok(())
+}
+
+fn print_telemetry(root: &std::path::Path, sid: &str) -> Result<(), String> {
+    let path = root.join("telemetry").join(sid);
+    if !path.is_dir() {
+        return Ok(());
+    }
+    let db = UetsDb::open(&path).map_err(|e| format!("open telemetry: {e}"))?;
+    let samples = db
+        .query_telemetry(sid)
+        .map_err(|e| format!("read telemetry: {e}"))?;
+    println!("telemetry: {} samples", samples.len());
+    for sample in samples.iter().rev().take(5).rev() {
+        println!(
+            "  t={} connections={} ram={:.2} MB cpu={:.2}% latency_sum={:.3} ms mean={:.6} ms observations={}",
+            sample.timestamp_ms,
+            sample.connection_count,
+            sample.total_ram_mb,
+            sample.total_cpu_percent,
+            sample.latency_sum_ms,
+            sample.latency_mean_ms.unwrap_or_default(),
+            sample.latency_observations,
+        );
     }
     Ok(())
 }
@@ -1974,10 +2168,16 @@ fn print_session(
     filter: &QueryFilter,
 ) -> Result<(), String> {
     let trades = trades_db.query_trades(filter).map_err(|e| e.to_string())?;
-    let portfolios = portfolio_db.query_portfolio(filter).map_err(|e| e.to_string())?;
+    let portfolios = portfolio_db
+        .query_portfolio(filter)
+        .map_err(|e| e.to_string())?;
 
     println!("session: {sid}");
-    println!("  trades: {}   portfolio: {}", trades.len(), portfolios.len());
+    println!(
+        "  trades: {}   portfolio: {}",
+        trades.len(),
+        portfolios.len()
+    );
 
     if !trades.is_empty() {
         println!("  trades:");
@@ -2083,7 +2283,11 @@ fn main() -> ExitCode {
                 }
             };
             if mode == "playback" {
-                let requested = if rest.is_empty() { configured_playbacks } else { rest.clone() };
+                let requested = if rest.is_empty() {
+                    configured_playbacks
+                } else {
+                    rest.clone()
+                };
                 if requested.is_empty() {
                     eprintln!("mode is playback but playback.playback_strategies is empty");
                     return ExitCode::FAILURE;

@@ -169,6 +169,38 @@ pub struct PortfolioRecord {
     pub win_rate: f64,
 }
 
+/// One session-wide live resource and strategy-latency sample.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TelemetryRecord {
+    pub schema: SchemaVersion,
+    pub session_id: String,
+    pub timestamp_ms: u64,
+    pub connection_count: usize,
+    /// Sum of per-connection RSS in MiB at this sample time.
+    pub total_ram_mb: f64,
+    /// Sum of per-connection CPU, in percent of one logical core.
+    pub total_cpu_percent: f64,
+    /// Arithmetic mean across all strategy-compute observations represented.
+    pub latency_mean_ms: Option<f64>,
+    pub latency_sum_ms: f64,
+    pub latency_observations: u64,
+    /// Per-connection readings preserve enough detail to audit each total.
+    pub connections: Vec<ConnectionTelemetry>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ConnectionTelemetry {
+    pub strategy_id: String,
+    pub asset_id: String,
+    pub ram_mb: Option<f64>,
+    pub cpu_percent: Option<f64>,
+    pub latency_mean_ms: Option<f64>,
+    pub latency_sum_ms: f64,
+    pub latency_observations: u64,
+    pub latency_p95_ms: Option<f64>,
+    pub latency_p99_ms: Option<f64>,
+}
+
 /// Session metadata — enables independent querying, reporting, archival
 /// and recovery per session without separate physical database instances.
 #[derive(Clone, Debug, Serialize, Deserialize)]

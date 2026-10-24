@@ -2,12 +2,13 @@
 //! keys, indexes, batched writes, and async persistence.
 
 use crate::schema::{
-    IntegrityReport, PortfolioRecord, QueryFilter, SessionMeta, SessionSummary, TradeRecord,
+    IntegrityReport, PortfolioRecord, QueryFilter, SessionMeta, SessionSummary, TelemetryRecord,
+    TradeRecord,
 };
 use chrono::Utc;
-use rocksdb::{Direction, IteratorMode, WriteBatch, DB};
-use std::sync::Arc;
+use rocksdb::{DB, Direction, IteratorMode, WriteBatch};
 use std::path::Path;
+use std::sync::Arc;
 use thiserror::Error;
 
 use crate::schema::SchemaVersion;
@@ -41,6 +42,7 @@ pub struct UetsDb {
     trades: DbTree,
     portfolio: DbTree,
     metadata: DbTree,
+    telemetry: DbTree,
     /// Test-only: simulate storage failures for failure-handling tests.
     #[cfg(test)]
     fail_writes: std::sync::atomic::AtomicBool,
@@ -105,7 +107,8 @@ struct DbBatch(Vec<(Vec<u8>, Vec<u8>)>);
 
 impl DbBatch {
     fn insert(&mut self, key: impl AsRef<[u8]>, value: impl AsRef<[u8]>) {
-        self.0.push((key.as_ref().to_vec(), value.as_ref().to_vec()));
+        self.0
+            .push((key.as_ref().to_vec(), value.as_ref().to_vec()));
     }
 }
 
@@ -113,9 +116,22 @@ impl UetsDb {
     /// Open or create the database at `path`.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, DbError> {
         let db = Arc::new(DB::open_default(path)?);
-        let trades = DbTree { db: db.clone(), namespace: "trades" };
-        let portfolio = DbTree { db: db.clone(), namespace: "portfolio" };
-        let metadata = DbTree { db: db.clone(), namespace: "metadata" };
+        let trades = DbTree {
+            db: db.clone(),
+            namespace: "trades",
+        };
+        let portfolio = DbTree {
+            db: db.clone(),
+            namespace: "portfolio",
+        };
+        let metadata = DbTree {
+            db: db.clone(),
+            namespace: "metadata",
+        };
+        let telemetry = DbTree {
+            db: db.clone(),
+            namespace: "telemetry",
+        };
 
         // Write schema version if not present; validate it if present.
         if let Some(raw) = metadata.get(b"schema_version")? {
@@ -130,8 +146,8 @@ impl UetsDb {
             }
         } else {
             let version = SchemaVersion::default();
-            let encoded = bincode::serialize(&version)
-                .map_err(|e| DbError::Serialization(e.to_string()))?;
+            let encoded =
+                bincode::serialize(&version).map_err(|e| DbError::Serialization(e.to_string()))?;
             metadata.insert(b"schema_version", encoded)?;
         }
 
@@ -140,6 +156,7 @@ impl UetsDb {
             trades,
             portfolio,
             metadata,
+            telemetry,
             #[cfg(test)]
             fail_writes: std::sync::atomic::AtomicBool::new(false),
         })
@@ -164,8 +181,8 @@ impl UetsDb {
     pub fn write_trade(&self, record: &TradeRecord) -> Result<(), DbError> {
         self.ensure_writable()?;
         let key = Self::trade_key(record);
-        let encoded = bincode::serialize(record)
-            .map_err(|e| DbError::Serialization(e.to_string()))?;
+        let encoded =
+            bincode::serialize(record).map_err(|e| DbError::Serialization(e.to_string()))?;
         let ikey = Self::trade_index_key(record);
 
         let mut batch = DbBatch::default();
@@ -221,8 +238,8 @@ impl UetsDb {
     pub fn write_portfolio(&self, record: &PortfolioRecord) -> Result<(), DbError> {
         self.ensure_writable()?;
         let key = Self::portfolio_key(record);
-        let encoded = bincode::serialize(record)
-            .map_err(|e| DbError::Serialization(e.to_string()))?;
+        let encoded =
+            bincode::serialize(record).map_err(|e| DbError::Serialization(e.to_string()))?;
         let ikey = Self::portfolio_index_key(record);
 
         let mut batch = DbBatch::default();
@@ -266,6 +283,35 @@ impl UetsDb {
         }
 
         Ok(results)
+    }
+
+    /// Store one session-wide telemetry snapshot, keyed by its sample time.
+    pub fn write_telemetry(&self, record: &TelemetryRecord) -> Result<(), DbError> {
+        self.ensure_writable()?;
+        let encoded =
+            bincode::serialize(record).map_err(|e| DbError::Serialization(e.to_string()))?;
+        self.telemetry.insert(
+            format!("{}|{:020}", record.session_id, record.timestamp_ms),
+            encoded,
+        )?;
+        Ok(())
+    }
+
+    /// Read telemetry snapshots for a session in timestamp order.
+    pub fn query_telemetry(&self, session_id: &str) -> Result<Vec<TelemetryRecord>, DbError> {
+        let prefix = format!("{}|", session_id);
+        let mut records = Vec::new();
+        for result in self.telemetry.range(prefix.as_bytes()..) {
+            let (key, value) = result?;
+            if !key.starts_with(prefix.as_bytes()) {
+                break;
+            }
+            records.push(
+                bincode::deserialize(value.as_ref())
+                    .map_err(|e| DbError::Serialization(e.to_string()))?,
+            );
+        }
+        Ok(records)
     }
 
     // ------- Batched writes -------
@@ -336,8 +382,8 @@ impl UetsDb {
             ended_at: None,
             active: true,
         };
-        let encoded = bincode::serialize(&meta)
-            .map_err(|e| DbError::Serialization(e.to_string()))?;
+        let encoded =
+            bincode::serialize(&meta).map_err(|e| DbError::Serialization(e.to_string()))?;
         self.metadata.insert(key, encoded)?;
         Ok(meta)
     }
@@ -385,10 +431,10 @@ impl UetsDb {
         meta.ended_at = Some(summary.finalized_at);
 
         let mut batch = DbBatch::default();
-        let meta_encoded = bincode::serialize(&meta)
-            .map_err(|e| DbError::Serialization(e.to_string()))?;
-        let sum_encoded = bincode::serialize(summary)
-            .map_err(|e| DbError::Serialization(e.to_string()))?;
+        let meta_encoded =
+            bincode::serialize(&meta).map_err(|e| DbError::Serialization(e.to_string()))?;
+        let sum_encoded =
+            bincode::serialize(summary).map_err(|e| DbError::Serialization(e.to_string()))?;
         batch.insert(Self::session_key(id), meta_encoded);
         batch.insert(Self::summary_key(id), sum_encoded);
         self.metadata.apply_batch(batch)?;
@@ -421,10 +467,9 @@ impl UetsDb {
             }
             match bincode::deserialize::<TradeRecord>(value.as_ref()) {
                 Ok(_) => report.trade_records += 1,
-                Err(_) => report.corrupt_keys.push(format!(
-                    "trades:{}",
-                    String::from_utf8_lossy(&key)
-                )),
+                Err(_) => report
+                    .corrupt_keys
+                    .push(format!("trades:{}", String::from_utf8_lossy(&key))),
             }
         }
 
@@ -435,18 +480,13 @@ impl UetsDb {
             }
             match bincode::deserialize::<PortfolioRecord>(value.as_ref()) {
                 Ok(_) => report.portfolio_records += 1,
-                Err(_) => report.corrupt_keys.push(format!(
-                    "portfolio:{}",
-                    String::from_utf8_lossy(&key)
-                )),
+                Err(_) => report
+                    .corrupt_keys
+                    .push(format!("portfolio:{}", String::from_utf8_lossy(&key))),
             }
         }
 
-        report.active_sessions = self
-            .list_sessions()?
-            .iter()
-            .filter(|s| s.active)
-            .count();
+        report.active_sessions = self.list_sessions()?.iter().filter(|s| s.active).count();
         Ok(report)
     }
 
@@ -461,10 +501,7 @@ impl UetsDb {
 
     fn ensure_writable(&self) -> Result<(), DbError> {
         #[cfg(test)]
-        if self
-            .fail_writes
-            .load(std::sync::atomic::Ordering::Relaxed)
-        {
+        if self.fail_writes.load(std::sync::atomic::Ordering::Relaxed) {
             return Err(DbError::Injected);
         }
         #[cfg(not(test))]
@@ -550,23 +587,29 @@ impl UetsDb {
 
     fn matches_trade_filter(record: &TradeRecord, filter: &QueryFilter) -> bool {
         if let Some(ref sid) = filter.session_id
-            && record.session_id != *sid {
+            && record.session_id != *sid
+        {
             return false;
         }
         if let Some(ref strat) = filter.strategy_id
-            && record.instance.strategy_id != *strat {
+            && record.instance.strategy_id != *strat
+        {
             return false;
         }
         if let Some(ref asset) = filter.asset_id
-            && record.instance.asset_id != *asset && record.symbol != *asset {
+            && record.instance.asset_id != *asset
+            && record.symbol != *asset
+        {
             return false;
         }
         if let Some(start) = filter.start_time
-            && record.event_time < start {
+            && record.event_time < start
+        {
             return false;
         }
         if let Some(end) = filter.end_time
-            && record.event_time > end {
+            && record.event_time > end
+        {
             return false;
         }
         true
@@ -574,23 +617,28 @@ impl UetsDb {
 
     fn matches_portfolio_filter(record: &PortfolioRecord, filter: &QueryFilter) -> bool {
         if let Some(ref sid) = filter.session_id
-            && record.session_id != *sid {
+            && record.session_id != *sid
+        {
             return false;
         }
         if let Some(ref strat) = filter.strategy_id
-            && record.instance.strategy_id != *strat {
+            && record.instance.strategy_id != *strat
+        {
             return false;
         }
         if let Some(ref asset) = filter.asset_id
-            && record.asset_id != *asset {
+            && record.asset_id != *asset
+        {
             return false;
         }
         if let Some(start) = filter.start_time
-            && record.timestamp < start {
+            && record.timestamp < start
+        {
             return false;
         }
         if let Some(end) = filter.end_time
-            && record.timestamp > end {
+            && record.timestamp > end
+        {
             return false;
         }
         true
@@ -600,15 +648,19 @@ impl UetsDb {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::schema::{PortfolioRecord, SchemaVersion, SessionSummary, StrategyInstance};
     use crate::schema::TradeIntent;
+    use crate::schema::{PortfolioRecord, SchemaVersion, SessionSummary, StrategyInstance};
     use chrono::{TimeZone, Utc};
     use std::env;
     use std::fs;
 
     fn temp_db_path() -> std::path::PathBuf {
         // Unique per call so parallel tests never share (or delete) each other's DB.
-        env::temp_dir().join(format!("uets_db_test_{}_{:x}", std::process::id(), uuid::Uuid::new_v4().as_u128()))
+        env::temp_dir().join(format!(
+            "uets_db_test_{}_{:x}",
+            std::process::id(),
+            uuid::Uuid::new_v4().as_u128()
+        ))
     }
 
     fn sample_trade() -> TradeRecord {
@@ -627,9 +679,7 @@ mod tests {
             exit_price: None,
             tp_price: Some(100.5),
             sl_price: Some(99.5),
-            vertical_time: Some(
-                Utc.with_ymd_and_hms(2026, 1, 1, 0, 5, 0).unwrap(),
-            ),
+            vertical_time: Some(Utc.with_ymd_and_hms(2026, 1, 1, 0, 5, 0).unwrap()),
             fill_qty: 1.0,
             fees: 0.1,
             realized_pnl: 0.0,
@@ -809,7 +859,9 @@ mod tests {
         assert_eq!(r[0].symbol, "BTCUSDT");
 
         // Asset only (no session -> full scan path).
-        let r = db.query_trades(&QueryFilter::new().asset("btcusdt")).unwrap();
+        let r = db
+            .query_trades(&QueryFilter::new().asset("btcusdt"))
+            .unwrap();
         assert_eq!(r.len(), 3);
 
         // Strategy only (crosses sessions).
@@ -820,12 +872,10 @@ mod tests {
 
         // Time range within a session.
         let r = db
-            .query_trades(
-                &QueryFilter::new().session("session_1").time_range(
-                    base + chrono::Duration::minutes(1),
-                    base + chrono::Duration::minutes(2),
-                ),
-            )
+            .query_trades(&QueryFilter::new().session("session_1").time_range(
+                base + chrono::Duration::minutes(1),
+                base + chrono::Duration::minutes(2),
+            ))
             .unwrap();
         assert_eq!(r.len(), 2);
 

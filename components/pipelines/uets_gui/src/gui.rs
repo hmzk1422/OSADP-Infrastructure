@@ -44,6 +44,9 @@ pub struct Statistics {
     pub latest_decision: Option<String>,
     pub exchange_latency_ms: Option<f64>,
     pub processing_latency_ms: Option<f64>,
+    pub processing_latency_mean_ms: Option<f64>,
+    pub latency_sum_ms: Option<f64>,
+    pub latency_observations: Option<u64>,
     pub latency_p05_ms: Option<f64>,
     pub latency_p95_ms: Option<f64>,
     pub latency_p99_ms: Option<f64>,
@@ -54,6 +57,12 @@ pub struct Statistics {
     pub tick_to_trade_ms: Option<f64>,
     pub memory_mb: Option<f64>,
     pub cpu_percent: Option<f64>,
+    /// Count of workers with a live RAM/CPU sample in the aggregate frame.
+    pub resource_worker_count: Option<usize>,
+    /// Arithmetic 100-worker projection from the sampled per-worker mean.
+    pub ram_100_workers_mb: Option<f64>,
+    /// Arithmetic 100-worker projection from the sampled per-worker mean.
+    pub cpu_100_workers_percent: Option<f64>,
     pub persistence_queue: Option<usize>,
     pub persistence_write_ms: Option<f64>,
     pub persistence_errors: Option<u64>,
@@ -208,6 +217,18 @@ pub fn aggregate_instances(
     };
     aggregate.exchange_latency_ms = mean(|s| s.exchange_latency_ms);
     aggregate.processing_latency_ms = mean(|s| s.processing_latency_ms);
+    let (latency_sum, latency_count) = instances.iter().fold((0.0, 0u64), |(sum, count), i| {
+        let n = i.statistics.latency_observations.unwrap_or(0);
+        let value = i
+            .statistics
+            .latency_sum_ms
+            .unwrap_or_else(|| i.statistics.processing_latency_mean_ms.unwrap_or(0.0) * n as f64);
+        (sum + value, count.saturating_add(n))
+    });
+    aggregate.latency_sum_ms = Some(latency_sum);
+    aggregate.latency_observations = Some(latency_count);
+    aggregate.processing_latency_mean_ms =
+        (latency_count > 0).then_some(latency_sum / latency_count as f64);
     aggregate.latency_p05_ms = mean(|s| s.latency_p05_ms);
     aggregate.latency_p95_ms = mean(|s| s.latency_p95_ms);
     aggregate.latency_p99_ms = mean(|s| s.latency_p99_ms);
@@ -218,12 +239,42 @@ pub fn aggregate_instances(
         .iter()
         .filter_map(|instance| instance.statistics.clock_skew_max_ms)
         .reduce(f64::max);
-    aggregate.memory_mb = mean(|s| s.memory_mb);
-    aggregate.cpu_percent = mean(|s| s.cpu_percent);
+    // RAM and CPU are process-level measurements: aggregate totals must sum
+    // workers. Keep a clearly labeled linear projection for capacity planning.
+    let ram_samples = instances
+        .iter()
+        .filter_map(|i| i.statistics.memory_mb)
+        .filter(|v| v.is_finite())
+        .collect::<Vec<_>>();
+    let cpu_samples = instances
+        .iter()
+        .filter_map(|i| i.statistics.cpu_percent)
+        .filter(|v| v.is_finite())
+        .collect::<Vec<_>>();
+    aggregate.memory_mb = (!ram_samples.is_empty()).then(|| ram_samples.iter().sum());
+    aggregate.cpu_percent = (!cpu_samples.is_empty()).then(|| cpu_samples.iter().sum());
+    let resource_workers = instances
+        .iter()
+        .filter(|i| {
+            i.statistics.memory_mb.is_some_and(f64::is_finite)
+                && i.statistics.cpu_percent.is_some_and(f64::is_finite)
+        })
+        .count();
+    aggregate.resource_worker_count = (resource_workers > 0).then_some(resource_workers);
+    aggregate.ram_100_workers_mb = (!ram_samples.is_empty())
+        .then(|| ram_samples.iter().sum::<f64>() / ram_samples.len() as f64 * 100.0);
+    aggregate.cpu_100_workers_percent = (!cpu_samples.is_empty())
+        .then(|| cpu_samples.iter().sum::<f64>() / cpu_samples.len() as f64 * 100.0);
     aggregate.tick_to_trade_ms = mean(|s| s.tick_to_trade_ms);
     aggregate.persistence_write_ms = mean(|s| s.persistence_write_ms);
-    aggregate.persistence_queue = eligible.iter().filter_map(|i| i.statistics.persistence_queue).max();
-    aggregate.persistence_errors = eligible.iter().filter_map(|i| i.statistics.persistence_errors).reduce(|a, b| a.saturating_add(b));
+    aggregate.persistence_queue = eligible
+        .iter()
+        .filter_map(|i| i.statistics.persistence_queue)
+        .max();
+    aggregate.persistence_errors = eligible
+        .iter()
+        .filter_map(|i| i.statistics.persistence_errors)
+        .reduce(|a, b| a.saturating_add(b));
     // Bracket and mark-to-entry telemetry is per position; surface the mean
     // across workers holding a position instead of dropping it in the
     // aggregate view.
@@ -353,48 +404,48 @@ impl<S: SnapshotSource> Monitor<S> {
             })?;
             let timeout = self.interval.saturating_sub(started.elapsed());
             if event::poll(timeout)?
-                && let Event::Key(key) = event::read()? {
-                    if let Some(input) = &mut self.add_input {
-                        match key.code {
-                            crossterm::event::KeyCode::Esc => self.add_input = None,
-                            crossterm::event::KeyCode::Enter => {
-                                let identity = std::mem::take(input);
-                                self.add_input = None;
-                                self.control(StrategyCommand::Add(identity));
-                            }
-                            crossterm::event::KeyCode::Backspace => {
-                                input.pop();
-                            }
-                            crossterm::event::KeyCode::Char(character) => input.push(character),
-                            _ => {}
+                && let Event::Key(key) = event::read()?
+            {
+                if let Some(input) = &mut self.add_input {
+                    match key.code {
+                        crossterm::event::KeyCode::Esc => self.add_input = None,
+                        crossterm::event::KeyCode::Enter => {
+                            let identity = std::mem::take(input);
+                            self.add_input = None;
+                            self.control(StrategyCommand::Add(identity));
                         }
-                        continue;
+                        crossterm::event::KeyCode::Backspace => {
+                            input.pop();
+                        }
+                        crossterm::event::KeyCode::Char(character) => input.push(character),
+                        _ => {}
                     }
-                    match crate::controls::action(key) {
-                        crate::controls::Action::Quit => return Ok(()),
-                        crate::controls::Action::Up => self.move_selection(&snapshot, -1),
-                        crate::controls::Action::Down => self.move_selection(&snapshot, 1),
-                        crate::controls::Action::Select => {
-                            if !snapshot.instances.is_empty() {
-                                self.selected = Some(
-                                    self.selected.unwrap_or(0).min(snapshot.instances.len() - 1),
-                                );
-                            }
-                        }
-                        crate::controls::Action::Clear => self.selected = None,
-                        crate::controls::Action::Add => {
-                            self.add_input = Some(String::new());
-                            self.message = Some("Enter strategy@asset, e.g. ofmr@btcusdt".into());
-                        }
-                        crate::controls::Action::Toggle => {
-                            self.control_selected(&snapshot, StrategyCommand::Toggle);
-                        }
-                        crate::controls::Action::Remove => {
-                            self.control_selected(&snapshot, StrategyCommand::Remove);
-                        }
-                        crate::controls::Action::None => {}
-                    }
+                    continue;
                 }
+                match crate::controls::action(key) {
+                    crate::controls::Action::Quit => return Ok(()),
+                    crate::controls::Action::Up => self.move_selection(&snapshot, -1),
+                    crate::controls::Action::Down => self.move_selection(&snapshot, 1),
+                    crate::controls::Action::Select => {
+                        if !snapshot.instances.is_empty() {
+                            self.selected =
+                                Some(self.selected.unwrap_or(0).min(snapshot.instances.len() - 1));
+                        }
+                    }
+                    crate::controls::Action::Clear => self.selected = None,
+                    crate::controls::Action::Add => {
+                        self.add_input = Some(String::new());
+                        self.message = Some("Enter strategy@asset, e.g. ofmr@btcusdt".into());
+                    }
+                    crate::controls::Action::Toggle => {
+                        self.control_selected(&snapshot, StrategyCommand::Toggle);
+                    }
+                    crate::controls::Action::Remove => {
+                        self.control_selected(&snapshot, StrategyCommand::Remove);
+                    }
+                    crate::controls::Action::None => {}
+                }
+            }
         }
     }
 
@@ -461,7 +512,10 @@ fn render(
         })
         .unwrap_or_else(|| {
             (
-                snapshot.aggregate_title.clone().unwrap_or_else(|| "Portfolio aggregate".to_string()),
+                snapshot
+                    .aggregate_title
+                    .clone()
+                    .unwrap_or_else(|| "Portfolio aggregate".to_string()),
                 &snapshot.aggregate,
                 &snapshot.aggregate_equity_history,
                 snapshot.aggregate_equity_paths.as_slice(),
@@ -538,7 +592,13 @@ fn render_chart(
     } else {
         equity_paths.iter().map(Vec::as_slice).collect()
     };
-    let x_max = paths.iter().map(|path| path.len()).max().unwrap_or(0).saturating_sub(1).max(1) as f64;
+    let x_max = paths
+        .iter()
+        .map(|path| path.len())
+        .max()
+        .unwrap_or(0)
+        .saturating_sub(1)
+        .max(1) as f64;
     let (y_min, y_max) = paths
         .iter()
         .flat_map(|path| path.iter())
@@ -550,20 +610,34 @@ fn render_chart(
     } else {
         (0.0, 1.0)
     };
-    let colors = [Color::Cyan, Color::Green, Color::Yellow, Color::Magenta, Color::Blue, Color::Red];
+    let colors = [
+        Color::Cyan,
+        Color::Green,
+        Color::Yellow,
+        Color::Magenta,
+        Color::Blue,
+        Color::Red,
+    ];
     let data: Vec<Vec<(f64, f64)>> = paths
         .iter()
-        .map(|path| path.iter().enumerate().map(|(i, value)| (i as f64, *value)).collect())
+        .map(|path| {
+            path.iter()
+                .enumerate()
+                .map(|(i, value)| (i as f64, *value))
+                .collect()
+        })
         .collect();
     let datasets: Vec<Dataset<'_>> = data
         .iter()
         .enumerate()
-        .map(|(index, points)| Dataset::default()
-            .name(format!("Path {}", index + 1))
-            .marker(symbols::Marker::Braille)
-            .graph_type(GraphType::Line)
-            .style(Style::default().fg(colors[index % colors.len()]))
-            .data(points))
+        .map(|(index, points)| {
+            Dataset::default()
+                .name(format!("Path {}", index + 1))
+                .marker(symbols::Marker::Braille)
+                .graph_type(GraphType::Line)
+                .style(Style::default().fg(colors[index % colors.len()]))
+                .data(points)
+        })
         .collect();
     let title = format!(
         " {identity} · Equity{} ",
@@ -646,8 +720,23 @@ fn render_statistics(
         metric("Win rate", number(stats.win_rate, true)),
         metric("Stop loss %", telemetry_number(stats.stop_loss_pct)),
         metric("Take profit %", telemetry_number(stats.take_profit_pct)),
-        metric("Price vs entry %", telemetry_number(stats.price_vs_entry_pct)),
+        metric(
+            "Price vs entry %",
+            telemetry_number(stats.price_vs_entry_pct),
+        ),
         metric("Status", stats.status.clone()),
+        metric(
+            "Workers sampled",
+            stats.resource_worker_count.map(|v| v.to_string()),
+        ),
+        metric(
+            "RAM @100 workers MB",
+            telemetry_number(stats.ram_100_workers_mb),
+        ),
+        metric(
+            "CPU @100 workers %",
+            telemetry_number(stats.cpu_100_workers_percent),
+        ),
         metric("Error", stats.last_error.clone()),
         metric(
             "Market data",
@@ -655,6 +744,18 @@ fn render_statistics(
         ),
         metric("Decision", telemetry_text(stats.latest_decision.clone())),
         metric("Strategy ms", telemetry_number(stats.processing_latency_ms)),
+        metric(
+            "Mean strategy ms",
+            telemetry_number(stats.processing_latency_mean_ms),
+        ),
+        metric(
+            "Strategy latency sum ms",
+            telemetry_number(stats.latency_sum_ms),
+        ),
+        metric(
+            "Latency observations",
+            stats.latency_observations.map(|v| v.to_string()),
+        ),
         metric(
             "Exchange→local ms",
             telemetry_number(stats.exchange_latency_ms),
@@ -784,16 +885,7 @@ fn render_instances(
         .collect::<Vec<_>>();
     let table = std::iter::once(format!(
         "{:<20} {:>8} {:>12} {:>12} {:>9} {:>7} {:>7} {:>7} {:>7} {:>7}",
-        "INSTANCE",
-        "STATUS",
-        "EQUITY",
-        "PNL",
-        "WIN%",
-        "TRADES",
-        "POS",
-        "SL%",
-        "TP%",
-        "PvE%"
+        "INSTANCE", "STATUS", "EQUITY", "PNL", "WIN%", "TRADES", "POS", "SL%", "TP%", "PvE%"
     ))
     .chain(rows)
     .collect::<Vec<_>>()
@@ -930,7 +1022,7 @@ mod aggregation_tests {
         assert_eq!(back.price_vs_entry_pct, Some(2.5));
 
         // Older payloads without the new keys deserialize to None.
-        let back: Statistics = serde_json::from_str("{}" ).unwrap();
+        let back: Statistics = serde_json::from_str("{}").unwrap();
         assert_eq!(back.stop_loss_pct, None);
         assert_eq!(back.take_profit_pct, None);
         assert_eq!(back.price_vs_entry_pct, None);
@@ -988,8 +1080,14 @@ mod aggregation_tests {
         assert!(screen.contains("TP%"), "missing TP% column:\n{screen}");
         assert!(screen.contains("PvE%"), "missing PvE% column:\n{screen}");
         assert!(screen.contains("0.50%"), "missing stop distance:\n{screen}");
-        assert!(screen.contains("1.00%"), "missing target distance:\n{screen}");
-        assert!(screen.contains("2.50%"), "missing price vs entry:\n{screen}");
+        assert!(
+            screen.contains("1.00%"),
+            "missing target distance:\n{screen}"
+        );
+        assert!(
+            screen.contains("2.50%"),
+            "missing price vs entry:\n{screen}"
+        );
     }
 
     #[test]
