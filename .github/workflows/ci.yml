@@ -63,8 +63,13 @@ jobs:
       - name: Run Clippy on UETS and all workspace components
         run: cargo clippy --workspace --all-targets -- -D clippy::correctness -D clippy::suspicious
 
+      - name: Reclaim build space before Semgrep
+        run: |
+          cargo clean
+          python -m pip cache purge
+
       - name: Install Semgrep
-        run: python -m pip install semgrep
+        run: python -m pip install --no-cache-dir semgrep
 
       - name: Run UETS static-analysis rules
         env:

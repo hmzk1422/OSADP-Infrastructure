@@ -38,6 +38,9 @@ Caveats baked into the design (also printed by ``report``)
 from __future__ import annotations
 
 import math
+import gc
+import os
+import pickle
 import time
 from dataclasses import dataclass, field, replace
 from typing import Callable
@@ -190,18 +193,16 @@ def build_fold_features(raw: pd.DataFrame, seg_raw: np.ndarray, feature_sets=("1
     ts_sec = ts_sec[warm:][keep]
     seg = seg_raw[warm:][keep]
     truth = df["regime_truth"].to_numpy()[warm:][keep] if "regime_truth" in df else None
-    frames = {}
+    frames = {"_base": allf}
     n = len(allf)
-    for fs in feature_sets:
-        if fs == "decoy40":
-            base = allf[CORE_10].copy()
-            for i in (1, 2, 3):
-                shifted = np.roll(allf[CORE_10].to_numpy(), n * i // 4, axis=0)
-                for j, c in enumerate(CORE_10):
-                    base[f"decoy{i}_{c}"] = shifted[:, j]
-            frames[fs] = base
-        else:
-            frames[fs] = allf[FEATURE_SETS[fs]].copy()
+    if "decoy40" in feature_sets:
+        base = allf[CORE_10].copy()
+        core_values = allf[CORE_10].to_numpy()
+        for i in (1, 2, 3):
+            shifted = np.roll(core_values, n * i // 4, axis=0)
+            for j, c in enumerate(CORE_10):
+                base[f"decoy{i}_{c}"] = shifted[:, j]
+        frames["decoy40"] = base
     return FoldData(fold, frames, mid, spread, ts_sec, seg,
                     meta=dict(rows=n, dropped_warmup=dropped + warm, decimate=decimate), truth=truth)
 
@@ -217,8 +218,11 @@ def load_fold(loader: Callable, fold: int, d: "DataConfig") -> FoldData:
         parts.append(piece)
         seg.append(np.full(len(piece), code))
     raw = pd.concat(parts, ignore_index=True)
-    return build_fold_features(raw, np.concatenate(seg), d.feature_sets, d.decimate, d.baseline_window,
-                               d.min_periods, d.ts_unit, fold)
+    del parts
+    fold_data = build_fold_features(raw, np.concatenate(seg), d.feature_sets, d.decimate, d.baseline_window,
+                                    d.min_periods, d.ts_unit, fold)
+    del raw
+    return fold_data
 
 
 # ----------------------------------------------------------------------------------------------
@@ -303,7 +307,10 @@ def _seg_kwargs(cfg: RunConfig) -> tuple[str, dict]:
         bp = {"n_clusters": cfg.n_latents, **user.pop("backend_params", {})}
         return "kmeans", {**kw, "backend_params": bp, **user}
     if cfg.segmenter == "hdbscan":
-        bp = {"min_cluster_size": 500, **user.pop("backend_params", {})}
+        # Bound HDBSCAN's expensive fit sample and use a less restrictive
+        # default so sparse-but-real clusters are less likely to be all noise.
+        bp = {"min_cluster_size": 200, "max_fit_samples": 20_000,
+              **user.pop("backend_params", {})}
         return "hdbscan", {**kw, "backend_params": bp, **user}
     return cfg.segmenter, {**kw, **user}
 
@@ -327,13 +334,45 @@ def discover_regimes(frame: pd.DataFrame, seg: np.ndarray, cfg: RunConfig, n_tr_
         labels[seg == 1] = "gap"
         return labels, emb
     sg_name, sg_kw = _seg_kwargs(cfg)
-    sg = make_segmenter(sg_name, **sg_kw)
     e_tr = emb.iloc[tr].dropna()
     e_te = emb.iloc[te].dropna()
+    # HDBSCAN can legitimately find no clusters when its default minimum
+    # cluster size is too large for the embedding. Retry at smaller sizes;
+    # if the data still has no clusters, keep the fold usable and record null
+    # labels instead of failing the whole run.
+    if cfg.segmenter == "hdbscan":
+        if not len(e_tr):
+            labels[seg == 1] = "gap"
+            print(f"  [{cfg.name}]: HDBSCAN has no finite training embeddings; recording null regimes")
+            return labels, emb
+        backend_params = dict(sg_kw.get("backend_params", {}))
+        initial_size = int(backend_params.get("min_cluster_size", 200))
+        sizes = list(dict.fromkeys([initial_size, max(20, initial_size // 2),
+                                    max(10, initial_size // 5), 10]))
+        sg = None
+        for min_size in sizes:
+            retry_kw = {**sg_kw, "backend_params": {**backend_params, "min_cluster_size": min_size}}
+            candidate = make_segmenter(sg_name, **retry_kw)
+            try:
+                candidate.fit(e_tr)
+                sg = candidate
+                if min_size != initial_size:
+                    print(f"  [{cfg.name}] HDBSCAN found no clusters at min_cluster_size={initial_size}; retry succeeded at {min_size}")
+                break
+            except ValueError as exc:
+                if "found no clusters" not in str(exc).lower():
+                    raise
+        if sg is None:
+            labels[seg == 1] = "gap"
+            print(f"  [{cfg.name}]: HDBSCAN found no clusters after retries (min_cluster_size={sizes}); recording null regimes")
+            return labels, emb
+    else:
+        sg = make_segmenter(sg_name, **sg_kw)
     if sg.backend == "custom":
         pred_tr = sg.predict(e_tr)                   # online learning pass == fit
     else:
-        sg.fit(e_tr)
+        if cfg.segmenter != "hdbscan":
+            sg.fit(e_tr)
         pred_tr = sg.predict(e_tr)
     labels[e_tr.index.to_numpy()] = pred_tr["latent_id"].to_numpy()
     sg.learn_novel = bool(cfg.learn_novel_oos)
@@ -534,7 +573,12 @@ class Similarity:
 def run_fold(fd: FoldData, cfg: RunConfig, verbose: bool = True) -> dict:
     t0 = time.time()
     rng = np.random.default_rng(cfg.seed + fd.fold)
-    frame = fd.frames[cfg.feature_set]
+    if cfg.feature_set == "decoy40":
+        frame = fd.frames["decoy40"]
+    elif "_base" in fd.frames:
+        frame = fd.frames["_base"][FEATURE_SETS[cfg.feature_set]]
+    else:  # compatibility with FoldData built by older callers
+        frame = fd.frames[cfg.feature_set]
     F = frame.to_numpy(dtype=float)
     T, D = F.shape
     seg = fd.seg
@@ -678,25 +722,71 @@ def run_fold(fd: FoldData, cfg: RunConfig, verbose: bool = True) -> dict:
 # ----------------------------------------------------------------------------------------------
 # 7. Driver + analysis
 # ----------------------------------------------------------------------------------------------
-def run_study(data: DataConfig, runs: list[RunConfig], verbose: bool = True) -> dict:
+def run_study(data: DataConfig, runs: list[RunConfig], verbose: bool = True,
+              checkpoint_path: str | None = None) -> dict:
     """Fold-major loop (each fold is loaded and featurised ONCE, then every run config is executed on it)."""
     if data.loader is None:
         from ...exchange.loader import load_L2
         data = replace(data, loader=load_L2)
     res = {r.name: [] for r in runs}
+    checkpoint_key = repr(({k: v for k, v in vars(data).items() if k != "loader"}, runs))
+    if checkpoint_path and os.path.exists(checkpoint_path):
+        with open(checkpoint_path, "rb") as fh:
+            saved = pickle.load(fh)
+        if saved.get("key") != checkpoint_key:
+            raise ValueError(f"Checkpoint {checkpoint_path} belongs to different study settings; choose another checkpoint path")
+        res = {name: [row for row in saved.get("results", {}).get(name, []) if "error" not in row]
+               for name in res}
+        if verbose:
+            done = sum(len(rows) for rows in res.values())
+            print(f"Resuming from {checkpoint_path}: {done} completed run-folds already saved")
+
+    def save_checkpoint():
+        if not checkpoint_path:
+            return
+        parent = os.path.dirname(os.path.abspath(checkpoint_path))
+        os.makedirs(parent, exist_ok=True)
+        temp_path = checkpoint_path + ".tmp"
+        with open(temp_path, "wb") as fh:
+            pickle.dump({"key": checkpoint_key, "results": res}, fh, protocol=pickle.HIGHEST_PROTOCOL)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(temp_path, checkpoint_path)
+
     for f in range(data.n_folds):
+        if all(any(row.get("fold") == f for row in res[r.name]) for r in runs):
+            if verbose:
+                print(f"fold {f}: all run-folds already checkpointed; skipping")
+            continue
         t0 = time.time()
         fd = load_fold(data.loader, f, data)
         if verbose:
             print(f"fold {f}: {fd.meta['rows']} rows after warm-up/decimation ({time.time() - t0:.1f}s)")
+        if not len(fd.seg) or not np.any(fd.seg == 0) or not np.any(fd.seg == 2):
+            reason = "no usable rows" if not len(fd.seg) else "missing train or test rows"
+            if verbose:
+                print(f"fold {f}: skipped ({reason})")
+            for r in runs:
+                res[r.name].append(dict(fold=f, skipped=reason, pairs=pd.DataFrame(), trades=pd.DataFrame(),
+                                        placebo=pd.DataFrame(), persistence={}))
+            save_checkpoint()
+            del fd
+            gc.collect()
+            continue
         for r in runs:
+            if any(row.get("fold") == f for row in res[r.name]):
+                continue
             try:
-                res[r.name].append(run_fold(fd, r, verbose))
+                result = run_fold(fd, r, verbose)
+                res[r.name].append(result)
             except Exception as exc:                          # keep the grid alive; surface the failure
                 print(f"  [{r.name}] fold {f} FAILED: {type(exc).__name__}: {exc}")
                 res[r.name].append(dict(fold=f, error=str(exc), pairs=pd.DataFrame(), trades=pd.DataFrame(),
                                         placebo=pd.DataFrame(), persistence={}))
+            save_checkpoint()
+            gc.collect()
         del fd
+        gc.collect()
     return {r.name: collect(res[r.name], r) for r in runs}
 
 

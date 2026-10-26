@@ -22,11 +22,15 @@ pd.set_option("display.width", 220, "display.max_columns", 60, "display.float_fo
 # ---- EDIT ME ---------------------------------------------------------------------------------------------
 DATA = DataConfig(
     train_files=10, gap_files=0, test_files=4, step_files=4, n_folds=6, start=0,
-    decimate=1,                      # raise (e.g. 5) to thin events if encoding the full stream is too slow
+    decimate=5,                      # retain every fifth event after full-resolution feature calculation
     ts_unit="ms",                    # only used if load_L2's ``timestamp`` is numeric
 )
+CHECKPOINT = "infonet_study_checkpoint_v2.pkl"  # saved after each run/fold and resumed automatically
 COMMON = dict(
-    horizons=(4, 16, 64), trade_horizon=16, block=200, min_episode_len=400,   # InfoNet: block >= 2*max(horizon)+1
+    # Scale row-based settings to keep roughly the same event-time horizons
+    # and episode lengths after retaining every fifth event.
+    window=8, horizons=(1, 3, 13), trade_horizon=3, block=40, min_dwell=10,
+    min_episode_len=80, min_expert_rows=100,   # InfoNet: block >= 2*max(horizon)+1
     fee_bps=0.0,                     # per side, ON TOP of crossing the spread -- set to your venue's taker fee
     max_test_episodes=60, max_ref_episodes=6, n_placebo=20,
 )
@@ -46,7 +50,7 @@ H2 = [RunConfig(name=f"H2_{enc}_{seg}", feature_set="20", encoder=enc, segmenter
 #       geometric, tdmi and infonet.  Read metric_value(results["H1_20"]).
 
 if __name__ == "__main__":
-    results = run_study(DATA, H1 + H2)
+    results = run_study(DATA, H1 + H2, checkpoint_path=CHECKPOINT)
     with open("infonet_study_results.pkl", "wb") as fh:
         pickle.dump(results, fh)
 
