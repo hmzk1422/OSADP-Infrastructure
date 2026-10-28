@@ -50,7 +50,7 @@ import pandas as pd
 
 from ...strategy.moe.ood.base_regime_encoder import make_encoder
 from ...strategy.moe.ood.base_regime_segmenter import make_segmenter
-from ...strategy.moe.ood.metrics import (cosine_similarity, infonet_estimate, infonet_target, resampled_distance_similarity,
+from ...strategy.moe.ood.metrics import (cosine_similarity, infonet_estimate, resampled_distance_similarity,
                       tdmi_fingerprint, tdmi_fingerprint_similarity)
 from ...strategy.moe.feature.orderflow import _robust_zscore, add_orderflow
 
@@ -74,6 +74,12 @@ FEATURE_SETS = {"10": CORE_10, "20": CORE_10 + REST_OF_19 + EXTRA_ORDER[:1],
                 "40": CORE_10 + REST_OF_19 + EXTRA_ORDER}
 assert len(FEATURE_SETS["20"]) == 20 and len(FEATURE_SETS["40"]) == 40
 ZERO_FILL = ("trade_imbalance_1", "trade_imbalance_5", "trade_imbalance_20", "trade_imbalance_100")
+NOISE_IDS = {"-1", "-1.0", "noise", "nan", "None", "NaN"}
+
+
+def _as_labels(ids) -> np.ndarray:
+    labels = pd.Series(np.asarray(ids)).astype(str)
+    return labels.where(~labels.isin(NOISE_IDS), "null").to_numpy(dtype=object)
 
 
 def _level(side: str, kind: str, k: int) -> str:
@@ -276,6 +282,7 @@ class RunConfig:
     ridge_lambda: float = 0.1
     val_fraction: float = 0.25
     fee_bps: float = 0.0            # per side, on top of spread crossing
+    max_cost_rr: float = 5.0        # reject entries whose spread + fee costs exceed 5 volatility units
     # episode / sampling rules
     min_episode_len: int = 400
     min_trades: int = 5
@@ -285,6 +292,7 @@ class RunConfig:
     max_ref_episodes: int = 6
     parity_tol: float = 0.05
     n_placebo: int = 20
+    vol_window: int = 100
     seed: int = 0
 
 
@@ -295,6 +303,26 @@ def auto_min_features(d: int, alpha: float, tail: float = 0.05) -> int:
         if p <= tail:
             return m
     return d
+
+
+def stable_rr_targets(price, horizons, vol_window: int = 100) -> tuple[pd.DataFrame, np.ndarray]:
+    """Forward RR targets and cost vol, rejecting numerical flats with a causal local floor."""
+    series = pd.Series(np.asarray(price, dtype=np.float64))
+    min_periods = max(vol_window // 2, 2)
+    vol = series.diff().rolling(vol_window, min_periods=min_periods).std(ddof=0)
+    price_scale = float(np.nanmedian(np.abs(series.to_numpy()))) if len(series) else 0.0
+    numeric_floor = np.finfo(float).eps * max(price_scale, 1.0)
+    change = series.diff()
+    move_floor = max(10 * numeric_floor, 1e-10 * max(price_scale, 1.0))
+    meaningful_steps = change.abs().where(change.abs() > move_floor)
+    local_step = meaningful_steps.rolling(vol_window, min_periods=1).median()
+    has_real_move = meaningful_steps.notna().rolling(vol_window, min_periods=1).sum() > 0
+    floor = np.maximum(numeric_floor, 0.2 * local_step / math.sqrt(vol_window))
+    vol = vol.where(np.isfinite(vol) & (vol > floor) & has_real_move)
+    out = {f"rr_{int(h)}": series.diff(int(h)).shift(-int(h)) / (vol * math.sqrt(int(h)))
+           for h in horizons}
+    targets = pd.DataFrame(out, index=series.index).replace([np.inf, -np.inf], np.nan)
+    return targets, vol.to_numpy(dtype=float)
 
 
 # ----------------------------------------------------------------------------------------------
@@ -320,12 +348,13 @@ def discover_regimes(frame: pd.DataFrame, seg: np.ndarray, cfg: RunConfig, n_tr_
     cols = list(frame.columns)
     tr = np.flatnonzero(seg == 0)
     te = np.flatnonzero(seg == 2)
+    fit_tr = tr[:n_tr_fit_end]
     enc = make_encoder(cfg.encoder, window=cfg.window, embedding_dim=cfg.embedding_dim,
                        feature_columns=cols, **cfg.encoder_kwargs)
     enc.fit_encoder(frame.iloc[tr[:n_tr_fit_end]])
     emb = enc.transform(frame)                       # causal normalisation; weights learnt on train only
     if cfg.standardize_embeddings:
-        ref = emb.iloc[tr].dropna()
+        ref = emb.iloc[fit_tr].dropna()
         emb = (emb - ref.mean()) / ref.std(ddof=0).where(lambda x: x > 1e-12, 1.0)
     labels = np.full(len(frame), "null", dtype=object)
     if cfg.segmenter == "oracle":                    # positive control: needs a 'regime_truth' column from the loader
@@ -334,6 +363,7 @@ def discover_regimes(frame: pd.DataFrame, seg: np.ndarray, cfg: RunConfig, n_tr_
         labels[seg == 1] = "gap"
         return labels, emb
     sg_name, sg_kw = _seg_kwargs(cfg)
+    e_fit = emb.iloc[fit_tr].dropna()
     e_tr = emb.iloc[tr].dropna()
     e_te = emb.iloc[te].dropna()
     # HDBSCAN can legitimately find no clusters when its default minimum
@@ -341,7 +371,7 @@ def discover_regimes(frame: pd.DataFrame, seg: np.ndarray, cfg: RunConfig, n_tr_
     # if the data still has no clusters, keep the fold usable and record null
     # labels instead of failing the whole run.
     if cfg.segmenter == "hdbscan":
-        if not len(e_tr):
+        if not len(e_fit):
             labels[seg == 1] = "gap"
             print(f"  [{cfg.name}]: HDBSCAN has no finite training embeddings; recording null regimes")
             return labels, emb
@@ -354,7 +384,7 @@ def discover_regimes(frame: pd.DataFrame, seg: np.ndarray, cfg: RunConfig, n_tr_
             retry_kw = {**sg_kw, "backend_params": {**backend_params, "min_cluster_size": min_size}}
             candidate = make_segmenter(sg_name, **retry_kw)
             try:
-                candidate.fit(e_tr)
+                candidate.fit(e_fit)
                 sg = candidate
                 if min_size != initial_size:
                     print(f"  [{cfg.name}] HDBSCAN found no clusters at min_cluster_size={initial_size}; retry succeeded at {min_size}")
@@ -372,13 +402,13 @@ def discover_regimes(frame: pd.DataFrame, seg: np.ndarray, cfg: RunConfig, n_tr_
         pred_tr = sg.predict(e_tr)                   # online learning pass == fit
     else:
         if cfg.segmenter != "hdbscan":
-            sg.fit(e_tr)
+            sg.fit(e_fit)
         pred_tr = sg.predict(e_tr)
-    labels[e_tr.index.to_numpy()] = pred_tr["latent_id"].to_numpy()
+    labels[e_tr.index.to_numpy()] = _as_labels(pred_tr["latent_id"].to_numpy())
     sg.learn_novel = bool(cfg.learn_novel_oos)
     if len(e_te):
         pred_te = sg.predict(e_te)
-        labels[e_te.index.to_numpy()] = pred_te["latent_id"].to_numpy()
+        labels[e_te.index.to_numpy()] = _as_labels(pred_te["latent_id"].to_numpy())
     labels[seg == 1] = "gap"
     return labels, emb
 
@@ -590,14 +620,13 @@ def run_fold(fd: FoldData, cfg: RunConfig, verbose: bool = True) -> dict:
     assert h in cfg.horizons, "trade_horizon must be one of the InfoNet horizons"
 
     # ---- targets, cost ------------------------------------------------------------------
-    rr_df = infonet_target(pd.Series(fd.mid), cfg.horizons)
+    rr_df, vol = stable_rr_targets(fd.mid, cfg.horizons, cfg.vol_window)
     rr = rr_df.to_numpy()
     rr_h = rr_df[f"rr_{h}"].to_numpy()
-    vol = pd.Series(fd.mid).diff().rolling(100, min_periods=50).std(ddof=0).to_numpy()
-    vol = np.where(vol > 1e-12, vol, np.nan)
     exit_spread = np.full(T, np.nan)
     exit_spread[:-h] = fd.spread[h:]
     cost = ((fd.spread + exit_spread) / 2 + 2 * cfg.fee_bps * 1e-4 * fd.mid) / (vol * math.sqrt(h))
+    cost = np.where(np.isfinite(cost) & (cost >= 0) & (cost <= cfg.max_cost_rr), cost, np.nan)
 
     # ---- purge: training rows whose forward window crosses the train boundary are unusable -------
     usable_tr = np.zeros(T, bool)
@@ -717,6 +746,218 @@ def run_fold(fd: FoldData, cfg: RunConfig, verbose: bool = True) -> dict:
         print(f"  [{cfg.name}] fold {fd.fold}: {len(eps)} test episodes, {len(experts)} experts, "
               f"{len(pairs)} pairs, {out['secs']:.1f}s")
     return out
+
+
+def _tail_average(values: np.ndarray, upper: bool) -> float:
+    values = np.asarray(values, dtype=float)
+    values = values[np.isfinite(values)]
+    if not len(values):
+        return np.nan
+    q = np.quantile(values, 0.95 if upper else 0.05)
+    tail = values[values >= q] if upper else values[values <= q]
+    return float(tail.mean()) if len(tail) else np.nan
+
+
+def _episode_correlation(cells: pd.DataFrame) -> pd.DataFrame:
+    """Pairwise expert correlations with explicit reasons where correlation is undefined."""
+    experts = sorted(cells["expert_latent"].unique()) if len(cells) else []
+    matrix = pd.DataFrame(index=experts, columns=experts, dtype=object)
+    by_episode = cells.pivot(index="ep", columns="expert_latent", values="rr_net") if len(cells) else pd.DataFrame()
+    for left in experts:
+        for right in experts:
+            pair = by_episode[[left, right]].dropna() if left != right else by_episode[[left]].dropna()
+            a = pair[left].to_numpy(dtype=float)
+            if left == right:
+                matrix.loc[left, right] = 1.0 if len(a) >= 2 and np.ptp(a) > 0 else ("constant" if len(a) >= 2 else "n<2")
+                continue
+            b = pair[right].to_numpy(dtype=float)
+            if len(a) < 3:
+                value = "n<3"
+            elif np.ptp(a) == 0 or np.ptp(b) == 0:
+                value = "constant"
+            else:
+                value = float(np.corrcoef(a, b)[0, 1])
+            matrix.loc[left, right] = value
+    return matrix
+
+
+def run_simple_fold(fd: FoldData, cfg: RunConfig) -> dict:
+    """Half-train discovery, half-train identification, and compact OOS metrics."""
+    frame = fd.frames["decoy40"] if cfg.feature_set == "decoy40" else fd.frames["_base"][FEATURE_SETS[cfg.feature_set]]
+    F = frame.to_numpy(dtype=float)
+    T = len(F)
+    seg = fd.seg
+    tr, te = np.flatnonzero(seg == 0), np.flatnonzero(seg == 2)
+    if len(tr) < 4 or not len(te):
+        return dict(fold=fd.fold, skipped="too few train or test rows", expectancy=pd.DataFrame(),
+                    persistence=pd.DataFrame(), parity=pd.DataFrame(), correlation=pd.DataFrame())
+
+    discovery_n = max(2, len(tr) // 2)
+    rr_df, vol = stable_rr_targets(fd.mid, cfg.horizons, cfg.vol_window)
+    h = cfg.trade_horizon
+    rr = rr_df[f"rr_{h}"].to_numpy(dtype=float)
+    exit_spread = np.full(T, np.nan)
+    exit_spread[:-h] = fd.spread[h:]
+    cost = ((fd.spread + exit_spread) / 2 + 2 * cfg.fee_bps * 1e-4 * fd.mid) / (vol * math.sqrt(h))
+    rejected_costs = int(np.sum(np.isfinite(cost) & ((cost < 0) | (cost > cfg.max_cost_rr))))
+    cost = np.where(np.isfinite(cost) & (cost >= 0) & (cost <= cfg.max_cost_rr), cost, np.nan)
+    finite_cost = cost[np.isfinite(cost)]
+    cost_diag = ({f"p{p}": float(x) for p, x in zip((50, 99, 99.9, 100),
+                  np.percentile(finite_cost, (50, 99, 99.9, 100))) } if len(finite_cost) else {})
+
+    labels, _ = discover_regimes(frame, seg, cfg, n_tr_fit_end=discovery_n, truth=fd.truth)
+    ident = tr[discovery_n:]
+    ident_runs = runs_of(labels, int(ident[0]), int(tr[-1]) + 1) if len(ident) else []
+    counts: dict[str, int] = {}
+    for s, e, k in ident_runs:
+        if e - s >= cfg.min_episode_len:
+            counts[k] = counts.get(k, 0) + 1
+    recurring = {k for k, n in counts.items() if n >= 2}
+
+    experts: dict[str, Expert] = {}
+    ident_mask = np.zeros(T, dtype=bool)
+    ident_mask[ident] = True
+    for k in sorted(recurring):
+        train_rows = ident_mask & (labels == k) & np.isfinite(rr)
+        if train_rows.sum() < cfg.min_expert_rows:
+            continue
+        expert = fit_expert(F[train_rows], rr[train_rows], cfg.ridge_lambda, cfg.entry_quantile)
+        if expert is not None:
+            experts[k] = expert
+
+    episodes = [(s, e, k) for s, e, k in runs_of(labels, int(te[0]), int(te[-1]) + 1)
+                if e - s >= cfg.min_episode_len and k in experts]
+    cell_rows = []
+    predictions = {k: expert.predict(F) for k, expert in experts.items()}
+    for ep, (s, e, assigned) in enumerate(episodes):
+        rows = np.arange(s, e)
+        for expert_id, expert in experts.items():
+            take, net, _ = trade_rows(predictions[expert_id], expert.thr, rr, cost, rows, h)
+            if len(net):
+                cell_rows.append(dict(ep=ep, assigned_latent=assigned, expert_latent=expert_id,
+                                      n_trades=len(net), rr_net=float(net.mean())))
+    cells = pd.DataFrame(cell_rows)
+    if len(cells):
+        weighted = cells.assign(weighted_rr=cells["rr_net"] * cells["n_trades"])
+        grouped = weighted.groupby(["expert_latent", "assigned_latent"], sort=True).agg(
+            weighted_rr=("weighted_rr", "sum"), trades=("n_trades", "sum"))
+        parity = (grouped["weighted_rr"] / grouped["trades"]).unstack("assigned_latent")
+        correlation = _episode_correlation(cells)
+    else:
+        parity = pd.DataFrame()
+        correlation = pd.DataFrame()
+
+    expectancy_rows = []
+    for k in sorted(experts):
+        own = cells[(cells["expert_latent"] == k) & (cells["assigned_latent"] == k)] if len(cells) else pd.DataFrame()
+        if own.empty:
+            continue
+        means = own["rr_net"].to_numpy(dtype=float) if len(own) else np.array([])
+        weights = own["n_trades"].to_numpy(dtype=float) if len(own) else np.array([])
+        expectancy_rows.append(dict(
+            latent=k, episodes=len(own), trades=int(weights.sum()) if len(weights) else 0,
+            expectancy=float(np.average(means, weights=weights)) if len(means) else np.nan,
+            cvar005=_tail_average(means, upper=False), cvar095=_tail_average(means, upper=True)))
+    expectancy = pd.DataFrame(expectancy_rows)
+
+    duration_rows = []
+    duration_runs = [(s, e, k) for s, e, k in runs_of(labels, int(te[0]), int(te[-1]) + 1)
+                     if e - s >= cfg.min_episode_len and k in experts]
+    for k in sorted(experts):
+        subset = [(s, e) for s, e, label in duration_runs if label == k]
+        if not subset:
+            continue
+        row_durations = np.asarray([e - s for s, e in subset], dtype=float)
+        sec_durations = np.asarray([fd.ts_sec[e - 1] - fd.ts_sec[s] for s, e in subset], dtype=float)
+        duration_rows.append(dict(
+            latent=k, episodes=len(subset), mean_duration_rows=float(row_durations.mean()) if len(row_durations) else np.nan,
+            cvar005_rows=_tail_average(row_durations, upper=False), cvar095_rows=_tail_average(row_durations, upper=True),
+            mean_duration_sec=float(sec_durations.mean()) if len(sec_durations) else np.nan,
+            cvar005_sec=_tail_average(sec_durations, upper=False), cvar095_sec=_tail_average(sec_durations, upper=True)))
+
+    return dict(fold=fd.fold, discovery_rows=discovery_n, identification_rows=len(ident),
+                recurring_latents=sorted(experts), expectancy=expectancy,
+                persistence=pd.DataFrame(duration_rows), parity=parity, correlation=correlation,
+                cost_percentiles=cost_diag, rejected_costs=rejected_costs,
+                vol_filtered_rows=int((~np.isfinite(vol)).sum()),
+                eligible_test_rows=int(np.sum(np.isfinite(rr[te]) & np.isfinite(cost[te]))))
+
+
+def run_simple_study(data: DataConfig, runs: list[RunConfig], checkpoint_path: str,
+                     verbose: bool = True) -> dict:
+    """Run and checkpoint each encoder/segmenter/fold independently for safe resume."""
+    if data.loader is None:
+        from ...exchange.loader import load_L2
+        data = replace(data, loader=load_L2)
+    key = repr(({k: v for k, v in vars(data).items() if k != "loader"}, runs))
+    results = {r.name: [] for r in runs}
+    if os.path.exists(checkpoint_path):
+        with open(checkpoint_path, "rb") as fh:
+            saved = pickle.load(fh)
+        if saved.get("key") != key:
+            raise ValueError(f"Checkpoint {checkpoint_path} belongs to different settings; choose another path")
+        results = {name: [x for x in saved.get("results", {}).get(name, []) if "error" not in x]
+                   for name in results}
+        if verbose:
+            print(f"Resuming {sum(map(len, results.values()))} completed run-folds from {checkpoint_path}")
+
+    def checkpoint():
+        parent = os.path.dirname(os.path.abspath(checkpoint_path))
+        os.makedirs(parent, exist_ok=True)
+        temp = checkpoint_path + ".tmp"
+        with open(temp, "wb") as fh:
+            pickle.dump({"key": key, "results": results}, fh, protocol=pickle.HIGHEST_PROTOCOL)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(temp, checkpoint_path)
+
+    for fold in range(data.n_folds):
+        if all(any(x.get("fold") == fold for x in results[r.name]) for r in runs):
+            continue
+        t0 = time.time()
+        fd = load_fold(data.loader, fold, data)
+        if verbose:
+            print(f"fold {fold}: {fd.meta['rows']} rows after warm-up/decimation ({time.time() - t0:.1f}s)")
+        if not len(fd.seg) or not np.any(fd.seg == 0) or not np.any(fd.seg == 2):
+            reason = "no usable rows" if not len(fd.seg) else "missing train or test rows"
+            if verbose:
+                print(f"fold {fold}: skipped ({reason})")
+            for run in runs:
+                results[run.name].append(dict(fold=fold, skipped=reason, expectancy=pd.DataFrame(),
+                                              persistence=pd.DataFrame(), parity=pd.DataFrame(),
+                                              correlation=pd.DataFrame()))
+            checkpoint()
+            del fd
+            gc.collect()
+            continue
+        for run_idx, run in enumerate(runs):
+            if any(x.get("fold") == fold for x in results[run.name]):
+                continue
+            try:
+                result = run_simple_fold(fd, run)
+                if verbose:
+                    if run_idx == 0:
+                        p = result.get("cost_percentiles", {})
+                        if p:
+                            print(f"  accepted cost RR: p50={p['p50']:.4g}, p99={p['p99']:.4g}, "
+                                  f"p99.9={p['p99.9']:.4g}, max={p['p100']:.4g}")
+                        else:
+                            print("  accepted cost RR: no eligible rows")
+                        print(f"  volatility-filtered rows={result.get('vol_filtered_rows', 0)}, "
+                              f"cost-rejected rows={result.get('rejected_costs', 0)}")
+                    print(f"  [{run.name}] recurring train latents={len(result.get('recurring_latents', []))}; "
+                          f"test expectancy rows={len(result.get('expectancy', []))}")
+                results[run.name].append(result)
+            except Exception as exc:
+                print(f"  [{run.name}] fold {fold} FAILED: {type(exc).__name__}: {exc}")
+                results[run.name].append(dict(fold=fold, error=str(exc), expectancy=pd.DataFrame(),
+                                              persistence=pd.DataFrame(), parity=pd.DataFrame(),
+                                              correlation=pd.DataFrame()))
+            checkpoint()
+            gc.collect()
+        del fd
+        gc.collect()
+    return {r.name: dict(cfg=r, folds=results[r.name]) for r in runs}
 
 
 # ----------------------------------------------------------------------------------------------
