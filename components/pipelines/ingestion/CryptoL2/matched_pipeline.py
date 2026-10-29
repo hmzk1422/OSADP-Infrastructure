@@ -6,13 +6,19 @@ import argparse
 from pathlib import Path
 from typing import Optional
 
+import logging
 import components.pipelines.ingestion.CryptoL2.datapaths as paths
 from components.pipelines.event_merger.matched.merge import run_merge
-from components.pipelines.event_merger.matched.parquet import fetch_source_data
+from components.pipelines.event_merger.matched.parquet import (
+    fetch_source_data,
+    pipeline_work_dir,
+)
 from components.pipelines.event_merger.matched.snapshots import (
     build_day_start_snapshots,
     build_per_row_book_state,
 )
+
+logger = logging.getLogger("matched_pipeline")
 
 
 def main(argv: Optional[list[str]] = None) -> int:
@@ -38,6 +44,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         root=root, symbol=symbol, start=args.start, end=args.end,
         lob_levels=args.lob_levels, tick_size=args.tick_size,
     )
+    merged_days: list[str] = []
+    failed_days: list[str] = []
     for day in sorted(
         set(paths.binance_parquet_days(root, symbol, "aggTrades"))
         & set(paths.binance_parquet_days(root, symbol, "bookDepth"))
@@ -45,11 +53,19 @@ def main(argv: Optional[list[str]] = None) -> int:
     ):
         if not (args.start <= day <= args.end):
             continue
-        run_merge(
-            root=root, symbol=symbol, source=args.source, date=day,
-            hour=None, lob_levels=args.lob_levels,
-            keep_work_inputs=args.keep_work_inputs,
-        )
+        try:
+            run_merge(
+                root=root, symbol=symbol, source=args.source, date=day,
+                hour=None, lob_levels=args.lob_levels,
+                keep_work_inputs=args.keep_work_inputs,
+            )
+            merged_days.append(day)
+        except Exception as exc:  # isolate failures by date: one bad hour must not kill the run
+            logger.exception("merged %s failed: %s", day, exc)
+            failed_days.append(day)
+            continue
+    if failed_days and not merged_days:
+        return 1
     return 0
 
 

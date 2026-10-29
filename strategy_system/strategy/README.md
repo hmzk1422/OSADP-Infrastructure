@@ -28,3 +28,9 @@ NOTE:
     - compute_feature.rs --> purely for computing features
     - state_builder.rs --> rules of strategy, building data (ex: triple barrier)
     - research.pdf --> to document mathematically how the edge works.
+
+## Notes
+[PAUSED] Mixture of Experts 
+[PAUSED] Volatility Decay Capture
+[APPROVED] Orderflow Mean Reversion
+[] Statistical Arbitrage

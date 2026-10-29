@@ -143,31 +143,34 @@ def normalize_hour(
         }
 
     before = _stats(src)
-
-    expected = pl.col("prev_final_update_id") + 1
-    rewritten = pl.col("first_update_id")
-    expression = (
-        pl.when(pl.col("prev_final_update_id").is_not_null())
-        .then(expected)
-        .otherwise(rewritten)
-        .cast(pl.Int64)
-        .alias("first_update_id")
-    )
-
     dst.parent.mkdir(parents=True, exist_ok=True)
     temp = dst.with_name(f".{dst.name}.tmp.parquet")
     if temp.exists():
         temp.unlink()
 
     try:
-        (
-            pl.scan_parquet(str(src))
-            .with_columns(expression)
-            .sink_parquet(str(temp))
-        )
-    except Exception:  # pragma: no cover - engine fallback
-        logger.warning("streaming sink failed; falling back to eager rewrite")
-        pl.read_parquet(str(src)).with_columns(expression).write_parquet(str(temp))
+        # Keep Arrow's ordinary UTF-8 strings. Polars writes String columns as
+        # LargeUtf8; lob_replay's Arrow reader expects Utf8 and rejects those
+        # normalized files. A direct Arrow rewrite preserves the input schema.
+        import pyarrow as pa
+        import pyarrow.compute as pc
+        import pyarrow.parquet as pq
+
+        table = pq.read_table(src)
+        first_idx = table.schema.get_field_index("first_update_id")
+        prev = table.column("prev_final_update_id")
+        first = table.column("first_update_id")
+        expected = pc.add(prev, pa.scalar(1, type=prev.type))
+        normalized = pc.if_else(pc.is_valid(prev), expected, first)
+        table = table.set_column(first_idx, table.schema.field(first_idx), normalized)
+        # CryptoHFTData orderbook files are grouped by price bands rather than
+        # exchange event time. Replay requires every event's price levels to
+        # be contiguous and chronological; order update batches by final ID.
+        table = table.sort_by([("final_update_id", "ascending"), ("event_time", "ascending")])
+        pq.write_table(table, temp, compression="zstd", use_dictionary=False)
+    except Exception:
+        temp.unlink(missing_ok=True)
+        raise
     temp.replace(dst)
 
     after = _stats(dst)

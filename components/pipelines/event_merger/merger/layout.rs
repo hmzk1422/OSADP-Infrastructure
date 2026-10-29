@@ -50,7 +50,6 @@ fn first_matching_file(root: &std::path::Path, date: &str, hour: u32) -> Option<
             let name = path.file_name().and_then(|value| value.to_str()).unwrap_or_default();
             if name == format!("{hh}.parquet")
                 || name == format!("{hh}_every_event.parquet")
-                || name.ends_with("_every_event.parquet")
                 || name.contains(&format!("{date}_{hh}"))
                 || name.contains(&format!("{date}-{hh}"))
                 || name.contains(&format!("{date}_{date}_{hh}-{hh}"))

@@ -78,8 +78,9 @@ NOISE_IDS = {"-1", "-1.0", "noise", "nan", "None", "NaN"}
 
 
 def _as_labels(ids) -> np.ndarray:
-    labels = pd.Series(np.asarray(ids)).astype(str)
-    return labels.where(~labels.isin(NOISE_IDS), "null").to_numpy(dtype=object)
+    labels = pd.Series(np.asarray(ids, dtype=object)).astype("string")
+    labels = labels.mask(labels.isna() | labels.isin(NOISE_IDS), "null")
+    return labels.to_numpy(dtype=object)
 
 
 def _level(side: str, kind: str, k: int) -> str:
@@ -94,18 +95,39 @@ def prepare_l2(raw: pd.DataFrame) -> tuple[pd.DataFrame, int]:
     ``quantity`` is zeroed elsewhere.  Without this, all trade-flow features are inflated and autocorrelated.
     Returns (frame, number_of_leading_rows_dropped).
     """
-    df = raw.reset_index(drop=True).ffill()
+    raw = raw.reset_index(drop=True)
+    # Keep the row-level availability signal before ffill. Once files with no
+    # book snapshots are concatenated, ffill alone would carry an old quote
+    # across the entire file and make volatility appear identically zero.
+    book_present = (pd.to_numeric(raw["best_bid_price"], errors="coerce").notna() &
+                    pd.to_numeric(raw["best_ask_price"], errors="coerce").notna()).to_numpy()
+    df = raw.ffill()
     core = ["best_bid_price", "best_ask_price", "best_bid_qty", "best_ask_qty", "price", "is_buyer_maker"]
     first = int(df[core].notna().all(axis=1).to_numpy().argmax())
     df = df.iloc[first:].reset_index(drop=True)
+    book_present = book_present[first:]
     tid = df["agg_trade_id"]
     new_trade = (tid.ne(tid.shift()) & tid.notna())
     new_trade.iloc[0] = False
     df["new_trade"] = new_trade.to_numpy()
     df["quantity"] = pd.to_numeric(df["quantity"], errors="coerce").where(new_trade, 0.0)
     df["is_buyer_maker"] = df["is_buyer_maker"].astype(float).astype(bool)
-    if "mid_price" not in df or df["mid_price"].isna().any():
-        df["mid_price"] = (df["best_bid_price"] + df["best_ask_price"]) / 2
+    # Cached mid_price can be stale even when fully populated. Use current
+    # quotes when available; bookless rows use the causally ffilled trade
+    # price instead of a quote carried across an entire bookless file.
+    bid = pd.to_numeric(df["best_bid_price"], errors="coerce")
+    ask = pd.to_numeric(df["best_ask_price"], errors="coerce")
+    quote_mid = (bid + ask) / 2
+    valid_quote = book_present & np.isfinite(quote_mid) & (bid > 0) & (ask >= bid)
+    df["_book_available"] = valid_quote
+    trade_mid = pd.to_numeric(df["price"], errors="coerce")
+    df["mid_price"] = quote_mid.where(valid_quote, trade_mid)
+    # Do not let the global ffill above invent a book state for a whole file
+    # that had no replayed LOB rows. The trade price remains usable as the
+    # forecast reference, while book-derived features are neutralized below.
+    book_cols = [c for c in df.columns if c in ("best_bid_price", "best_ask_price")
+                 or c.startswith(("bid_price_", "bid_qty_", "ask_price_", "ask_qty_", "best_bid_qty", "best_ask_qty"))]
+    df.loc[~valid_quote, book_cols] = np.nan
     df["price_close"] = df["price"]
     df["best_bid_price_close"] = df["best_bid_price"]
     df["best_ask_price_close"] = df["best_ask_price"]
@@ -180,11 +202,35 @@ def build_fold_features(raw: pd.DataFrame, seg_raw: np.ndarray, feature_sets=("1
         ts_sec = (ts - ts.iloc[0]).dt.total_seconds().to_numpy()
     else:
         ts_sec = pd.to_numeric(ts, errors="coerce").to_numpy(dtype=float) / {"ms": 1e3, "s": 1.0, "us": 1e6, "ns": 1e9}[ts_unit]
+    # Pre-extract df-only columns so the full-resolution frame can be freed
+    # immediately after add_orderflow deep-copies it — otherwise both the
+    # original (~1.5 GiB) and the featurized copy (~2.6 GiB) live at once.
+    new_trade = df["new_trade"].to_numpy()
+    mid_price = df["mid_price"].to_numpy()
+    book_available = df["_book_available"].to_numpy(dtype=bool)
+    regime_truth = df["regime_truth"].to_numpy() if "regime_truth" in df else None
     out, feat19 = add_orderflow(df, windows=(1, 5, 20, 100), baseline_window=baseline_window, min_periods=min_periods)
-    out["new_trade"] = df["new_trade"].to_numpy()
+    del raw, df                                          # free original full-resolution frames (~1.5 GiB)
+    out["new_trade"] = new_trade
+    # add_orderflow reconstructs mid from the last ffilled quote. Restore the
+    # row-aware mid chosen above so bookless files use their trade-price path.
+    out["mid_price"] = mid_price
+    with np.errstate(divide="ignore", invalid="ignore"):
+        flow_efficiency = out["mid_price"].diff(5) / (
+            out["aggressive_signed_notional"].rolling(5, min_periods=1).sum().abs() + 1.0)
+    out["flow_price_efficiency_z_5"] = _robust_zscore(
+        flow_efficiency, baseline_window=baseline_window, min_periods=min_periods)
     allf = out[feat19].copy()
     for name, col in _extra_features(out, baseline_window, min_periods).items():
         allf[name] = col
+    book_dependent = [c for c in allf.columns if c.startswith((
+        "spread_bps_z", "queue_", "microprice_", "ofi_", "depth_imbalance_",
+        "bid_depth_change_", "ask_depth_change_", "spread_mean_", "touch_concentration",
+        "bid_dist_", "ask_dist_", "slope_imbalance", "wdepth_imbalance", "imb5_change_",
+        "total_depth_", "bid_depth_", "ask_depth_"))]
+    book_missing = ~book_available
+    if book_missing.any() and book_dependent:
+        allf.loc[book_missing, book_dependent] = 0.0
     for c in allf.columns:
         if c in ZERO_FILL:                       # no trade in the window == no net flow, not "unknown"
             allf[c] = allf[c].fillna(0.0)
@@ -194,11 +240,13 @@ def build_fold_features(raw: pd.DataFrame, seg_raw: np.ndarray, feature_sets=("1
     allf = allf.iloc[warm:].replace([np.inf, -np.inf], np.nan).ffill().fillna(0.0)
     keep = slice(None, None, decimate)
     allf = allf.iloc[keep].reset_index(drop=True)
-    mid = out["mid_price"].to_numpy()[warm:][keep]
-    spread = (out["best_ask_price"] - out["best_bid_price"]).to_numpy()[warm:][keep]
+    mid = mid_price[warm:][keep]
+    _ask = np.where(book_available, out["best_ask_price"].to_numpy(dtype=float), np.nan)
+    _bid = np.where(book_available, out["best_bid_price"].to_numpy(dtype=float), np.nan)
+    spread = (_ask - _bid)[warm:][keep]
     ts_sec = ts_sec[warm:][keep]
     seg = seg_raw[warm:][keep]
-    truth = df["regime_truth"].to_numpy()[warm:][keep] if "regime_truth" in df else None
+    truth = regime_truth[warm:][keep] if regime_truth is not None else None
     frames = {"_base": allf}
     n = len(allf)
     if "decoy40" in feature_sets:
@@ -263,6 +311,7 @@ class RunConfig:
     n_latents: int = 6
     min_dwell: int = 50
     learn_novel_oos: bool = False   # False: test regimes are limited to latents seen in train
+    min_latents: int = 2            # HDBSCAN is re-fitted with smaller clusters until it yields >= this many latents
     standardize_embeddings: bool = True   # z-score embeddings with TRAIN mean/std; segmenter thresholds assume unit scale
     metrics: tuple = ("cosine", "geometric", "tdmi", "infonet")
     # InfoNet objective
@@ -277,6 +326,7 @@ class RunConfig:
     tdmi_bins: int = 8
     tdmi_surrogates: int = 19
     # strategy
+    strategy: str = "rr"               # "rr" legacy trade evaluation or "forecast_mae"
     trade_horizon: int = 16
     entry_quantile: float = 0.6
     ridge_lambda: float = 0.1
@@ -294,6 +344,51 @@ class RunConfig:
     n_placebo: int = 20
     vol_window: int = 100
     seed: int = 0
+
+
+@dataclass
+class ForecastExpert:
+    """Standardized ridge forecaster with one output per forward horizon."""
+    mu: np.ndarray
+    sd: np.ndarray
+    w: np.ndarray
+    y_mean: np.ndarray
+
+    def predict(self, X: np.ndarray) -> np.ndarray:
+        return ((X - self.mu) / self.sd) @ self.w + self.y_mean
+
+
+def forward_return_targets(mid: np.ndarray, horizons=(1, 2, 3, 4, 5), scale: float = 1e4) -> pd.DataFrame:
+    """Cumulative log returns from t to t+h, in basis points; no volatility scaling."""
+    p = np.asarray(mid, dtype=float)
+    targets = {}
+    valid_mid = np.isfinite(p) & (p > 0)
+    for h in horizons:
+        y = np.full(len(p), np.nan, dtype=float)
+        if h > 0 and h < len(p):
+            ok = valid_mid[:-h] & valid_mid[h:]
+            y[:-h][ok] = scale * np.log(p[h:][ok] / p[:-h][ok])
+        targets[f"logret_{h}"] = y
+    return pd.DataFrame(targets)
+
+
+def fit_forecast_expert(X: np.ndarray, Y: np.ndarray, lam: float = 0.1,
+                        min_rows: int = 50) -> ForecastExpert | None:
+    """Fit a multi-output ridge forecaster, retaining rows finite at every horizon."""
+    X, Y = np.asarray(X, float), np.asarray(Y, float)
+    if Y.ndim == 1:
+        Y = Y[:, None]
+    ok = np.isfinite(X).all(axis=1) & np.isfinite(Y).all(axis=1)
+    if int(ok.sum()) < min_rows:
+        return None
+    X, Y = X[ok], Y[ok]
+    mu, sd = X.mean(0), X.std(0)
+    sd = np.where(sd > 1e-12, sd, 1.0)
+    Z = (X - mu) / sd
+    y_mean = Y.mean(0)
+    n, d = Z.shape
+    w = np.linalg.solve(Z.T @ Z / n + lam * np.eye(d), Z.T @ (Y - y_mean) / n)
+    return ForecastExpert(mu, sd, w, y_mean)
 
 
 def auto_min_features(d: int, alpha: float, tail: float = 0.05) -> int:
@@ -379,29 +474,34 @@ def discover_regimes(frame: pd.DataFrame, seg: np.ndarray, cfg: RunConfig, n_tr_
         initial_size = int(backend_params.get("min_cluster_size", 200))
         sizes = list(dict.fromkeys([initial_size, max(20, initial_size // 2),
                                     max(10, initial_size // 5), 10]))
-        sg = None
+        sg, pred_tr, best_n, used = None, None, -1, initial_size
         for min_size in sizes:
             retry_kw = {**sg_kw, "backend_params": {**backend_params, "min_cluster_size": min_size}}
             candidate = make_segmenter(sg_name, **retry_kw)
             try:
                 candidate.fit(e_fit)
-                sg = candidate
-                if min_size != initial_size:
-                    print(f"  [{cfg.name}] HDBSCAN found no clusters at min_cluster_size={initial_size}; retry succeeded at {min_size}")
-                break
+                pred_try = candidate.predict(e_tr)
             except ValueError as exc:
                 if "found no clusters" not in str(exc).lower():
                     raise
+                continue
+            n_lat = len(set(_as_labels(pred_try["latent_id"].to_numpy())) - {"null"})
+            if n_lat > best_n:                       # keep the most informative solution seen so far
+                sg, pred_tr, best_n, used = candidate, pred_try, n_lat, min_size
+            if n_lat >= cfg.min_latents:             # a single cluster cannot separate regimes: keep shrinking
+                break
         if sg is None:
             labels[seg == 1] = "gap"
             print(f"  [{cfg.name}]: HDBSCAN found no clusters after retries (min_cluster_size={sizes}); recording null regimes")
             return labels, emb
+        if used != initial_size or best_n < cfg.min_latents:
+            print(f"  [{cfg.name}] HDBSCAN used min_cluster_size={used} -> {best_n} latent(s) "
+                  f"(wanted >= {cfg.min_latents}, started at {initial_size})")
     else:
         sg = make_segmenter(sg_name, **sg_kw)
-    if sg.backend == "custom":
-        pred_tr = sg.predict(e_tr)                   # online learning pass == fit
-    else:
-        if cfg.segmenter != "hdbscan":
+        pred_tr = None
+    if pred_tr is None:
+        if sg.backend != "custom":                   # custom backends learn online inside predict()
             sg.fit(e_fit)
         pred_tr = sg.predict(e_tr)
     labels[e_tr.index.to_numpy()] = _as_labels(pred_tr["latent_id"].to_numpy())
@@ -783,6 +883,8 @@ def _episode_correlation(cells: pd.DataFrame) -> pd.DataFrame:
 
 def run_simple_fold(fd: FoldData, cfg: RunConfig) -> dict:
     """Half-train discovery, half-train identification, and compact OOS metrics."""
+    if cfg.strategy == "forecast_mae":
+        return run_forecast_fold(fd, cfg)
     frame = fd.frames["decoy40"] if cfg.feature_set == "decoy40" else fd.frames["_base"][FEATURE_SETS[cfg.feature_set]]
     F = frame.to_numpy(dtype=float)
     T = len(F)
@@ -790,22 +892,32 @@ def run_simple_fold(fd: FoldData, cfg: RunConfig) -> dict:
     tr, te = np.flatnonzero(seg == 0), np.flatnonzero(seg == 2)
     if len(tr) < 4 or not len(te):
         return dict(fold=fd.fold, skipped="too few train or test rows", expectancy=pd.DataFrame(),
-                    persistence=pd.DataFrame(), parity=pd.DataFrame(), correlation=pd.DataFrame())
+                    persistence=pd.DataFrame(), parity=pd.DataFrame(), correlation=pd.DataFrame(),
+                    cells=pd.DataFrame(), sim_pairs=pd.DataFrame())
 
     discovery_n = max(2, len(tr) // 2)
     rr_df, vol = stable_rr_targets(fd.mid, cfg.horizons, cfg.vol_window)
     h = cfg.trade_horizon
-    rr = rr_df[f"rr_{h}"].to_numpy(dtype=float)
+    rr = rr_df[f"rr_{h}"].to_numpy(dtype=float, copy=True)
+    # A training target at t reads price[t+h]. Purge targets whose forward
+    # interval leaves the training segment, including into a gap or test set.
+    train_rows = seg == 0
+    future_train = np.zeros(T, dtype=bool)
+    if h < T:
+        window_counts = np.convolve(train_rows.astype(np.int8), np.ones(h + 1, dtype=np.int8), mode="valid")
+        future_train[:T - h] = window_counts[:T - h] == h + 1
+    rr[train_rows & ~future_train] = np.nan
     exit_spread = np.full(T, np.nan)
     exit_spread[:-h] = fd.spread[h:]
     cost = ((fd.spread + exit_spread) / 2 + 2 * cfg.fee_bps * 1e-4 * fd.mid) / (vol * math.sqrt(h))
+    cost_raw = cost.copy()
     rejected_costs = int(np.sum(np.isfinite(cost) & ((cost < 0) | (cost > cfg.max_cost_rr))))
     cost = np.where(np.isfinite(cost) & (cost >= 0) & (cost <= cfg.max_cost_rr), cost, np.nan)
     finite_cost = cost[np.isfinite(cost)]
     cost_diag = ({f"p{p}": float(x) for p, x in zip((50, 99, 99.9, 100),
                   np.percentile(finite_cost, (50, 99, 99.9, 100))) } if len(finite_cost) else {})
 
-    labels, _ = discover_regimes(frame, seg, cfg, n_tr_fit_end=discovery_n, truth=fd.truth)
+    labels, emb_df = discover_regimes(frame, seg, cfg, n_tr_fit_end=discovery_n, truth=fd.truth)
     ident = tr[discovery_n:]
     ident_runs = runs_of(labels, int(ident[0]), int(tr[-1]) + 1) if len(ident) else []
     counts: dict[str, int] = {}
@@ -834,9 +946,44 @@ def run_simple_fold(fd: FoldData, cfg: RunConfig) -> dict:
         for expert_id, expert in experts.items():
             take, net, _ = trade_rows(predictions[expert_id], expert.thr, rr, cost, rows, h)
             if len(net):
-                cell_rows.append(dict(ep=ep, assigned_latent=assigned, expert_latent=expert_id,
-                                      n_trades=len(net), rr_net=float(net.mean())))
+                cell_rows.append(dict(ep=ep, start=s, end=e, assigned_latent=assigned, expert_latent=expert_id,
+                                      n_trades=len(net), rr_net=float(net.mean()),
+                                      rr_sd=float(net.std(ddof=1)) if len(net) > 1 else np.nan))
     cells = pd.DataFrame(cell_rows)
+
+    # ---- similarity of every sampled test episode to every latent's reference (train identification half) ----
+    sim_rows = []
+    if cfg.metrics and experts and episodes:
+        try:
+            ok_tr = np.isfinite(F[tr]).all(axis=1)
+            mu_z, sd_z = F[tr][ok_tr].mean(0), F[tr][ok_tr].std(0)
+            sd_z = np.where(sd_z > 1e-12, sd_z, 1.0)
+            sim = Similarity(cfg, F, (F - mu_z) / sd_z, emb_df.to_numpy(dtype=float), rr_df.to_numpy(dtype=float))
+            by_latent: dict = {}
+            for s, e, k in ident_runs:
+                if k in experts and e - s >= cfg.min_episode_len:
+                    by_latent.setdefault(k, []).append((s, e))
+            refs = {}
+            for k, v in by_latent.items():
+                try:
+                    refs[k] = sim.build_ref(v)
+                except Exception as exc:
+                    print(f"  [{cfg.name}] fold {fd.fold}: reference for {k} failed ({type(exc).__name__}: {exc})")
+            pick_rng = np.random.default_rng(cfg.seed + fd.fold)
+            pick = set(pick_rng.choice(len(episodes), min(len(episodes), cfg.max_test_episodes),
+                                       replace=False).tolist())
+            for ep, (s, e, assigned) in enumerate(episodes):
+                if ep not in pick:
+                    continue
+                try:
+                    desc = sim.describe(s, e)
+                except Exception:
+                    continue
+                for j, ref in refs.items():
+                    sim_rows.append(dict(ep=ep, assigned_latent=assigned, ref_latent=j, **sim.sim(desc, ref)))
+        except Exception as exc:
+            print(f"  [{cfg.name}] fold {fd.fold}: similarity skipped ({type(exc).__name__}: {exc})")
+    sim_pairs = pd.DataFrame(sim_rows)
     if len(cells):
         weighted = cells.assign(weighted_rr=cells["rr_net"] * cells["n_trades"])
         grouped = weighted.groupby(["expert_latent", "assigned_latent"], sort=True).agg(
@@ -880,7 +1027,99 @@ def run_simple_fold(fd: FoldData, cfg: RunConfig) -> dict:
                 persistence=pd.DataFrame(duration_rows), parity=parity, correlation=correlation,
                 cost_percentiles=cost_diag, rejected_costs=rejected_costs,
                 vol_filtered_rows=int((~np.isfinite(vol)).sum()),
-                eligible_test_rows=int(np.sum(np.isfinite(rr[te]) & np.isfinite(cost[te]))))
+                eligible_test_rows=int(np.sum(np.isfinite(rr[te]) & np.isfinite(cost[te]))),
+                cells=cells, sim_pairs=sim_pairs,
+                health=dict(test_rows=int(len(te)), test_vol_nan=int((~np.isfinite(vol[te])).sum()),
+                            test_cost_rejected=int(np.sum(np.isfinite(cost_raw[te]) &
+                                                          ((cost_raw[te] < 0) | (cost_raw[te] > cfg.max_cost_rr)))),
+                            test_rr_nan=int((~np.isfinite(rr[te])).sum()), max_cost_rr=cfg.max_cost_rr))
+
+
+def run_forecast_fold(fd: FoldData, cfg: RunConfig) -> dict:
+    """Regime-conditioned multi-horizon forecasting, scored by out-of-sample MAE."""
+    frame = fd.frames["decoy40"] if cfg.feature_set == "decoy40" else fd.frames["_base"][FEATURE_SETS[cfg.feature_set]]
+    F = frame.to_numpy(dtype=float)
+    seg = np.asarray(fd.seg)
+    tr, te = np.flatnonzero(seg == 0), np.flatnonzero(seg == 2)
+    empty = dict(fold=fd.fold, forecast_metrics=pd.DataFrame(), forecast_cells=pd.DataFrame(),
+                 sim_pairs=pd.DataFrame())
+    if len(tr) < 4 or not len(te):
+        return dict(**empty, skipped="too few train or test rows")
+    horizons = tuple(int(h) for h in cfg.horizons)
+    if not horizons or min(horizons) <= 0:
+        raise ValueError("forecast horizons must be positive integers")
+    maxh = max(horizons)
+    Y = forward_return_targets(fd.mid, horizons).to_numpy(dtype=float)
+    labels, emb_df = discover_regimes(frame, seg, cfg, n_tr_fit_end=max(2, len(tr) // 2), truth=fd.truth)
+    ident_start = int(tr[len(tr) // 2])
+    train_end = int(tr[-1]) + 1
+    fit_rows = (np.arange(len(F)) >= ident_start) & (np.arange(len(F)) + maxh < train_end)
+    fit_rows &= seg == 0
+    # Require the entire forward path to remain in the training segment.
+    fit_rows &= np.isfinite(Y).all(axis=1)
+    experts: dict[str, ForecastExpert] = {}
+    for latent in sorted(set(labels[fit_rows]) - {"null", "gap"}):
+        mask = fit_rows & (labels == latent)
+        expert = fit_forecast_expert(F[mask], Y[mask], cfg.ridge_lambda, cfg.min_expert_rows)
+        if expert is not None:
+            experts[latent] = expert
+    global_expert = fit_forecast_expert(F[fit_rows], Y[fit_rows], cfg.ridge_lambda,
+                                        cfg.min_expert_rows)
+    eligible = np.zeros(len(F), dtype=bool)
+    eligible[te] = np.arange(len(te)) < max(len(te) - maxh, 0)
+    eligible &= np.isfinite(Y).all(axis=1)
+    test_rows = np.flatnonzero(eligible)
+    zero_mae = np.mean(np.abs(Y[test_rows]), axis=0) if len(test_rows) else np.full(len(horizons), np.nan)
+    global_pred = global_expert.predict(F[test_rows]) if global_expert is not None and len(test_rows) else None
+    global_mae = np.mean(np.abs(Y[test_rows] - global_pred), axis=0) if global_pred is not None else np.full(len(horizons), np.nan)
+    cell_rows, metric_rows = [], []
+    for expert_id, expert in experts.items():
+        pred = expert.predict(F[test_rows]) if len(test_rows) else np.empty((0, len(horizons)))
+        groups = sorted(set(labels[test_rows]) - {"null", "gap"})
+        for assigned in groups:
+            local = np.flatnonzero(labels[test_rows] == assigned)
+            if not len(local):
+                continue
+            actual = Y[test_rows[local]]
+            error = np.abs(actual - pred[local])
+            for col, horizon in enumerate(horizons):
+                base = float(np.mean(np.abs(actual[:, col])))
+                mae = float(np.mean(error[:, col]))
+                cell_rows.append(dict(fold=fd.fold, expert_latent=expert_id, assigned_latent=assigned,
+                                      own=(expert_id == assigned), horizon=horizon, n=len(local),
+                                      mae_bps=mae, zero_mae_bps=base,
+                                      skill_vs_zero=1.0 - mae / base if base > 0 else np.nan))
+        own = np.flatnonzero(labels[test_rows] == expert_id)
+        for col, horizon in enumerate(horizons):
+            mae = float(np.mean(np.abs(Y[test_rows[own], col] - pred[own, col]))) if len(own) else np.nan
+            own_zero_mae = float(np.mean(np.abs(Y[test_rows[own], col]))) if len(own) else np.nan
+            own_global_mae = (float(np.mean(np.abs(Y[test_rows[own], col] - global_pred[own, col])))
+                              if len(own) and global_pred is not None else np.nan)
+            metric_rows.append(dict(fold=fd.fold, expert_latent=expert_id, horizon=horizon, n=len(own),
+                                    mae_bps=mae,
+                                    zero_mae_bps=own_zero_mae,
+                                    global_mae_bps=own_global_mae,
+                                    skill_vs_zero=1.0 - mae / own_zero_mae if len(own) and own_zero_mae > 0 else np.nan,
+                                    skill_vs_global=1.0 - mae / own_global_mae
+                                    if len(own) and np.isfinite(own_global_mae) and own_global_mae > 0 else np.nan))
+    cells = pd.DataFrame(cell_rows)
+    metrics = pd.DataFrame(metric_rows)
+    if global_expert is not None:
+        global_rows = []
+        for col, horizon in enumerate(horizons):
+            global_rows.append(dict(fold=fd.fold, expert_latent="global", horizon=horizon, n=len(test_rows),
+                                    mae_bps=float(global_mae[col]), zero_mae_bps=float(zero_mae[col]),
+                                    global_mae_bps=float(global_mae[col]),
+                                    skill_vs_zero=1.0 - global_mae[col] / zero_mae[col] if zero_mae[col] > 0 else np.nan,
+                                    skill_vs_global=0.0))
+        metrics = pd.concat([metrics, pd.DataFrame(global_rows)], ignore_index=True)
+    print(f"  [{cfg.name}] fold {fd.fold}: forecast rows={len(test_rows)}, experts={len(experts)}, "
+          f"horizons={horizons}, scored by MAE (bps)")
+    return dict(fold=fd.fold, strategy="forecast_mae", horizons=horizons,
+                recurring_latents=sorted(experts), forecast_metrics=metrics,
+                forecast_cells=cells, sim_pairs=pd.DataFrame(),
+                health=dict(train_rows=len(tr), test_rows=len(te), forecast_test_rows=len(test_rows),
+                            train_target_rows=int(fit_rows.sum()), target_scale="cumulative log return, bps"))
 
 
 def run_simple_study(data: DataConfig, runs: list[RunConfig], checkpoint_path: str,
@@ -950,9 +1189,10 @@ def run_simple_study(data: DataConfig, runs: list[RunConfig], checkpoint_path: s
                 results[run.name].append(result)
             except Exception as exc:
                 print(f"  [{run.name}] fold {fold} FAILED: {type(exc).__name__}: {exc}")
-                results[run.name].append(dict(fold=fold, error=str(exc), expectancy=pd.DataFrame(),
+                results[run.name].append(dict(fold=fold, error=f"{type(exc).__name__}: {exc}", expectancy=pd.DataFrame(),
                                               persistence=pd.DataFrame(), parity=pd.DataFrame(),
-                                              correlation=pd.DataFrame()))
+                                              correlation=pd.DataFrame(), cells=pd.DataFrame(),
+                                              sim_pairs=pd.DataFrame()))
             checkpoint()
             gc.collect()
         del fd
@@ -1220,3 +1460,234 @@ def report(results: dict) -> None:
     print("\nREAD ME: InfoNet is ex-post and sign-blind; see sign_flip_rate_high_sim and the global/placebo arms before "
           "concluding anything from a high similarity score.  Episode-level RR has SE ~ 1/sqrt(n_trades): use tau/I2, "
           "not the raw spread, to judge consistency.")
+
+
+# ----------------------------------------------------------------------------------------------
+# 8. Final report: edge matrices, similarity-metric check, deviation summary
+# ----------------------------------------------------------------------------------------------
+ENC_NAMES = {"ts2vec": "TS2Vec", "tcn": "TCN", "vq-vae": "VQ-VAE"}
+SEG_NAMES = {"hdbscan": "HDBSCAN", "kmeans": "KNN/Kmeans"}
+_RULE = "-" * 96
+METRIC_NAMES = {"infonet": "InfoNET", "cosine": "Cosine", "tdmi": "TDMI", "geometric": "Geometric"}
+
+
+def _wmean_ci(rr, n, boot: int = 1000, seed: int = 0) -> tuple[float, float, float]:
+    """Trade-weighted mean of episode RR with a 95% bootstrap CI over EPISODES (NaN CI if < 3 episodes)."""
+    rr, n = np.asarray(rr, dtype=float), np.asarray(n, dtype=float)
+    m = float(np.average(rr, weights=n))
+    if len(rr) < 3:
+        return m, np.nan, np.nan
+    idx = np.random.default_rng(seed).integers(0, len(rr), (boot, len(rr)))
+    bm = (rr[idx] * n[idx]).sum(1) / n[idx].sum(1)
+    return m, float(np.percentile(bm, 2.5)), float(np.percentile(bm, 97.5))
+
+
+def _fmt_cell(m: float, lo: float, hi: float, own: bool) -> str:
+    s = f"{m:+.2f} +- [n<3]" if not np.isfinite(lo) else f"{m:+.2f} +- [{lo:+.2f}, {hi:+.2f}]"
+    return s + (" *" if own else "")
+
+
+def _edge_matrix(cells: pd.DataFrame) -> pd.DataFrame:
+    experts = sorted(cells["expert_latent"].unique())
+    assigned = sorted(cells["assigned_latent"].unique())
+    n_ep = cells.drop_duplicates("ep").groupby("assigned_latent").size()
+    table = pd.DataFrame("-", index=[f"{k} (model)" for k in experts],
+                         columns=[f"{a} (n={int(n_ep.get(a, 0))})" for a in assigned])
+    table.index.name = "model used / episodes"
+    for (j, a), g in cells.groupby(["expert_latent", "assigned_latent"]):
+        m, lo, hi = _wmean_ci(g["rr_net"], g["n_trades"])
+        table.loc[f"{j} (model)", f"{a} (n={int(n_ep.get(a, 0))})"] = _fmt_cell(m, lo, hi, j == a)
+    return table
+
+
+def _why_empty(f: dict) -> str:
+    if f.get("error"):
+        return f"error: {f['error']}"
+    if f.get("skipped"):
+        return f"skipped: {f['skipped']}"
+    if not f.get("recurring_latents"):
+        return ("no regime recurred (>= 2 episodes of >= min_episode_len rows) in the identification half with "
+                ">= min_expert_rows rows, so no expert could be fitted")
+    h = f.get("health", {})
+    return (f"{len(f['recurring_latents'])} expert(s) fitted but no tradable test trades: test rows={h.get('test_rows')}, "
+            f"volatility-filtered={h.get('test_vol_nan')}, cost>{h.get('max_cost_rr')}R rejected={h.get('test_cost_rejected')}, "
+            f"rows with valid RR and cost={f.get('eligible_test_rows')}")
+
+
+def _sd(x: np.ndarray) -> float:
+    return float(np.std(x, ddof=1)) if len(x) >= 3 else np.nan
+
+
+def _clean_sd(g: pd.DataFrame) -> float:
+    """SD of episode means minus the part explained by trade-count noise (rr_sd^2 / n_trades)."""
+    se2 = float(np.nanmean((g["rr_sd"] ** 2 / g["n_trades"]).to_numpy())) if g["rr_sd"].notna().any() else 0.0
+    return math.sqrt(max(0.0, float(np.var(g["rr_net"].to_numpy(), ddof=1)) - se2)) if len(g) >= 3 else np.nan
+
+
+def _wavg(vals, weights) -> float:
+    v, w = np.asarray(vals, dtype=float), np.asarray(weights, dtype=float)
+    ok = np.isfinite(v)
+    return float(np.average(v[ok], weights=w[ok])) if ok.any() else np.nan
+
+
+def run_deviation(run: dict, min_own_episodes: int = 10) -> dict:
+    """Edge deviation = SD of episode-level net RR/trade.
+
+    own   : expert k on test episodes assigned to regime k   (SD inside each fold x expert cell, episode-weighted)
+    cross : expert j on test episodes assigned to other regimes (SD inside each fold x expert, episode-weighted)
+    SD instead of max-min: a range grows with the number of episodes and is set by one outlier.
+    ``*_clean`` removes the share of the SD that is just trade-count noise.
+    """
+    own = dict(sd=[], clean=[], w=[]); cross = dict(sd=[], clean=[], w=[])
+    own_rr, own_n, cross_rr, cross_n = [], [], [], []
+    max_latents = 0
+    for f in run["folds"]:
+        c = f.get("cells")
+        if c is None or c.empty:
+            continue
+        max_latents = max(max_latents, c["expert_latent"].nunique())
+        for j, gj in c.groupby("expert_latent"):
+            o, x = gj[gj["assigned_latent"] == j], gj[gj["assigned_latent"] != j]
+            for g, bucket, rr_l, n_l in ((o, own, own_rr, own_n), (x, cross, cross_rr, cross_n)):
+                if len(g):
+                    rr_l.extend(g["rr_net"]); n_l.extend(g["n_trades"])
+                if len(g) >= 3:
+                    bucket["sd"].append(_sd(g["rr_net"].to_numpy())); bucket["clean"].append(_clean_sd(g)); bucket["w"].append(len(g))
+    res = dict(own_eps=len(own_rr), cross_eps=len(cross_rr), latents=max_latents,
+               own_exp=_wavg(own_rr, own_n) if own_rr else np.nan, cross_exp=_wavg(cross_rr, cross_n) if cross_rr else np.nan,
+               own_sd=_wavg(own["sd"], own["w"]), own_clean=_wavg(own["clean"], own["w"]),
+               cross_sd=_wavg(cross["sd"], cross["w"]), cross_clean=_wavg(cross["clean"], cross["w"]))
+    why = []
+    if max_latents < 2:
+        why.append(f"only {max_latents} regime(s) with an expert in any fold")
+    if res["own_eps"] < min_own_episodes:
+        why.append(f"only {res['own_eps']} own-regime episodes (< {min_own_episodes})")
+    if not np.isfinite(res["own_sd"]):
+        why.append("no expert/regime cell with >= 3 episodes")
+    res["eligible"], res["why"] = not why, "; ".join(why)
+    return res
+
+
+def run_similarity(run: dict) -> list[dict]:
+    """Per metric: is an episode more similar to ITS OWN latent's reference than to the other latents' references?"""
+    parts = [f["sim_pairs"].assign(fold=f["fold"]) for f in run["folds"]
+             if f.get("sim_pairs") is not None and len(f["sim_pairs"])]
+    if not parts:
+        return []
+    sp = pd.concat(parts, ignore_index=True)
+    rows = []
+    for m in run["cfg"].metrics:
+        if m not in sp:
+            continue
+        own_v, cross_v, hit, chance = [], [], [], []
+        for _, g in sp.dropna(subset=[m]).groupby(["fold", "ep"]):
+            same = g["ref_latent"] == g["assigned_latent"]
+            if not same.any() or same.all():
+                continue
+            own_v.append(float(g.loc[same, m].iloc[0])); cross_v.append(float(g.loc[~same, m].mean()))
+            hit.append(bool(g.loc[g[m].idxmax(), "ref_latent"] == g["assigned_latent"].iloc[0])); chance.append(1 / len(g))
+        if not own_v:
+            continue
+        gap = np.asarray(own_v) - np.asarray(cross_v)
+        gm, glo, ghi = boot_ci(gap)
+        rows.append(dict(metric=METRIC_NAMES.get(m, m), episodes=len(gap), own=float(np.mean(own_v)), other=float(np.mean(cross_v)),
+                         gap=gm, lo=glo, hi=ghi, top1=float(np.mean(hit)), chance=float(np.mean(chance))))
+    return rows
+
+
+def final_report(results: dict) -> str:
+    cfgs = [r.get("cfg") for r in results.values()]
+    if cfgs and all(getattr(c, "strategy", "rr") == "forecast_mae" for c in cfgs):
+        out = ["Forecast target: cumulative log return from t to t+h, in basis points.",
+               "Scoring: out-of-sample mean absolute error (MAE); lower is better.",
+               "Zero and global ridge forecasts are reported as baselines. Skill = 1 - model MAE / baseline MAE."]
+        for name, run in results.items():
+            out.append(f"\n{_RULE}\n{name}\n{_RULE}")
+            fold_results = []
+            for fold in run.get("folds", []):
+                fm = fold.get("forecast_metrics")
+                if fm is not None and len(fm):
+                    fold_results.append(fm)
+                    out.append(f"[fold {fold.get('fold')}]")
+                    show = fm[["expert_latent", "horizon", "n", "mae_bps", "zero_mae_bps", "global_mae_bps",
+                               "skill_vs_zero", "skill_vs_global"]]
+                    out.append(show.to_string(index=False, float_format=lambda x: f"{x:.4f}"))
+                else:
+                    out.append(f"[fold {fold.get('fold')}] no forecast rows: {fold.get('skipped', fold.get('error', 'no expert met minimum rows'))}")
+            if fold_results:
+                joined = pd.concat(fold_results, ignore_index=True)
+                out.append("\nAcross folds (mean by expert and horizon):")
+                out.append(joined.groupby(["expert_latent", "horizon"], as_index=False).agg(
+                    folds=("fold", "nunique"), rows=("n", "sum"), mae_bps=("mae_bps", "mean"),
+                    zero_mae_bps=("zero_mae_bps", "mean"), global_mae_bps=("global_mae_bps", "mean"),
+                    skill_vs_zero=("skill_vs_zero", "mean"), skill_vs_global=("skill_vs_global", "mean")
+                ).to_string(index=False, float_format=lambda x: f"{x:.4f}"))
+        return "\n".join(out)
+    out: list[str] = []
+    p = out.append
+    runs = {(r["cfg"].segmenter, r["cfg"].encoder): r for r in results.values()}
+    segs = [s for s in ("hdbscan", "kmeans") if any(k[0] == s for k in runs)]
+    encs = [e for e in ("ts2vec", "tcn", "vq-vae") if any(k[1] == e for k in runs)]
+    p("Cell = trade-weighted mean net RR per trade  +- [95% bootstrap CI over test episodes].  * = the expert's own regime.")
+    p("Rows: model (expert) used.  Columns: regime the test episode was assigned to (n = tradable test episodes).")
+    p("Latent ids are re-learned in every fold, so each fold gets its own matrix (folds are never pooled by name).")
+    for seg in segs:
+        p("\n" + _RULE); p(f"With {SEG_NAMES.get(seg, seg)} as Segmenter (InfoNET)"); p(_RULE)
+        for enc in encs:
+            run = runs.get((seg, enc))
+            if run is None:
+                continue
+            p(f"\n{ENC_NAMES.get(enc, enc)} by edge (expectancy per trade)")
+            for f in run["folds"]:
+                c = f.get("cells")
+                if c is not None and len(c):
+                    p(f"[fold {f['fold']}]")
+                    p(_edge_matrix(c).to_string())
+                else:
+                    p(f"[fold {f['fold']}] no matrix: {_why_empty(f)}")
+    p("\n" + _RULE); p("InfoNET vs cosine similarity vs TDMI"); p(_RULE)
+    p("Is a test episode more similar to its own latent's reference than to other latents'?  gap = own - other (+- 95% CI);")
+    p("top1 = share of episodes whose most-similar reference is their own latent (chance = 1/#latents).")
+    p(f"{'segmenter':<11}{'encoder':<8}{'metric':<9}{'ep':>4}{'own':>8}{'other':>8}{'gap':>9}{'gap 95% CI':>18}{'top1':>7}{'chance':>8}")
+    any_sim = False
+    for seg in segs:
+        for enc in encs:
+            run = runs.get((seg, enc))
+            for r in (run_similarity(run) if run else []):
+                any_sim = True
+                ci = f"[{r['lo']:+.2f}, {r['hi']:+.2f}]" if np.isfinite(r["lo"]) else "[n<3]"
+                p(f"{SEG_NAMES.get(seg, seg):<11}{ENC_NAMES.get(enc, enc):<8}{r['metric']:<9}{r['episodes']:>4}{r['own']:>8.2f}"
+                  f"{r['other']:>8.2f}{r['gap']:>+9.2f}{ci:>18}{r['top1']:>7.2f}{r['chance']:>8.2f}")
+    if not any_sim:
+        p("no similarity rows (needs >= 2 recurring latents with tradable test episodes, and RunConfig.metrics non-empty)")
+    p("\n" + _RULE); p("Edge deviation (SD of episode-level net RR per trade; lower = more consistent)"); p(_RULE)
+    p("own   = model k on episodes of its own regime k;  cross = model j on episodes of the other regimes.")
+    p(f"{'run':<22}{'own exp':>8}{'own SD':>8}{'(clean)':>8}{'cross exp':>10}{'cross SD':>9}{'(clean)':>8}{'own ep':>7}  status")
+    devs = {}
+    for seg in segs:
+        for enc in encs:
+            run = runs.get((seg, enc))
+            if run is None:
+                continue
+            d = devs[(seg, enc)] = run_deviation(run)
+            label = f"{ENC_NAMES.get(enc, enc)}+{SEG_NAMES.get(seg, seg)}"
+            f2 = lambda v: f"{v:.2f}" if np.isfinite(v) else "  -"
+            p(f"{label:<22}{f2(d['own_exp']):>8}{f2(d['own_sd']):>8}{f2(d['own_clean']):>8}{f2(d['cross_exp']):>10}"
+              f"{f2(d['cross_sd']):>9}{f2(d['cross_clean']):>8}{d['own_eps']:>7}  {'ok' if d['eligible'] else 'NOT RANKABLE: ' + d['why']}")
+    p("\n" + _RULE); p("Summary"); p(_RULE)
+    ok = {k: d for k, d in devs.items() if d["eligible"]}
+    if not ok:
+        p("Winner: none.  No run has >= 2 regimes with experts and >= 10 own-regime episodes, so deviation cannot be compared.")
+    else:
+        (seg, enc), d = min(ok.items(), key=lambda kv: kv[1]["own_sd"])
+        p(f"Winner: {ENC_NAMES.get(enc, enc).upper()} + {SEG_NAMES.get(seg, seg).upper()}")
+        p(f"* Deviation: own-regime {d['own_sd']:.2f} RR (noise-corrected {d['own_clean']:.2f}); cross-regime "
+          f"{d['cross_sd']:.2f} RR.  It returned the lowest own-regime deviation among rankable runs.")
+        p(f"* Own-regime expectancy {d['own_exp']:+.3f} RR/trade over {d['own_eps']} episodes"
+          + ("  <-- NEGATIVE: consistent, but consistently losing." if d["own_exp"] <= 0 else "."))
+        if np.isfinite(d["cross_sd"]) and d["cross_sd"] <= d["own_sd"]:
+            p("* Cross-regime deviation is NOT larger than own-regime deviation: the regime label does not isolate this expert's edge.")
+        skipped = [f"{ENC_NAMES.get(e, e)}+{SEG_NAMES.get(s, s)}" for (s, e), x in devs.items() if not x["eligible"]]
+        if skipped:
+            p("* Not rankable: " + ", ".join(skipped))
+    return "\n".join(out)
