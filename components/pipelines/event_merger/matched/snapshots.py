@@ -189,6 +189,10 @@ def build_day_start_snapshots(
         if not src.exists():
             raise FileNotFoundError(f"missing canonical LOB hour 00: {src}")
         out_book = work / "day_seed_state" / day / "00.parquet"
+        # Never let a seed from a previous run make a day with no replayable
+        # snapshot look healthy.
+        (day_seed_dir / f"{day}.parquet").unlink(missing_ok=True)
+        out_book.unlink(missing_ok=True)
         stats = _run_snapshot_policy(
             src,
             out_book,
@@ -198,8 +202,12 @@ def build_day_start_snapshots(
             tick_size=tick_size,
             warm_start=warm_start,
         )
-        if not (day_seed_dir / f"{day}.parquet").exists():
-            raise RuntimeError(f"day-start seed was not created for {day}")
+        seed_file = day_seed_dir / f"{day}.parquet"
+        if not seed_file.exists():
+            raise RuntimeError(
+                f"day-start seed was not created for {day}; hour 00 contains no usable snapshot "
+                f"(emitted_rows={stats.get('emitted_rows', 0)}, malformed={stats.get('malformed_events', 0)})"
+            )
         totals["days"] += 1
         totals["emitted_rows"] += int(stats.get("emitted_rows", 0))
     if totals["days"] == 0:
@@ -242,6 +250,7 @@ def build_per_row_book_state(
                 )
                 state = seed
             out_book = work / "lob_state" / day / f"{hour:02d}.parquet"
+            out_book.unlink(missing_ok=True)
             stats = _run_snapshot_policy(
                 src,
                 out_book,

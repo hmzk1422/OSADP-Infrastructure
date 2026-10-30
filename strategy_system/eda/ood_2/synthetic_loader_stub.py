@@ -16,6 +16,7 @@ import numpy as np
 import pandas as pd
 
 ROWS_PER_FILE = 10_000
+MAX_FILES = 32  # fixed master length keeps separate train/gap/test calls on one random stream
 _WORLD = {"name": "sign_flip", "seed": 0, "mean_dwell": 5000, "beta": 0.35}
 _CACHE: dict = {}
 
@@ -98,8 +99,10 @@ def _master(n_files: int) -> pd.DataFrame:
 
 def load_L2(file_limit: int = 1, start: int = 0, **_) -> pd.DataFrame:
     """Return ``file_limit`` consecutive 'files' starting at file index ``start``."""
-    master = _master(max(20, start + file_limit))
+    if start < 0 or file_limit < 0 or start + file_limit > MAX_FILES:
+        raise ValueError(f"synthetic data supports file ranges within [0, {MAX_FILES})")
+    master = _master(MAX_FILES)
     out = master.iloc[start * ROWS_PER_FILE:(start + file_limit) * ROWS_PER_FILE].copy()
-    key = (_WORLD["name"], _WORLD["seed"], _WORLD["mean_dwell"], _WORLD["beta"], ROWS_PER_FILE, max(20, start + file_limit))
+    key = (_WORLD["name"], _WORLD["seed"], _WORLD["mean_dwell"], _WORLD["beta"], ROWS_PER_FILE, MAX_FILES)
     out["regime_truth"] = _CACHE[("truth",) + key][start * ROWS_PER_FILE:(start + file_limit) * ROWS_PER_FILE]
     return out

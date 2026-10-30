@@ -30,8 +30,12 @@
 
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 import pandas as pd
+
+warnings.filterwarnings("ignore", category=pd.errors.PerformanceWarning)
 
 
 # ===========================================================
@@ -79,6 +83,22 @@ def _validate_windows(
         raise ValueError(
             "all windows must be > 0"
         )
+
+
+def _copy_frame(df: pd.DataFrame) -> pd.DataFrame:
+    """Deep-copy one column at a time.
+
+    ``DataFrame.copy()`` consolidates same-dtype blocks first. A fold of
+    about a million rows and ~90 float columns asks for one contiguous
+    ~700 MiB array and raises ``ArrayMemoryError`` once the heap is
+    fragmented. Each column here is a few megabytes.
+    """
+
+    copied = pd.DataFrame(index=df.index.copy())
+    for name in df.columns:
+        # Positional, so a non-unique index stays aligned with ``DataFrame.copy``.
+        copied[name] = df[name].to_numpy(copy=True)
+    return copied
 
 
 # ===========================================================
@@ -282,6 +302,7 @@ def add_trade_flow_features(
     ),
     baseline_window: int = 1000,
     min_periods: int = 100,
+    copy: bool = True,
 ) -> pd.DataFrame:
     """
     Aggressive trade flow.
@@ -312,7 +333,7 @@ def add_trade_flow_features(
 
     _validate_windows(windows)
 
-    out = df.copy()
+    out = _copy_frame(df) if copy else df
 
     quantity = pd.to_numeric(
         out["quantity"],
@@ -464,6 +485,7 @@ def add_bbo_features(
     df: pd.DataFrame,
     baseline_window: int = 1000,
     min_periods: int = 100,
+    copy: bool = True,
 ) -> pd.DataFrame:
     """
     Best bid / ask state.
@@ -485,7 +507,7 @@ def add_bbo_features(
         ],
     )
 
-    out = df.copy()
+    out = _copy_frame(df) if copy else df
 
     bid = pd.to_numeric(
         out["best_bid_price_close"],
@@ -593,6 +615,7 @@ def add_ofi(
     ),
     baseline_window: int = 1000,
     min_periods: int = 100,
+    copy: bool = True,
 ) -> pd.DataFrame:
     """
     Best-level Order Flow Imbalance.
@@ -623,7 +646,7 @@ def add_ofi(
 
     _validate_windows(windows)
 
-    out = df.copy()
+    out = _copy_frame(df) if copy else df
 
     bid_price = pd.to_numeric(
         out["best_bid_price_close"],
@@ -741,6 +764,7 @@ def add_multilevel_depth_features(
     ),
     baseline_window: int = 1000,
     min_periods: int = 100,
+    copy: bool = True,
 ) -> pd.DataFrame:
     """
     Multi-level resting liquidity.
@@ -756,7 +780,7 @@ def add_multilevel_depth_features(
 
     _validate_windows(levels)
 
-    out = df.copy()
+    out = _copy_frame(df) if copy else df
 
     def bid_qty_column(level: int) -> str:
         return (
@@ -878,6 +902,7 @@ def add_depth_dynamics(
     ),
     baseline_window: int = 1000,
     min_periods: int = 100,
+    copy: bool = True,
 ) -> pd.DataFrame:
     """
     Measure liquidity entering / leaving the book.
@@ -900,7 +925,7 @@ def add_depth_dynamics(
 
     _validate_windows(depths)
 
-    out = df.copy()
+    out = _copy_frame(df) if copy else df
 
     for depth in depths:
 
@@ -999,6 +1024,7 @@ def add_flow_price_features(
     window: int = 5,
     baseline_window: int = 1000,
     min_periods: int = 100,
+    copy: bool = True,
 ) -> pd.DataFrame:
     """
     Measure whether aggressive flow is actually transmitting
@@ -1027,7 +1053,7 @@ def add_flow_price_features(
         ],
     )
 
-    out = df.copy()
+    out = _copy_frame(df) if copy else df
 
     mid = out[
         "mid_price"
@@ -1149,7 +1175,7 @@ def add_orderflow(
             "DataFrame must already be in chronological order."
         )
 
-    out = df.copy()
+    out = _copy_frame(df)
 
     # -------------------------------------------------------
     # 1. Aggressive trade flow.
@@ -1160,6 +1186,7 @@ def add_orderflow(
         windows=windows,
         baseline_window=baseline_window,
         min_periods=min_periods,
+        copy=False,
     )
 
     # -------------------------------------------------------
@@ -1170,6 +1197,7 @@ def add_orderflow(
         out,
         baseline_window=baseline_window,
         min_periods=min_periods,
+        copy=False,
     )
 
     # -------------------------------------------------------
@@ -1181,6 +1209,7 @@ def add_orderflow(
         windows=windows,
         baseline_window=baseline_window,
         min_periods=min_periods,
+        copy=False,
     )
 
     # -------------------------------------------------------
@@ -1192,6 +1221,7 @@ def add_orderflow(
         levels=depth_levels,
         baseline_window=baseline_window,
         min_periods=min_periods,
+        copy=False,
     )
 
     # -------------------------------------------------------
@@ -1203,6 +1233,7 @@ def add_orderflow(
         depths=depth_dynamic_levels,
         baseline_window=baseline_window,
         min_periods=min_periods,
+        copy=False,
     )
 
     # -------------------------------------------------------
@@ -1214,6 +1245,7 @@ def add_orderflow(
         window=5,
         baseline_window=baseline_window,
         min_periods=min_periods,
+        copy=False,
     )
 
     # =======================================================
