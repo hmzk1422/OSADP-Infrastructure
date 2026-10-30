@@ -126,6 +126,8 @@ class DiscoverConfig:
     # --- overfitting guards
     dominance_max: float = 0.85       # max share of |beta|*std(term) among terms (only when >= 2 terms)
     dom_weight: float = 5.0
+    feat_share_max: float = 0.05      # all feature terms together may carry at most this share of the hedge (|beta|*std)
+    feat_weight: float = 100.0        # score penalty per unit of share above feat_share_max
     beta_abs_max: float = 5.0         # |beta| on a log-price leg above this is suspicious
     beta_weight: float = 1.0
     term_stationary_p: float = 0.05   # a price leg that is itself stationary below this p is flagged
@@ -558,16 +560,20 @@ class Candidate:
     shares: dict[str, float]
     n_i1: int
     drift: float = float("nan")
+    feat_share: float = 0.0
 
 
-def _score(p, hl, n_terms, max_share, max_abs_beta_px, cfg: DiscoverConfig, drift: float = 0.0) -> float:
+def _score(p, hl, n_terms, max_share, max_abs_beta_px, cfg: DiscoverConfig, drift: float = 0.0,
+           feat_share: float = 0.0) -> float:
     viol = max(0.0, np.log10(max(p, 1e-12) / cfg.p_train_max))
     hl_eff = cfg.hl_cap if (not np.isfinite(hl) or hl < cfg.half_life_min_bars) else min(hl, cfg.hl_cap)
     dom = max(0.0, max_share - cfg.dominance_max) if n_terms >= 2 else 0.0
     big = max(0.0, max_abs_beta_px - cfg.beta_abs_max)
     dr = max(0.0, np.log10(max(drift, 1e-12) / cfg.drift_max)) if np.isfinite(drift) else 0.0
+    fs = max(0.0, feat_share - cfg.feat_share_max)
     return (cfg.p_weight * viol + hl_eff / cfg.hl_ref * (1 + cfg.term_penalty * (n_terms - 1))
-            + cfg.dom_weight * dom + cfg.beta_weight * big + cfg.drift_weight * dr)
+            + cfg.dom_weight * dom + cfg.beta_weight * big + cfg.drift_weight * dr
+            + cfg.feat_weight * fs)
 
 
 def _evaluate(panel: AssetPanel, y: str, terms: tuple[str, ...], cfg: DiscoverConfig) -> Candidate | None:
@@ -586,9 +592,11 @@ def _evaluate(panel: AssetPanel, y: str, terms: tuple[str, ...], cfg: DiscoverCo
     share = contrib / (contrib.sum() + 1e-18)
     px_beta = [abs(b) for t, b in zip(terms, slopes) if kind(t) == "px"]
     drift = drift_ratio(yv, X, icpt, slopes, e.std(), cfg.drift_blocks)
-    sc = _score(p, hl, len(terms), float(share.max()), max(px_beta) if px_beta else 0.0, cfg, drift)
+    feat_share = float(sum(s for t, s in zip(terms, share) if kind(t) == "ft"))
+    sc = _score(p, hl, len(terms), float(share.max()), max(px_beta) if px_beta else 0.0, cfg, drift, feat_share)
     return Candidate(y, terms, float(sc), stat, p, hl, float(e.std()), float(share.max()),
-                     dict(zip(terms, map(float, slopes))), dict(zip(terms, map(float, share))), n_i1, float(drift))
+                     dict(zip(terms, map(float, slopes))), dict(zip(terms, map(float, share))), n_i1, float(drift),
+                     feat_share)
 
 
 def _pool(panel: AssetPanel, y: str, cfg: DiscoverConfig) -> list[str]:
@@ -684,6 +692,7 @@ class TestResult:
     drift_ok: bool = True
     drift_icpt_oos: float = float("nan")   # intercept-only part of the OOS chain, % of train spread RMS
     icpt_move: float = float("nan")        # kalman: max |alpha_t - alpha_train| in % of train spread RMS (0 if static)
+    feat_ok: bool = True
 
 
 def _spread_parts(panel: AssetPanel, cand: Candidate, split: int, cfg: DiscoverConfig):
@@ -748,11 +757,13 @@ def test_pair(panel: AssetPanel, cand: Candidate, cfg: DiscoverConfig = Discover
     hl_ok = cfg.half_life_min_bars <= hl <= cfg.half_life_max_bars
     dom_ok = len(cand.terms) < 2 or cand.max_share <= cfg.dominance_max
     drift_ok = d_oos <= cfg.drift_oos_max
-    passed = bool(p_ok and hl_ok and dom_ok and drift_ok)
+    feat_ok = cand.feat_share <= cfg.feat_share_max
+    passed = bool(p_ok and hl_ok and dom_ok and drift_ok and feat_ok)
 
     return TestResult(
         cand, stat, p, hl, float(100.0 * s_te.mean() / max(sigma, 1e-12)), _block_range(yv, X, split), move, b_tr, b_te,
-        p_ok, hl_ok, dom_ok, passed, float(d_tr), float(d_oos), bool(drift_ok), float(d_ic_oos), float(icpt_move))
+        p_ok, hl_ok, dom_ok, passed, float(d_tr), float(d_oos), bool(drift_ok), float(d_ic_oos), float(icpt_move),
+        bool(feat_ok))
 
 
 # --------------------------------------------------------------------------- 3) analysis
@@ -990,11 +1001,11 @@ def run(panel: AssetPanel, y: str, seed_x: Sequence[str] | None = None,
         "p_eg_train": r.candidate.p_eg, "hl_train": r.candidate.half_life,
         "p_oos": r.p_oos, "hl_oos": r.hl_oos,
         "mean_shift_pct_train_spread_rms": r.mean_shift_pct_train_spread_rms,
-        "max_share": r.candidate.max_share, "beta_blk_rng": r.beta_block_range,
+        "max_share": r.candidate.max_share, "feat_share": r.candidate.feat_share, "beta_blk_rng": r.beta_block_range,
         "max_beta_move": r.max_beta_move,
         "drift_train_pct_spread_rms": r.drift_train, "drift_oos_pct_spread_rms": r.drift_oos,
         "icpt_drift_oos_pct": r.drift_icpt_oos, "icpt_move_pct": r.icpt_move,
-        "p_ok": r.p_ok, "hl_ok": r.hl_ok, "dom_ok": r.dom_ok, "drift_ok": r.drift_ok, "passed": r.passed,
+        "p_ok": r.p_ok, "hl_ok": r.hl_ok, "dom_ok": r.dom_ok, "drift_ok": r.drift_ok, "feat_ok": r.feat_ok, "passed": r.passed,
     } for r in results])
     return results, table
 
