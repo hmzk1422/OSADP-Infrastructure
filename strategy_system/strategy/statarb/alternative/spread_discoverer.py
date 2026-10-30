@@ -18,16 +18,23 @@ Objective (lower is better)
           + dom_weight * max(0, max_share - dominance_max)    # one term carrying the whole hedge
           + beta_weight * (|beta_px| above beta_abs_max)      # huge price betas
 
-Beta drift, measured directly (the dBeta * underlying idea)
-    The spread is  s_t = y_t - a - sum_j beta_j x_j,t.  If beta_j is re-estimated to beta_j + dbeta_j, the spread moves by
-        impact_j,t = dbeta_j * (x_j,t - mu_j)          (mu_j = train mean of x_j; for a log price x - mu is "how far the
-                                                        asset has wandered from where beta was fitted")
-    expressed as a percentage of the TRAIN spread's RMS deviation (the standard deviation of its centred residuals).
-    This denominator is frozen from training so an OOS spread explosion cannot inflate the denominator and hide drift.
-    A term with a tiny dbeta can still move the spread substantially if x wanders far, so raw beta values are not the
-    right thing to look at. drift = 100 * max over blocks of RMS_t(sum_j impact_j,t) / train_spread_rms. It is part of
-    the objective, a pass criterion in test_pair, and the bottom panel of plot_spread. It is a relative percentage,
-    not a percentage of price and not a percentage of the spread's instantaneous value (which can be near zero).
+Beta drift = the cumulative dBeta * x chain (what re-estimating the hedge does to the THEORETICAL spread)
+    Real PnL of a rebalanced hedge is  dPnL_t = dy_t - sum_j beta_j,t-1 * dx_j,t        (dA - beta * dB)
+    The theoretical spread is          S_t = y_t - a_t - sum_j beta_j,t * x_j,t.
+    If (a, beta) are re-estimated, the product rule gives
+        S_t - S_t-1 = [ dy_t - sum_j beta_j,t-1 dx_j,t ]  -  [ sum_j dbeta_j,t * x_j,t + da_t ]
+                           ^ real PnL                           ^ excess chain-rule term: moves the SPREAD, earns NOTHING
+    so   S_t - S_0 = cumPnL_t - (C_t - C_0)   with   C_t = cumsum_t( dbeta_t . x_t + da_t ).
+    C_t is the true beta impact: the part of the spread's movement that is an artefact of re-fitting. A z-score that
+    "reverts" through C_t is not tradeable PnL. (This is an exact identity; it is checked numerically in the tests.)
+    A log price or a cumulative flow has an arbitrary level, so x is anchored at the reference (train) mean mu:
+        C_t = sum_j cumsum( dbeta_j,t * (x_j,t - mu_j) )    slope drift, one column per term
+              + cumsum( dalpha_t )                          intercept drift, alpha = a + beta.mu = fitted y at the anchor
+    Everything is a % of the TRAIN spread RMS (denominator frozen, so an OOS spread explosion cannot hide drift).
+    drift = 100 * RMS_t(C_t) / train_spread_rms: part of the objective, a pass criterion in test_pair, bottom panel of plot_spread.
+    Parameter path: reference (train fit) -> one re-fit per block (objective / test_pair) or causal rolling window (plot).
+    Intercept: FROZEN in beta_mode="static" (an OOS mean shift is real and shows in mean_shift_pct_train_spread_rms);
+    a filter state in beta_mode="kalman" (icpt_move_pct tracks it). Its drift is tracked in the chain either way.
 
 Fitting method
     fit(y, X, method=...) picks the estimator; DiscoverConfig.fit_method / fit_kw set it everywhere.
@@ -97,12 +104,12 @@ class DiscoverConfig:
     fit_kw: dict = field(default_factory=dict)   # e.g. {"between": 0.1} for stable, {"lam": 0.05} for ridge
 
     # --- beta-drift impact: percent of typical TRAIN spread RMS, using a frozen training denominator
-    drift_blocks: int = 6             # data blocks used to re-estimate beta
-    drift_max: float = 100.0          # beam: penalise impacts above 100% of typical training-spread RMS (same as old 1 sigma)
+    drift_blocks: int = 6             # data blocks used to re-estimate (a, beta); path = reference -> block fits
+    drift_max: float = 100.0          # beam: penalise RMS of the cumulative dBeta.x + dAlpha chain above 100% of train-spread RMS (NOT recalibrated)
     drift_weight: float = 100.0       # same footing as p_weight: large beta drift is strongly penalised
     drift_oos_max: float = 200.0      # OOS limit: 200% of typical training-spread RMS (same as old 2 sigma)
-    drift_window: int = 2016          # rolling re-fit window for the chart / beta_drift_impact (bars; 864 = 3 days of 5min)
-    drift_stride: int = 12            # re-fit every this many bars for the chart (value held in between: causal)
+    drift_window: int = 2016          # causal rolling re-fit window for the chart / actual_beta_impact (bars; 864 = 3 days of 5min)
+    drift_stride: int = 12            # re-fit every this many bars for the chart (params held in between; fit uses bars BEFORE t: causal)
 
     # --- ADF / objective
     adf_maxlag: int = 12              # ADF augmentation lags chosen by AIC up to this
@@ -224,12 +231,6 @@ class AssetPanel:
 
 
 def _loader_kwargs_compatible(loader, kwargs: dict) -> tuple[dict, list[str]]:
-    """Filter optional keyword arguments against the imported load_bars signature.
-
-    This keeps the discoverer compatible with older/local binance_vision.py versions
-    that predate metrics, funding, premium, liquidation, or bookTicker support. When a
-    loader accepts **kwargs, we trust its advertised forwarding interface.
-    """
     try:
         params = inspect.signature(loader).parameters
     except (TypeError, ValueError):
@@ -277,8 +278,6 @@ def get_assets(symbols, start, end, bar="5min", market="um", with_depth=True, wi
     if not cfg.use_features:
         return AssetPanel.from_frames(frames, warmup=warmup_bars(fcfg))
 
-    # Filter unavailable/low-coverage features out of the pool, but do NOT require every candidate feature
-    # to be present on every row. Candidate-specific finite checks below decide whether a term is usable.
     idx = None
     for f in frames.values():
         idx = f.index if idx is None else idx.intersection(f.index)
@@ -303,10 +302,6 @@ def get_assets(symbols, start, end, bar="5min", market="um", with_depth=True, wi
 
 # --------------------------------------------------------------------------- statistics
 def ols_fit(y: np.ndarray, X: np.ndarray):
-    """
-    Function used to form statistical arbitrage relationships.
-    CHANGE THIS TO CHANGE THE METHOD
-    """
     X = X if X.ndim == 2 else X[:, None]
     mu = X.mean(0)
     sd = X.std(0)
@@ -318,7 +313,6 @@ def ols_fit(y: np.ndarray, X: np.ndarray):
 
 
 # --------------------------------------------------------------------------- fitting methods
-# Every estimator has the signature  (y, X, **kw) -> (intercept, slopes, residuals)  in RAW units, like ols_fit.
 def _prep(X: np.ndarray):
     X = X if X.ndim == 2 else X[:, None]
     mu, sd = X.mean(0), X.std(0)
@@ -333,10 +327,6 @@ def _finish(y, X, mu, sd, beta_std):
 
 
 def ridge_fit(y: np.ndarray, X: np.ndarray, lam: float = 1e-2, beta0: np.ndarray | None = None):
-    """Standardised ridge. lam is on the CORRELATION scale (columns have unit variance), so lam=0.01 is a light touch
-    that stops two collinear legs from taking huge opposite-signed betas, and lam=1 is heavy.
-    beta0 (RAW units) is what to shrink TOWARD: None = zero, or pass a reference beta to anchor a re-fit to it
-    (lam -> inf freezes beta at beta0)."""
     X, mu, sd, Z = _prep(X)
     n, p = Z.shape
     b0 = np.zeros(p) if beta0 is None else np.asarray(beta0, float) * sd
@@ -345,16 +335,6 @@ def ridge_fit(y: np.ndarray, X: np.ndarray, lam: float = 1e-2, beta0: np.ndarray
 
 
 def stable_fit(y: np.ndarray, X: np.ndarray, n_blocks: int = 6, between: float = 0.25, lam: float = 1e-3):
-    """Block-consensus fit: beta that explains the data INSIDE every block, not just in aggregate.
-
-        minimise   (1-between) * sum_b RSS_b(beta; free intercept per block)  +  between * RSS(beta; one intercept)
-
-    between=1 is plain OLS. Lower values stop slow between-block level drift (the part that makes OLS betas swing when
-    the sample is cut differently) from steering beta, so the beta you freeze is the one that hedges in every block.
-    Closed form, one linear solve. lam is a spectral ridge (fraction of the mean eigenvalue) for conditioning only.
-    The intercept is global, so a level drift between blocks is NOT removed from the spread (use z_mode='rolling' or a
-    slow intercept for that); only its influence on beta is.
-    """
     X, mu, sd, Z = _prep(X)
     n, p = Z.shape
     nb = int(max(1, min(n_blocks, n // 50)))
@@ -373,10 +353,6 @@ def stable_fit(y: np.ndarray, X: np.ndarray, n_blocks: int = 6, between: float =
 
 
 def kalman_fit(y: np.ndarray, X: np.ndarray, q: float = 1e-8, p0_scale: float = 1e-2):
-    """Random-walk-beta Kalman filter (state noise q per bar, standardised units). Returns the FINAL state as the
-    betas and the one-step-ahead innovations as the residual. The prior is an OLS fit on the same data, so in-sample
-    residuals are optimistic; this is meant for the final/OOS leg (cfg.beta_mode='kalman'), not for a big beam
-    (python loop). q -> 0 gives back a static beta."""
     X, mu, sd, Z = _prep(X)
     n, p = Z.shape
     H = np.column_stack([np.ones(n), Z])
@@ -392,8 +368,6 @@ FIT_METHODS = {"ols": ols_fit, "ridge": ridge_fit, "stable": stable_fit, "kalman
 
 
 def fit(y: np.ndarray, X: np.ndarray, method: str = "stable", **kw):
-    """Single entry point for forming a stat-arb relationship. Returns (intercept, slopes, residuals).
-    method: "ols" | "ridge" | "stable" | "kalman". Extra kwargs go to the estimator. Add a method by adding it to FIT_METHODS."""
     try:
         f = FIT_METHODS[method]
     except KeyError:
@@ -411,45 +385,66 @@ def _edges(n: int, blocks: int) -> np.ndarray:
 
 
 def block_betas(y: np.ndarray, X: np.ndarray, blocks: int, lam: float = 1e-4) -> np.ndarray:
-    """Local betas, one fit per contiguous block (light ridge so a degenerate block stays finite). Shape (blocks, p)."""
     X = X if X.ndim == 2 else X[:, None]
     e = _edges(len(y), blocks)
     return np.array([ridge_fit(y[a:b], X[a:b], lam=lam)[1] for a, b in zip(e[:-1], e[1:])])
 
 
-def drift_ratio(y, X, slopes, spread_rms: float, blocks: int, mu_ref=None) -> float:
-    """Worst-block RMS beta-drift impact as % of typical TRAIN spread RMS.
-
-    `spread_rms` is the centred RMS/standard deviation of the training residual and is
-    held fixed for both training and OOS calculations. The returned value is a percent:
-    100 means beta re-estimation would shift the spread by an RMS amount equal to its
-    typical training fluctuation. This is not a percent of price or of the instantaneous
-    spread value (which may be close to zero).
-    """
+def block_params(y: np.ndarray, X: np.ndarray, blocks: int, lam: float = 1e-4):
+    """Per-block (intercept, slopes) re-fits. Returns edges, A (blocks,), B (blocks, p)."""
     X = X if X.ndim == 2 else X[:, None]
-    mu = X.mean(0) if mu_ref is None else mu_ref
-    B = block_betas(y, X, blocks)
     e = _edges(len(y), blocks)
-    worst = 0.0
-    for (a, b), bb in zip(zip(e[:-1], e[1:]), B):
-        imp = ((X[a:b] - mu) * (bb - slopes)).sum(1)
-        worst = max(worst, float(np.sqrt(np.mean(imp * imp))))
-    return 100.0 * worst / max(float(spread_rms), 1e-12)
+    fits = [ridge_fit(y[a:b], X[a:b], lam=lam) for a, b in zip(e[:-1], e[1:])]
+    return e, np.array([f[0] for f in fits]), np.array([f[1] for f in fits])
 
 
-def drift_by_term(y, X, slopes, spread_rms: float, blocks: int, mu_ref=None) -> np.ndarray:
-    """Per-term worst-block RMS impact as % of typical TRAIN spread RMS.
+def excess_chain(X: np.ndarray, a_t: np.ndarray, B_t: np.ndarray, a_ref: float, b_ref: np.ndarray,
+                 mu: np.ndarray) -> np.ndarray:
+    """Cumulative excess chain-rule term C_t = cumsum(dbeta_t . x_t + da_t), split into columns.
 
-    Term impacts do not add linearly because they can offset one another; their sum is
-    an upper bound on the absolute combined drift, not equal to the combined drift.
+    a_t (n,), B_t (n, p): the parameters in force at each bar. The parameters before bar 0 are the reference.
+    Columns 0..p-1: cumsum(dbeta_j * (x_j - mu_j))  (slope drift);  column p: cumsum(dalpha), alpha = a + beta.mu.
+    Row sum == cumsum(dbeta . x + da) exactly. Units: spread units (log price).
     """
+    b_ref = np.asarray(b_ref, float)
+    dB = B_t - np.vstack([b_ref[None, :], B_t[:-1]])
+    dA = a_t - np.r_[a_ref, a_t[:-1]]
+    return np.column_stack([np.cumsum(dB * (X - mu), axis=0), np.cumsum(dA + dB @ mu)])
+
+
+def rolling_params(y: np.ndarray, X: np.ndarray, cfg: "DiscoverConfig", a_ref: float, b_ref: np.ndarray):
+    """Causal rolling re-fit path: every drift_stride bars, fit on the previous drift_window bars (bars < t).
+    Before the first re-fit the parameters are the reference."""
+    n, W, S = len(y), int(cfg.drift_window), int(max(1, cfg.drift_stride))
+    a_t = np.full(n, float(a_ref))
+    B_t = np.tile(np.asarray(b_ref, float), (n, 1))
+    for t in range(W, n, S):
+        a, b, _ = _fit(y[t - W:t], X[t - W:t], cfg)
+        a_t[t:t + S], B_t[t:t + S] = a, b
+    return a_t, B_t
+
+
+def drift_components(y, X, icpt: float, slopes, blocks: int, mu_ref=None) -> np.ndarray:
+    """Excess chain C_t (n, p+1) in spread units for a block-wise re-fit path starting from the reference (icpt, slopes)."""
     X = X if X.ndim == 2 else X[:, None]
     mu = X.mean(0) if mu_ref is None else mu_ref
-    B, e = block_betas(y, X, blocks), _edges(len(y), blocks)
-    out = np.zeros(X.shape[1])
-    for (a, b), bb in zip(zip(e[:-1], e[1:]), B):
-        out = np.maximum(out, np.sqrt((((X[a:b] - mu) * (bb - slopes)) ** 2).mean(0)))
-    return 100.0 * out / max(float(spread_rms), 1e-12)
+    e, A, B = block_params(y, X, blocks)
+    a_t, B_t = np.empty(len(y)), np.empty((len(y), X.shape[1]))
+    for k, (a, b) in enumerate(zip(e[:-1], e[1:])):
+        a_t[a:b], B_t[a:b] = A[k], B[k]
+    return excess_chain(X, a_t, B_t, icpt, np.asarray(slopes, float), mu)
+
+
+def drift_ratio(y, X, icpt: float, slopes, spread_rms: float, blocks: int, mu_ref=None) -> float:
+    """100 * RMS_t(C_t) / spread_rms, C_t the TOTAL cumulative dBeta.x + dAlpha chain."""
+    C = drift_components(y, X, icpt, slopes, blocks, mu_ref)
+    return 100.0 * float(np.sqrt(np.mean(C.sum(1) ** 2))) / max(float(spread_rms), 1e-12)
+
+
+def drift_by_term(y, X, icpt: float, slopes, spread_rms: float, blocks: int, mu_ref=None) -> np.ndarray:
+    """RMS of each chain column as % of spread_rms; length p+1, last entry = intercept drift."""
+    C = drift_components(y, X, icpt, slopes, blocks, mu_ref)
+    return 100.0 * np.sqrt((C ** 2).mean(0)) / max(float(spread_rms), 1e-12)
 
 
 def adf_stat(e: np.ndarray, maxlag: int, const: bool) -> tuple[float, int]:
@@ -458,7 +453,7 @@ def adf_stat(e: np.ndarray, maxlag: int, const: bool) -> tuple[float, int]:
     n = len(de)
     maxlag = int(max(0, min(maxlag, (n - 10) // 3)))
 
-    def fit(L: int, s: int):
+    def fit_lag(L: int, s: int):
         y = de[s:]
         cols = [e[s:n]] + [de[s - i:n - i] for i in range(1, L + 1)]
         if const:
@@ -471,11 +466,11 @@ def adf_stat(e: np.ndarray, maxlag: int, const: bool) -> tuple[float, int]:
 
     best_L, best_aic = 0, np.inf
     for L in range(maxlag + 1):
-        _, _, rss, N, k = fit(L, maxlag)
+        _, _, rss, N, k = fit_lag(L, maxlag)
         aic = N * np.log(max(rss, 1e-300) / N) + 2 * k
         if aic < best_aic:
             best_L, best_aic = L, aic
-    b, ZtZ, rss, N, k = fit(best_L, best_L)
+    b, ZtZ, rss, N, k = fit_lag(best_L, best_L)
     se = np.sqrt(rss / (N - k) * np.linalg.inv(ZtZ)[0, 0])
     return float(b[0] / se), best_L
 
@@ -562,7 +557,7 @@ class Candidate:
     betas: dict[str, float]
     shares: dict[str, float]
     n_i1: int
-    drift: float = float("nan")      # beta-drift impact as % of typical train-spread RMS
+    drift: float = float("nan")
 
 
 def _score(p, hl, n_terms, max_share, max_abs_beta_px, cfg: DiscoverConfig, drift: float = 0.0) -> float:
@@ -590,7 +585,7 @@ def _evaluate(panel: AssetPanel, y: str, terms: tuple[str, ...], cfg: DiscoverCo
     contrib = np.abs(slopes) * X.std(0)
     share = contrib / (contrib.sum() + 1e-18)
     px_beta = [abs(b) for t, b in zip(terms, slopes) if kind(t) == "px"]
-    drift = drift_ratio(yv, X, slopes, e.std(), cfg.drift_blocks)
+    drift = drift_ratio(yv, X, icpt, slopes, e.std(), cfg.drift_blocks)
     sc = _score(p, hl, len(terms), float(share.max()), max(px_beta) if px_beta else 0.0, cfg, drift)
     return Candidate(y, terms, float(sc), stat, p, hl, float(e.std()), float(share.max()),
                      dict(zip(terms, map(float, slopes))), dict(zip(terms, map(float, share))), n_i1, float(drift))
@@ -607,12 +602,6 @@ def _pool(panel: AssetPanel, y: str, cfg: DiscoverConfig) -> list[str]:
 # --------------------------------------------------------------------------- 1) create_pair
 def create_pair(panel_train: AssetPanel, y: str, seed_x: Sequence[str] | None = None,
                 cfg: DiscoverConfig = DiscoverConfig()) -> list[Candidate]:
-    """Search for spread constructions on the training panel only.
-
-    If seed_x is non-empty, its price legs are mandatory anchors (legacy behavior).
-    If seed_x is None or empty, search starts from every usable I(1)-like RHS term,
-    so no single asset is forced into every candidate.
-    """
     cache: dict[tuple[str, ...], Candidate | None] = {}
 
     def score(terms: tuple[str, ...]) -> Candidate | None:
@@ -633,7 +622,6 @@ def create_pair(panel_train: AssetPanel, y: str, seed_x: Sequence[str] | None = 
         beam = [root]
         max_additions = cfg.max_terms - len(seed)
     else:
-        # A level regression should start with an I(1)-like term; I(0) features can be added later.
         starters = [t for t in pool if panel_train.is_i1(t)]
         roots = [c for t in starters if (c := score((t,))) is not None]
         if not roots:
@@ -641,8 +629,6 @@ def create_pair(panel_train: AssetPanel, y: str, seed_x: Sequence[str] | None = 
         beam = sorted(roots, key=lambda c: c.score)[:cfg.k]
         max_additions = cfg.max_terms - 1
 
-    # Do not stop merely because one extra term fails to improve the score: a second term can
-    # make a useful combination even when the intermediate model is worse.
     for depth in range(max_additions):
         new: dict[tuple[str, ...], Candidate] = {}
         for node in tqdm(beam, desc=f"beam depth {depth + 1}", leave=False):
@@ -659,8 +645,6 @@ def create_pair(panel_train: AssetPanel, y: str, seed_x: Sequence[str] | None = 
             break
         beam = sorted(new.values(), key=lambda c: c.score)[:cfg.k]
 
-    # Greedily remove non-anchor terms only where the objective does not get worse.
-    # In unanchored mode this can reduce a candidate to a singleton, but never to an empty model.
     pruned: dict[tuple[str, ...], Candidate] = {}
     for cand in sorted((c for c in cache.values() if c is not None), key=lambda c: c.score)[:cfg.k]:
         cur, improved = cand, True
@@ -695,30 +679,33 @@ class TestResult:
     hl_ok: bool
     dom_ok: bool
     passed: bool
-    drift_train: float = float("nan")   # beta-drift impact on train blocks, % of typical train-spread RMS
-    drift_oos: float = float("nan")     # OOS beta-drift impact, % of typical train-spread RMS
+    drift_train: float = float("nan")
+    drift_oos: float = float("nan")
     drift_ok: bool = True
+    drift_icpt_oos: float = float("nan")   # intercept-only part of the OOS chain, % of train spread RMS
+    icpt_move: float = float("nan")        # kalman: max |alpha_t - alpha_train| in % of train spread RMS (0 if static)
 
 
 def _spread_parts(panel: AssetPanel, cand: Candidate, split: int, cfg: DiscoverConfig):
     yv, X = panel.series(px(cand.y)), panel.matrix(cand.terms)
     icpt, slopes, e_tr = _fit(yv[:split], X[:split], cfg)
     sigma = float(e_tr.std())
-    move = 0.0
+    move = icpt_move = 0.0      # static: intercept and betas are FROZEN, so both are exactly 0
     if cfg.beta_mode == "static":
         s_te = yv[split:] - icpt - X[split:] @ slopes
     elif cfg.beta_mode == "kalman":
         mu, sd = X[:split].mean(0), np.where(X[:split].std(0) > 1e-12, X[:split].std(0), 1.0)
         Ztr = np.column_stack([np.ones(split), (X[:split] - mu) / sd])
-        # start the filter at the fitted static betas, in standardised coordinates
         theta0 = np.r_[icpt + slopes @ mu, slopes * sd]
         R = float(e_tr.var())
         P0 = cfg.kalman_p0_scale * R * np.linalg.inv(Ztr.T @ Ztr)
         s_te, path = kalman_spread(yv[split:], (X[split:] - mu) / sd, theta0, P0, R, cfg.kalman_q)
         move = float(np.abs(path[:, 1:] - theta0[1:]).max() / yv[:split].std())
+        # path[:, 0] is alpha (fitted y at the train mean of X): the intercept is a filter state here and DOES move with q
+        icpt_move = float(100.0 * np.abs(path[:, 0] - theta0[0]).max() / max(sigma, 1e-12))
     else:
         raise ValueError("beta_mode must be 'static' or 'kalman'")
-    return icpt, slopes, e_tr, s_te, sigma, move
+    return icpt, slopes, e_tr, s_te, sigma, move, icpt_move
 
 
 def _z(e_tr, s_te, sigma, cfg: DiscoverConfig):
@@ -739,8 +726,8 @@ def test_pair(panel: AssetPanel, cand: Candidate, cfg: DiscoverConfig = Discover
     split = panel.split_index(cfg.train_frac) if split is None else split
     yv, X = panel.series(px(cand.y)), panel.matrix(cand.terms)
     if not np.isfinite(X).all() or not np.isfinite(yv).all():
-        raise ValueError("Candidate target/terms contain NaNs or infinities over train+OOS; skip this candidate or use better-covered terms.")
-    _, slopes, e_tr, s_te, sigma, move = _spread_parts(panel, cand, split, cfg)
+        raise ValueError("Candidate target/terms contain NaNs or infinities over train+OOS.")
+    icpt, slopes, e_tr, s_te, sigma, move, icpt_move = _spread_parts(panel, cand, split, cfg)
     if len(s_te) < 100:
         raise ValueError("Not enough OOS data.")
     stat, _ = adf_stat(s_te, cfg.adf_maxlag, const=True)
@@ -751,21 +738,21 @@ def test_pair(panel: AssetPanel, cand: Candidate, cfg: DiscoverConfig = Discover
     b_te = bounce_stats(z_te, cfg.z_entry, cfg.z_exit, cfg.z_max_hold)
 
     mu_tr = X[:split].mean(0)
-    d_tr = drift_ratio(yv[:split], X[:split], slopes, sigma, cfg.drift_blocks)
+    d_tr = drift_ratio(yv[:split], X[:split], icpt, slopes, sigma, cfg.drift_blocks)
     nb_oos = int(max(1, min(cfg.drift_blocks, len(s_te) // 100)))
-    d_oos = drift_ratio(yv[split:], X[split:], slopes, sigma, nb_oos, mu_ref=mu_tr)
+    C_oos = drift_components(yv[split:], X[split:], icpt, slopes, nb_oos, mu_ref=mu_tr)   # chain starts from the TRAIN fit
+    d_oos = 100.0 * float(np.sqrt(np.mean(C_oos.sum(1) ** 2))) / max(sigma, 1e-12)
+    d_ic_oos = 100.0 * float(np.sqrt(np.mean(C_oos[:, -1] ** 2))) / max(sigma, 1e-12)
 
     p_ok = p <= cfg.p_oos_max
     hl_ok = cfg.half_life_min_bars <= hl <= cfg.half_life_max_bars
     dom_ok = len(cand.terms) < 2 or cand.max_share <= cfg.dominance_max
     drift_ok = d_oos <= cfg.drift_oos_max
-
-    # Bouncer / trade count rule removed from passed criteria!
     passed = bool(p_ok and hl_ok and dom_ok and drift_ok)
 
     return TestResult(
         cand, stat, p, hl, float(100.0 * s_te.mean() / max(sigma, 1e-12)), _block_range(yv, X, split), move, b_tr, b_te,
-        p_ok, hl_ok, dom_ok, passed, float(d_tr), float(d_oos), bool(drift_ok))
+        p_ok, hl_ok, dom_ok, passed, float(d_tr), float(d_oos), bool(drift_ok), float(d_ic_oos), float(icpt_move))
 
 
 # --------------------------------------------------------------------------- 3) analysis
@@ -798,11 +785,15 @@ def analyze(panel: AssetPanel, cand: Candidate, cfg: DiscoverConfig = DiscoverCo
     px_terms = tuple(t for t in terms if kind(t) == "px")
     ft_terms = tuple(t for t in terms if kind(t) == "ft")
 
-    rows = [_variant_row(panel, y, px_terms, split, cfg, "assets only")]
+    rows = []
+    if px_terms:   # a feature-only candidate has no "assets only" variant; the deltas below are then relative to the full model
+        rows.append(_variant_row(panel, y, px_terms, split, cfg, "assets only"))
     if ft_terms:
         rows.append(_variant_row(panel, y, terms, split, cfg, "assets + features (full)"))
         for t in ft_terms:
-            rows.append(_variant_row(panel, y, tuple(x for x in terms if x != t), split, cfg, f"full - {label(t)}"))
+            rest = tuple(x for x in terms if x != t)
+            if rest:   # dropping the only term leaves nothing to fit
+                rows.append(_variant_row(panel, y, rest, split, cfg, f"full - {label(t)}"))
     ab = pd.DataFrame(rows)
     base = ab.iloc[0]
     for c in ("adf_train", "adf_oos", "hl_oos"):
@@ -830,9 +821,15 @@ def analyze(panel: AssetPanel, cand: Candidate, cfg: DiscoverConfig = DiscoverCo
             "loo_d_adf": loo,
         })
     tt = pd.DataFrame(trs)
-    sig_tr = float(_fit(yv[:split], X[:split], cfg)[2].std())
-    tt["drift_pct_train_spread_rms"] = drift_by_term(
-        yv[:split], X[:split], np.array([cand.betas[t] for t in terms]), sig_tr, cfg.drift_blocks)
+    ic_tr, sl_tr, e_fit = _fit(yv[:split], X[:split], cfg)
+    sig_tr = float(e_fit.std())
+    comp = drift_components(yv[:split], X[:split], ic_tr, sl_tr, cfg.drift_blocks)
+    d_col = 100.0 * np.sqrt((comp ** 2).mean(0)) / max(sig_tr, 1e-12)
+    d_tot = 100.0 * float(np.sqrt((comp.sum(1) ** 2).mean())) / max(sig_tr, 1e-12)
+    tt["drift_pct_train_spread_rms"] = d_col[:-1]
+    extra = pd.DataFrame([{"term": "(intercept)", "kind": "icpt", "drift_pct_train_spread_rms": d_col[-1]},
+                          {"term": "TOTAL (chain)", "kind": "all", "drift_pct_train_spread_rms": d_tot}])
+    tt = pd.concat([tt, extra], ignore_index=True)
 
     bn = pd.DataFrame({"train": res.bounces_train, "oos": res.bounces_oos})
     bm = panel.bar_minutes
@@ -841,50 +838,53 @@ def analyze(panel: AssetPanel, cand: Candidate, cfg: DiscoverConfig = DiscoverCo
     return Analysis(res, tt, ab, bn)
 
 
-# --------------------------------------------------------------------------- beta-drift impact (dBeta * underlying)
-def beta_drift_impact(panel: AssetPanel, cand: Candidate, cfg: DiscoverConfig = DiscoverConfig(),
-                      split: int | None = None, window: int | None = None, stride: int | None = None) -> pd.DataFrame:
-    """Rolling beta-drift impact as percent of typical TRAIN spread RMS.
+# --------------------------------------------------------------------------- actual beta impact (for plotting / reporting)
+def actual_beta_impact(panel: AssetPanel, cand: Candidate, cfg: DiscoverConfig = DiscoverConfig(),
+                       split: int | None = None) -> pd.DataFrame:
+    """True beta impact: the cumulative excess chain-rule term of a causal rolling re-fit.
 
-        impact_j,t = 100 * (beta_j,t - beta_ref,j) * (x_j,t - mu_ref,j) / spread_rms_train
-        total_t    = sum_j impact_j,t
+        S_t - S_0 = cumPnL_t - (C_t - C_0),      C_t = cumsum( dbeta_t . x_t + da_t )
+        column j      = 100 * cumsum( dbeta_j,t * (x_j,t - mu_j) ) / train_spread_rms     (slope drift of term j)
+        "(intercept)" = 100 * cumsum( dalpha_t ) / train_spread_rms                       (intercept drift)
+        "total"       = sum of the columns
 
-    The denominator is the RMS deviation of the centred TRAIN residuals and remains fixed in OOS.
-    Thus total_t = +100 means re-fitting beta would shift the spread by an amount equal to one
-    typical training-spread RMS. This is a percentage of spread scale, not price or instantaneous
-    spread level. Re-fits are causal: each trailing window uses only bars <= t.
+    Reference = train fit (cfg.fit_method). Parameters before the first re-fit equal the reference (impact 0); afterwards they follow
+    rolling_params (previous drift_window bars, refreshed every drift_stride bars). The static-beta spread is unaffected:
+    this answers "how much of a re-fitted spread's movement would have been non-PnL".
+    attrs: split, sigma, components, beta_path (n, p), icpt_path (n,).
     """
     split = panel.split_index(cfg.train_frac) if split is None else split
-    window = cfg.drift_window if window is None else window
-    stride = cfg.drift_stride if stride is None else stride
     yv, X = panel.series(px(cand.y)), panel.matrix(cand.terms)
-    window = int(min(window, max(50, split // 2)))
-    method = "stable" if cfg.fit_method == "kalman" else cfg.fit_method       # python-loop Kalman is too slow to re-run per window
-    kw = {} if cfg.fit_method == "kalman" else cfg.fit_kw
-    _, ref, e_tr = _fit(yv[:split], X[:split], cfg)
+    icpt, ref, e_tr = _fit(yv[:split], X[:split], cfg)
     mu, sigma = X[:split].mean(0), float(e_tr.std())
 
-    T, p = X.shape
-    Bt = np.full((T, p), np.nan)
-    for t in range(window - 1, T, max(1, stride)):
-        Bt[t] = fit(yv[t - window + 1:t + 1], X[t - window + 1:t + 1], method, **kw)[1]
-    Bt = pd.DataFrame(Bt).ffill().to_numpy()
-    imp = 100.0 * (Bt - ref) * (X - mu) / max(sigma, 1e-12)
-    out = pd.DataFrame(imp, index=panel.logp.index, columns=[label(t) for t in cand.terms])
+    a_t, B_t = rolling_params(yv, X, cfg, icpt, ref)
+    C = excess_chain(X, a_t, B_t, icpt, ref, mu)
+    imp = 100.0 * C / max(sigma, 1e-12)
+    comps = [label(t) for t in cand.terms] + ["(intercept)"]
+    out = pd.DataFrame(imp, index=panel.logp.index, columns=comps)
     out["total"] = imp.sum(1)
-    out.attrs.update(split=split, sigma=sigma, window=window, stride=stride)
+    out.attrs.update(split=split, sigma=sigma, components=comps, beta_path=B_t, icpt_path=a_t)
     return out
 
 
-def drift_summary(imp: pd.DataFrame, spread: pd.Series | None = None) -> pd.DataFrame:
-    """Per-term and total RMS / 95th percentile / max impact, in % of TRAIN spread RMS.
+def realized_pnl_check(panel: AssetPanel, cand: Candidate, cfg: DiscoverConfig = DiscoverConfig(),
+                       split: int | None = None) -> float:
+    """Max abs error of  S_t - S_0 = cumPnL_t - (C_t - C_0)  over the sample (should be ~1e-12). Sanity check of the formula."""
+    split = panel.split_index(cfg.train_frac) if split is None else split
+    yv, X = panel.series(px(cand.y)), panel.matrix(cand.terms)
+    icpt, ref, _ = _fit(yv[:split], X[:split], cfg)
+    a_t, B_t = rolling_params(yv, X, cfg, icpt, ref)
+    C = excess_chain(X, a_t, B_t, icpt, ref, X[:split].mean(0)).sum(1)
+    S = yv - a_t - (B_t * X).sum(1)
+    pnl = np.cumsum(np.r_[0.0, np.diff(yv) - (B_t[:-1] * np.diff(X, axis=0)).sum(1)])
+    return float(np.abs((S - S[0]) - (pnl - (C - C[0]))).max())
 
-    `imp` is already normalised to percentages with a frozen training denominator, so the
-    summary must not multiply by 100 again. `spread` is accepted for call compatibility.
-    """
+
+def drift_summary(imp: pd.DataFrame, spread: pd.Series | None = None) -> pd.DataFrame:
     split = imp.attrs["split"]
     rows = []
-    for col in imp.columns:
+    for col in imp.attrs.get("components", list(imp.columns[:-1])) + ["total"]:
         for name, part in (("train", imp[col].iloc[:split]), ("oos", imp[col].iloc[split:])):
             v = part.dropna().to_numpy()
             if not len(v):
@@ -895,6 +895,7 @@ def drift_summary(imp: pd.DataFrame, spread: pd.Series | None = None) -> pd.Data
                 "rms_pct_train_spread_rms": float(np.sqrt((v * v).mean())),
                 "p95_pct_train_spread_rms": float(np.quantile(np.abs(v), 0.95)),
                 "max_pct_train_spread_rms": float(np.abs(v).max()),
+                "end_pct_train_spread_rms": float(v[-1]),
             })
     return pd.DataFrame(rows)
 
@@ -902,8 +903,7 @@ def drift_summary(imp: pd.DataFrame, spread: pd.Series | None = None) -> pd.Data
 # --------------------------------------------------------------------------- plotting
 def plot_spread(panel: AssetPanel, res: TestResult, cfg: DiscoverConfig = DiscoverConfig(), split: int | None = None,
                 show_betas: bool = False, show: bool = True):
-    """Spread, z-score and beta-drift impact as % of typical TRAIN spread RMS (bottom). Returns (fig, impact, summary).
-    show_betas=True adds a panel with the raw rolling betas for comparison (not comparable across terms; for reference)."""
+    """Spread, z-score and actual static beta impact (% of typical TRAIN spread RMS) on the bottom panel."""
     try:
         import matplotlib.pyplot as plt
     except ImportError:
@@ -913,22 +913,25 @@ def plot_spread(panel: AssetPanel, res: TestResult, cfg: DiscoverConfig = Discov
     split = panel.split_index(cfg.train_frac) if split is None else split
     cand = res.candidate
     yv, X = panel.series(px(cand.y)), panel.matrix(cand.terms)
-    icpt, slopes, e_tr, s_te, sigma, _ = _spread_parts(panel, cand, split, cfg)
+    icpt, slopes, e_tr, s_te, sigma, _, _ = _spread_parts(panel, cand, split, cfg)
     times = panel.logp.index
     z_tr, z_te = _z(e_tr, s_te, sigma, cfg)
-    imp = beta_drift_impact(panel, cand, cfg, split)
+    
+    # cumulative dBeta.x + dAlpha chain of a causal rolling re-fit (the non-PnL part of a re-fitted spread)
+    imp = actual_beta_impact(panel, cand, cfg, split)
     static = pd.Series(np.r_[e_tr, s_te], index=times)
     summ = drift_summary(imp, static)
 
     n = 4 if show_betas else 3
     fig, axes = plt.subplots(n, 1, figsize=(12, 3.6 * n + 1), sharex=True)
     ax1, ax2, ax3 = axes[:3]
+    
     ax1.plot(times[:split], e_tr, label="Train Spread", color="#1f77b4", alpha=0.8)
     ax1.plot(times[split:], s_te, label="OOS Spread", color="#ff7f0e", alpha=0.8)
     ax1.axvline(times[split], color="red", linestyle="--", label="Train/OOS Split")
     ax1.axhline(0, color="gray", linestyle=":", alpha=0.5)
     ax1.set_ylabel("Spread (Raw Units)")
-    ax1.set_title(f"StatArb Spread & Beta-Drift Impact [{cfg.fit_method}]: {cand.y} vs {' + '.join(label(t) for t in cand.terms)}")
+    ax1.set_title(f"Spread, z-score & beta impact chain [{cfg.fit_method}]: {cand.y} vs {' + '.join(label(t) for t in cand.terms)}")
     ax1.legend(loc="upper left")
     ax1.grid(True, alpha=0.3)
 
@@ -943,33 +946,27 @@ def plot_spread(panel: AssetPanel, res: TestResult, cfg: DiscoverConfig = Discov
     ax2.legend(loc="upper left")
     ax2.grid(True, alpha=0.3)
 
-    for col in imp.columns[:-1]:
+    for col in imp.attrs["components"]:
         ax3.plot(times, imp[col], label=f"{col}", alpha=0.7, linewidth=1)
-    ax3.plot(times, imp["total"], color="black", linewidth=1.8, label="TOTAL dBeta*(x-mu)")
-    ax3.axhspan(-cfg.drift_max, cfg.drift_max, color="green", alpha=0.08,
-                label=f"+/- {cfg.drift_max:g}% train-spread RMS cap")
+    ax3.plot(times, imp["total"], color="black", linewidth=1.8, label="TOTAL  C_t = cumsum(dBeta·x + dAlpha)")
     ax3.axhline(0, color="gray", linestyle=":", alpha=0.5)
     ax3.axvline(times[split], color="red", linestyle="--")
-    ax3.set_ylabel("Beta-drift impact\n(% of train-spread RMS)")
+    ax3.set_ylabel("Beta impact chain C_t\n(% of train-spread RMS)")
     ax3.legend(loc="upper left", ncol=2, fontsize=8)
     ax3.grid(True, alpha=0.3)
 
     if show_betas:
         ax4 = axes[3]
         _, ref, _ = _fit(yv[:split], X[:split], cfg)
-        w = imp.attrs["window"]
-        method = "stable" if cfg.fit_method == "kalman" else cfg.fit_method
-        Bt = np.full(X.shape, np.nan)
-        for t in range(w - 1, len(yv), max(1, imp.attrs["stride"])):
-            Bt[t] = fit(yv[t - w + 1:t + 1], X[t - w + 1:t + 1], method, **({} if cfg.fit_method == "kalman" else cfg.fit_kw))[1]
-        Bt = pd.DataFrame(Bt, index=times).ffill()
+        bp = imp.attrs["beta_path"]
         for j, t_name in enumerate(cand.terms):
-            ax4.plot(times, Bt[j], label=f"Rolling Beta ({label(t_name)})", alpha=0.8)
-            ax4.axhline(ref[j], linestyle=":", alpha=0.5)
+            ln, = ax4.plot(times, bp[:, j], linewidth=1.2, label=f"beta {label(t_name)}")
+            ax4.axhline(ref[j], color=ln.get_color(), linestyle="--", alpha=0.5)
         ax4.axvline(times[split], color="red", linestyle="--")
-        ax4.set_ylabel("Beta Value")
+        ax4.set_ylabel("Beta (solid: rolling re-fit,\ndashed: frozen train)")
         ax4.legend(loc="upper left", ncol=2, fontsize=8)
         ax4.grid(True, alpha=0.3)
+        
     axes[-1].set_xlabel("Time")
     plt.tight_layout()
     if show:
@@ -984,8 +981,6 @@ def run(panel: AssetPanel, y: str, seed_x: Sequence[str] | None = None,
     ranked = create_pair(panel.iloc(0, split), y, seed_x, cfg)
     results = []
     for c in ranked:
-        # A feature can be well-covered in train but missing in OOS. Do not let one such
-        # candidate crash the whole run or silently evaluate a partial sample.
         X = panel.matrix(c.terms)
         if not np.isfinite(X).all():
             continue
@@ -998,6 +993,7 @@ def run(panel: AssetPanel, y: str, seed_x: Sequence[str] | None = None,
         "max_share": r.candidate.max_share, "beta_blk_rng": r.beta_block_range,
         "max_beta_move": r.max_beta_move,
         "drift_train_pct_spread_rms": r.drift_train, "drift_oos_pct_spread_rms": r.drift_oos,
+        "icpt_drift_oos_pct": r.drift_icpt_oos, "icpt_move_pct": r.icpt_move,
         "p_ok": r.p_ok, "hl_ok": r.hl_ok, "dom_ok": r.dom_ok, "drift_ok": r.drift_ok, "passed": r.passed,
     } for r in results])
     return results, table
@@ -1005,19 +1001,17 @@ def run(panel: AssetPanel, y: str, seed_x: Sequence[str] | None = None,
 
 if __name__ == "__main__":
     SYMBOLS = ["ETH/USDT", "BTC/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT", "ADA/USDT"]
-    Y, SEED_X = "ETH/USDT", []  # empty = no forced hedge leg; search alternatives across the universe
+    Y, SEED_X = "ETH/USDT", []
     cfg = DiscoverConfig()
     panel = get_assets(SYMBOLS, start="2024-01-01", end="2024-01-31", bar="5min", market="um", cfg=cfg)
     results, table = run(panel, Y, SEED_X, cfg)
     pd.set_option("display.width", 250)
     print(table.to_string())
     if not results:
-        raise SystemExit("No candidates had complete train+OOS data. Reduce the feature pool or repair data coverage.")
+        raise SystemExit("No candidates had complete train+OOS data.")
     best = next((r for r in results if r.passed), results[0])
     a = analyze(panel, best.candidate, cfg)
     print("\n== terms ==\n", a.terms.to_string(), "\n\n== ablation ==\n", a.ablation.to_string(), "\n\n== bounces ==\n", a.bounces.to_string())
     
-    # Plot the spread, z-score, and the beta-drift impact (dBeta * underlying) chart
     fig, imp, summ = plot_spread(panel, best, cfg)
-    print("\n== beta-drift impact (% of typical train-spread RMS) ==\n", summ.to_string())
-    print("\nNote: mean_shift_pct_train_spread_rms is the signed OOS mean shift as % of typical train-spread RMS; diagnostic only, not a pass gate.")
+    print("\n== actual beta impact summary (% of typical train-spread RMS) ==\n", summ.to_string())
