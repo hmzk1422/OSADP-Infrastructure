@@ -1,0 +1,82 @@
+seed 7 | 20 iterations | timeframes (1,)
+
+=== formula stop | train half-life  (variant=None, smart=False)
+iterations 20 | segments 123 | OOS chunks 277 | trades 4,224 | abstaining smart folds 0
+exits: tp 42.7% | sl 43.6% | time 9.9% | window_end 3.8%
+Mean R/trade -0.2217 | sd 0.946 | trade-level t -15.23 | win rate 47.8% | total -936.5R
+Chunk bootstrap (2,000): E[R] -0.2211  95% CI [-0.2517, -0.1899]  P(E[R]>0) 0.0%  P05/P95 [-0.2469, -0.1956]  CVaR05 -0.2536
+chunks with positive expectancy: 61/277
+Per-iteration E[R] (20 independent draws): mean -0.2207 | median -0.2063 | P05/P95 [-0.3093, -0.1487] | iterations > 0: 0%
+Trades needed for 95% significance (trade-level): ~70 | have 4,224 -> enough
+
+=== smart classifier | train half-life  (variant=None, smart=True/classifier)
+iterations 20 | segments 123 | OOS chunks 277 | trades 219 | abstaining smart folds 0
+exits: tp 54.3% | sl 44.3% | window_end 1.4%
+Mean R/trade -0.2454 | sd 0.995 | trade-level t -3.65 | win rate 55.3% | total -53.7R
+Chunk bootstrap (2,000): E[R] -0.2419  95% CI [-0.3708, -0.1100]  P(E[R]>0) 0.0%  P05/P95 [-0.3522, -0.1314]  CVaR05 -0.3812
+chunks with positive expectancy: 17/49
+Per-iteration E[R] (18 independent draws): mean -0.1804 | median -0.2124 | P05/P95 [-0.5385, +0.3975] | iterations > 0: 28%
+Trades needed for 95% significance (trade-level): ~63 | have 219 -> enough
+
+=== smart RL | train half-life  (variant=None, smart=True/rl)
+iterations 20 | segments 123 | OOS chunks 277 | trades 158 | abstaining smart folds 267
+exits: tp 53.2% | sl 46.8%
+Mean R/trade -2.3318 | sd 3.341 | trade-level t -8.77 | win rate 31.0% | total -368.4R
+Chunk bootstrap (2,000): E[R] -2.2212  95% CI [-4.3729, -0.6542]  P(E[R]>0) 0.3%  P05/P95 [-4.0282, -0.7059]  CVaR05 -4.5140
+chunks with positive expectancy: 2/9
+Per-iteration E[R] (7 independent draws): mean -1.5824 | median -0.8654 | P05/P95 [-4.9976, +0.1274] | iterations > 0: 14%
+Trades needed for 95% significance (trade-level): ~8 | have 158 -> enough
+
+=== formula stop | spread stats  (variant=spread stats, smart=False)
+iterations 20 | segments 123 | OOS chunks 277 | trades 2,684 | abstaining smart folds 0
+exits: tp 40.6% | sl 43.7% | time 9.3% | window_end 6.4%
+Mean R/trade -0.1864 | sd 0.936 | trade-level t -10.32 | win rate 46.5% | total -500.4R
+Chunk bootstrap (2,000): E[R] -0.1859  95% CI [-0.2218, -0.1502]  P(E[R]>0) 0.0%  P05/P95 [-0.2153, -0.1555]  CVaR05 -0.2232
+chunks with positive expectancy: 82/277
+Per-iteration E[R] (20 independent draws): mean -0.1855 | median -0.1740 | P05/P95 [-0.3728, -0.0861] | iterations > 0: 5%
+Trades needed for 95% significance (trade-level): ~97 | have 2,684 -> enough
+
+=== smart classifier | spread stats  (variant=spread stats, smart=True/classifier)
+iterations 20 | segments 123 | OOS chunks 277 | trades 202 | abstaining smart folds 0
+exits: tp 48.0% | sl 51.0% | window_end 1.0%
+Mean R/trade -0.3896 | sd 1.011 | trade-level t -5.48 | win rate 48.5% | total -78.7R
+Chunk bootstrap (2,000): E[R] -0.3870  95% CI [-0.5460, -0.2154]  P(E[R]>0) 0.0%  P05/P95 [-0.5234, -0.2442]  CVaR05 -0.5524
+chunks with positive expectancy: 23/62
+Per-iteration E[R] (19 independent draws): mean -0.3495 | median -0.3673 | P05/P95 [-1.0395, +0.3889] | iterations > 0: 16%
+Trades needed for 95% significance (trade-level): ~26 | have 202 -> enough
+
+=== smart RL | spread stats  (variant=spread stats, smart=True/rl)
+iterations 20 | segments 123 | OOS chunks 277 | trades 257 | abstaining smart folds 254
+exits: tp 51.0% | sl 48.6% | window_end 0.4%
+Mean R/trade -1.6816 | sd 2.012 | trade-level t -13.40 | win rate 23.0% | total -432.2R
+Chunk bootstrap (2,000): E[R] -1.6772  95% CI [-2.3686, -1.0395]  P(E[R]>0) 0.0%  P05/P95 [-2.2665, -1.1337]  CVaR05 -2.4232
+chunks with positive expectancy: 2/20
+Per-iteration E[R] (12 independent draws): mean -1.4021 | median -1.0216 | P05/P95 [-3.6172, +0.1034] | iterations > 0: 8%
+Trades needed for 95% significance (trade-level): ~6 | have 257 -> enough
+
+=== formula stop | spread + order flow  (variant=spread + order flow, smart=False)
+iterations 20 | segments 123 | OOS chunks 277 | trades 13,339 | abstaining smart folds 0
+exits: tp 30.5% | sl 30.4% | time 38.0% | window_end 1.1%
+Mean R/trade -0.6756 | sd 0.893 | trade-level t -87.38 | win rate 27.3% | total -9012.4R
+Chunk bootstrap (2,000): E[R] -0.6750  95% CI [-0.7234, -0.6209]  P(E[R]>0) 0.0%  P05/P95 [-0.7167, -0.6304]  CVaR05 -0.7270
+chunks with positive expectancy: 43/277
+Per-iteration E[R] (20 independent draws): mean -0.6519 | median -0.6475 | P05/P95 [-0.8004, -0.4822] | iterations > 0: 0%
+Trades needed for 95% significance (trade-level): ~7 | have 13,339 -> enough
+
+=== smart classifier | spread + order flow  (variant=spread + order flow, smart=True/classifier)
+iterations 20 | segments 123 | OOS chunks 277 | trades 128 | abstaining smart folds 0
+exits: tp 49.2% | sl 48.4% | time 0.8% | window_end 1.6%
+Mean R/trade -0.3109 | sd 1.008 | trade-level t -3.49 | win rate 50.8% | total -39.8R
+Chunk bootstrap (2,000): E[R] -0.3070  95% CI [-0.5010, -0.1092]  P(E[R]>0) 0.2%  P05/P95 [-0.4670, -0.1418]  CVaR05 -0.5069
+chunks with positive expectancy: 12/34
+Per-iteration E[R] (15 independent draws): mean -0.2655 | median -0.3455 | P05/P95 [-0.7544, +0.2776] | iterations > 0: 20%
+Trades needed for 95% significance (trade-level): ~40 | have 128 -> enough
+
+=== smart RL | spread + order flow  (variant=spread + order flow, smart=True/rl)
+iterations 20 | segments 123 | OOS chunks 277 | trades 126 | abstaining smart folds 250
+exits: tp 49.2% | sl 50.8%
+Mean R/trade -1.1786 | sd 1.647 | trade-level t -8.03 | win rate 28.6% | total -148.5R
+Chunk bootstrap (2,000): E[R] -1.1867  95% CI [-1.7334, -0.7997]  P(E[R]>0) 0.0%  P05/P95 [-1.6119, -0.8500]  CVaR05 -1.7967
+chunks with positive expectancy: 2/18
+Per-iteration E[R] (12 independent draws): mean -1.1213 | median -1.0359 | P05/P95 [-3.1394, +0.3259] | iterations > 0: 17%
+Trades needed for 95% significance (trade-level): ~8 | have 126 -> enough
