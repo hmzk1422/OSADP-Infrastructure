@@ -5,6 +5,7 @@ pub mod core;
 pub mod exchange;
 #[path = "../live_strategy/mod.rs"]
 pub mod live_strategy;
+pub mod runtime_paths;
 use pyo3::prelude::*;
 
 #[pymodule]

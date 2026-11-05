@@ -21,7 +21,6 @@
 //! builds everywhere; the live loop only runs on Unix.
 
 #[cfg(any(unix, test))]
-use std::path::Path;
 
 #[cfg(unix)]
 use crate::connectors::binance::BinanceFuturesTrade;
@@ -111,7 +110,7 @@ struct ExecutionConfig {
 impl ExecutionConfig {
     #[allow(dead_code)]
     fn load() -> Result<Self, String> {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("config/execution.yaml");
+        let path = crate::runtime_paths::execution_config_path();
         let content = std::fs::read_to_string(&path)
             .map_err(|error| format!("read execution config {}: {error}", path.display()))?;
         Self::parse(&content)
@@ -218,7 +217,10 @@ impl OrderExecutor {
                 }
                 ExecutionMode::LiveTrade => {
                     if !config.allow_live_trading {
-                        return Err("live-trade execution requires allow_live_trading: true in uets/config/execution.yaml".into());
+                        return Err(
+                            "live-trade execution requires allow_live_trading: true in the execution config"
+                                .into(),
+                        );
                     }
                     let (Some(api_key), Some(secret_key)) = (api_key, secret_key) else {
                         return Err(

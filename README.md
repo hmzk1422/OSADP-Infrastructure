@@ -9,6 +9,22 @@ Desktop for UETS commands that need Linux Unix-domain sockets; market data is
 bind-mounted and remains on the host. Run the Python commands from an activated
 repository virtual environment with `python -m pip install -r requirements.txt`.
 
+## Setup OSADP (Source)
+Run the following command.
+```bash
+git clone https://github.com/hmzk1422/OSADP-Infrastructure.git
+cd OSADP-Infrastructure
+python -m venv venv
+python -m pip install -r requirements.txt
+```
+Once finished, continue to Run UETS to compile binary files
+
+## Setup OSADP (Binary)
+Primarily used for VPS execution/low constraint environment. Download binary executable directly. We moved from OCI to AWS-E2C so for reference, you may follow this step.
+1. Go to AWS E2C website then create account and configure VPS (RSS key, Ubuntu recommended)
+2. Connect to VPS with `ssh -i "RSS KEY" ubuntu@localip`
+3. Install binary executable using curl. 
+
 ## Run UETS
 
 Run from the repository root. The playback command runs directly in Python;

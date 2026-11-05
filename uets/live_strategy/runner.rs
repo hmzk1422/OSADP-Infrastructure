@@ -12,7 +12,7 @@ use crate::live_strategy::{LiveStrategy, load_strategy};
 
 /// Folders under `uets/live_strategy/` holding a strategy bundle.
 pub fn discover_strategy_dirs() -> Vec<String> {
-    let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("live_strategy");
+    let dir = crate::runtime_paths::package_dir().join("live_strategy");
     let Ok(entries) = std::fs::read_dir(dir) else {
         return Vec::new();
     };

@@ -1,7 +1,7 @@
 //! OFMR runtime configuration.
 //!
 //! Loads `ofmr.yaml` instead of silently using hard-coded values. Search order:
-//! `OFMR_SETTINGS_PATH`, then the known repository-relative locations below.
+//! `OFMR_SETTINGS_PATH`, then the configured UETS package directory.
 
 use serde::Deserialize;
 use std::{
@@ -131,6 +131,12 @@ impl Settings {
             .map_err(|e| format!("read OFMR settings {}: {e}", path.display()))?;
         let mut settings: Self = serde_yaml::from_str(&source)
             .map_err(|e| format!("parse OFMR settings {}: {e}", path.display()))?;
+        if !Path::new(&settings.model.path).is_absolute() {
+            settings.model.path = crate::runtime_paths::workspace_root()
+                .join(&settings.model.path)
+                .display()
+                .to_string();
+        }
         // Offline research uses the same threshold as ml_state_optimized's
         // CONFIDENCE_THRESHOLD (0.20 by default). Keep this override scoped to
         // the playback child process so live execution retains ofmr.yaml.
@@ -159,8 +165,7 @@ impl Settings {
                 path.display()
             ));
         }
-        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-        let candidates = [root.join("config/ofmr.yaml")];
+        let candidates = [crate::runtime_paths::config_dir().join("ofmr.yaml")];
         candidates
             .iter()
             .find(|p| p.is_file())
