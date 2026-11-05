@@ -375,10 +375,9 @@ fn raw_inputs_json(row: &crate::core::feature::FeatureRow) -> String {
 }
 
 pub fn default_live_db_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .map(|root| root.join("market_data").join("live_db"))
-        .unwrap_or_else(|| PathBuf::from("market_data/live_db"))
+    crate::runtime_paths::workspace_root()
+        .join("market_data")
+        .join("live_db")
 }
 
 pub fn new_session_id() -> String {

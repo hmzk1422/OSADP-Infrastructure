@@ -23,19 +23,17 @@ use uets_db::{QueryFilter, UetsDb};
 /// this binary is normally run through `cargo run` from anywhere and a capture
 /// landing in a random CWD is worse than one landing in a predictable place.
 fn default_live_db_dir() -> String {
-    // CARGO_MANIFEST_DIR is <repo>/uets, so exactly one parent reaches the
-    // repo root. Two would land beside the repo.
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .map(|root| root.join("market_data").join("live_db"))
-        .map(|p| p.display().to_string())
-        .unwrap_or_else(|| "market_data/live_db".to_string())
+    uets::runtime_paths::workspace_root()
+        .join("market_data")
+        .join("live_db")
+        .display()
+        .to_string()
 }
 
 /// Default diagnostic directory: `out/live` under the package (beside the
 /// monitor's frames), resolved from the manifest rather than the CWD.
 fn default_out_dir() -> String {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    uets::runtime_paths::package_dir()
         .join("out")
         .join("live")
         .display()
@@ -179,8 +177,7 @@ fn parse_strategy_instance(value: &str) -> Result<(String, String), String> {
 }
 
 fn execute_playback(args: &[String]) -> (ExitCode, String) {
-    let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-    let workspace_root = manifest_dir.parent().unwrap_or(manifest_dir);
+    let workspace_root = uets::runtime_paths::workspace_root();
     let python = std::env::var_os("PYTHON").unwrap_or_else(|| {
         let venv_python = if cfg!(windows) {
             workspace_root
@@ -391,7 +388,6 @@ fn research_method(selector: &str) -> Option<&'static str> {
 }
 
 fn run_research_batch(requested: &[String]) -> ExitCode {
-    let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let strategies = live_strategy::available_strategies();
     let mut succeeded = 0;
     let mut result_dirs = Vec::new();
@@ -422,7 +418,7 @@ fn run_research_batch(requested: &[String]) -> ExitCode {
 
         // execution.yaml is the mode and data-source authority. The @pwf/@mc/
         // @cpcv suffix selects only the evaluation method.
-        let config_path = manifest_dir.join("config").join("execution.yaml");
+        let config_path = uets::runtime_paths::execution_config_path();
         let args = vec![
             "--config".to_string(),
             config_path.display().to_string(),
@@ -460,8 +456,7 @@ fn run_research_batch(requested: &[String]) -> ExitCode {
 }
 
 fn configured_execution_mode() -> Result<(String, Vec<String>), String> {
-    let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-    let config_path = manifest_dir.join("config").join("execution.yaml");
+    let config_path = uets::runtime_paths::execution_config_path();
     let content = std::fs::read_to_string(&config_path)
         .map_err(|error| format!("read execution config {}: {error}", config_path.display()))?;
     let config: serde_yaml::Value = serde_yaml::from_str(&content)
@@ -522,10 +517,7 @@ impl Drop for LiveProcesses {
 fn run_live_system(requested: &[String]) -> Result<(), String> {
     use uets_gui::{Monitor, SocketSnapshotSource};
 
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .ok_or_else(|| "cannot resolve repository root".to_string())?
-        .to_path_buf();
+    let root = uets::runtime_paths::workspace_root();
     std::env::set_current_dir(&root).map_err(|error| error.to_string())?;
     let gui_socket = root.join("sockets").join("gui.sock");
     let snapshots = SocketSnapshotSource::bind(&gui_socket)
@@ -555,7 +547,7 @@ fn run_live_system(requested: &[String]) -> Result<(), String> {
     );
 
     // Read default tickers from execution.yaml
-    let exec_config_path = root.join("uets").join("config").join("execution.yaml");
+    let exec_config_path = uets::runtime_paths::execution_config_path();
     let exec_config: serde_yaml::Value = if exec_config_path.is_file() {
         let content = std::fs::read_to_string(&exec_config_path)
             .map_err(|error| format!("read execution config {error}"))?;

@@ -287,11 +287,7 @@ impl GuiBridge {
     /// The same `out/live` directory `monitor.rs` publishes frames into, so a
     /// dashboard has one place to watch instead of two.
     pub fn in_out_dir() -> Self {
-        Self::new(
-            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("out")
-                .join("live"),
-        )
+        Self::new(crate::runtime_paths::package_dir().join("out").join("live"))
     }
 
     pub fn dir(&self) -> &Path {

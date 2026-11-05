@@ -25,7 +25,7 @@ pub use traits::{ComputeFeatures, LiveStrategy, StateBuilder};
 
 /// Strategies compiled into this binary.
 pub fn available_strategies() -> Vec<String> {
-    discover_strategy_dirs()
+    vec!["ofmr".to_string(), "strategy2".to_string()]
 }
 
 /// Build a fresh bundle by name (independent state per call).

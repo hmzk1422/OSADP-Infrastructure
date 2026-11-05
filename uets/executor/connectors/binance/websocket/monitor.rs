@@ -25,7 +25,6 @@
 use serde_json::{Value, json};
 use std::fs;
 use std::io::Write;
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tungstenite::{Message, connect};
@@ -168,9 +167,7 @@ fn spawn_stream(url: String, on_msg: impl FnMut(&str) + Send + 'static) {
 pub fn monitor_websocket(symbol: &str) {
     let symbol = symbol.to_uppercase();
     let low = symbol.to_lowercase();
-    let out_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("out")
-        .join("live");
+    let out_dir = crate::runtime_paths::package_dir().join("out").join("live");
     let _ = fs::create_dir_all(&out_dir);
     let frame_path = out_dir.join(format!("{}.json", low));
     let tmp_path = frame_path.with_extension("json.tmp");

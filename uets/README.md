@@ -57,6 +57,37 @@ For a defensible capacity claim, report the host/container limits, build mode,
 strategy and feed workload, sample duration, worker count, and observed totals
 alongside the projection.
 
+## Linux VPS executable
+
+The Linux CI job publishes a release-mode x86_64 bundle built on Amazon Linux
+2023 named `uets-linux-x86_64-amazonlinux2023`. Download
+`uets-linux-x86_64.tar.gz` from the successful workflow run's artifacts and
+extract it on the VPS. The archive contains
+`bin/uets`, editable defaults under `uets/config/`, and the OFMR model file.
+Run it from the extracted directory so runtime data, logs, sockets, and the
+live database are stored there:
+
+```sh
+tar -xzf uets-linux-x86_64.tar.gz
+cd uets-linux-x86_64
+./bin/uets run ofmr@btcusdt
+```
+
+Edit `uets/config/execution.yaml` and `uets/config/ofmr.yaml` on the VPS; the
+binary reads them at startup, so restart the relevant process after changing a
+file. Set `UETS_HOME` to the deployment directory when launching from another
+working directory. `UETS_EXECUTION_CONFIG` and `OFMR_SETTINGS_PATH` can point
+to alternate YAML files. The bundle changes the default execution mode to
+`live-test` (real-time public data, simulated orders); set `testnet` or
+`live-trade` explicitly to route orders. Keep API credentials in environment
+variables, not in the bundle.
+
+The artifact targets Linux x86_64 and Amazon Linux 2023's glibc baseline. A
+native executable avoids installing Rust/Cargo and Cargo's build-time memory
+use on the VPS. It does not remove UETS runtime processes: the live dashboard
+still starts feed and strategy workers, so measure RSS under the intended
+workload before assuming a 1 GB host is sufficient.
+
 Each `run` also records a one-second telemetry snapshot in its own RocksDB at
 `market_data/live_db/telemetry/<run-id>/`. A snapshot contains total RSS and
 CPU across running strategy worker processes (feed-process overhead is not
@@ -94,9 +125,9 @@ development records, not a reconciled account ledger.
 
 Offline research is independent of the execution mode and never connects to
 an exchange. Run `run ofmr@pwf`, `run ofmr@cpcv`, or `run ofmr@mc` to select
-purged walk-forward, CPCV, or Monte Carlo. Available strategies are discovered
-from folders under `uets/live_strategy/`. Results, including the equity-path
-CSV and terminal path chart, are written under
+purged walk-forward, CPCV, or Monte Carlo. Available strategies are compiled
+into the executable from modules under `uets/live_strategy/`. Results,
+including the equity-path CSV and terminal path chart, are written under
 `market_data/live_db/playback/`. The Python runner can also be invoked directly
 with `python -m uets.playback`. Configure inputs and method-specific settings
 in `uets/config/execution.yaml`, `execution_cpcv.yaml`, and `execution_mc.yaml`.
