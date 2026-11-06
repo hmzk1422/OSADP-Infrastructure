@@ -2911,6 +2911,7 @@ dependencies = [
  "chrono",
  "libc",
  "pyo3",
+ "reqwest",
  "rocksdb",
  "serde",
  "serde_json",

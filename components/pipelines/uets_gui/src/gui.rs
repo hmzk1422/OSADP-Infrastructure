@@ -19,6 +19,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(default)]
 pub struct Statistics {
     pub starting_equity: Option<f64>,
     pub sortino: Option<f64>,
@@ -43,6 +44,14 @@ pub struct Statistics {
     pub latest_market_data: Option<String>,
     pub latest_decision: Option<String>,
     pub exchange_latency_ms: Option<f64>,
+    pub public_ping_rtt_ms: Option<f64>,
+    pub public_ping_rtt_mean_ms: Option<f64>,
+    pub public_ping_rtt_p95_ms: Option<f64>,
+    pub public_ping_rtt_samples: Option<u64>,
+    pub order_ack_rtt_ms: Option<f64>,
+    pub order_ack_rtt_mean_ms: Option<f64>,
+    pub order_ack_rtt_p95_ms: Option<f64>,
+    pub order_ack_rtt_samples: Option<u64>,
     pub processing_latency_ms: Option<f64>,
     pub processing_latency_mean_ms: Option<f64>,
     pub latency_sum_ms: Option<f64>,
@@ -216,6 +225,24 @@ pub fn aggregate_instances(
         (!values.is_empty()).then(|| values.iter().sum::<f64>() / values.len() as f64)
     };
     aggregate.exchange_latency_ms = mean(|s| s.exchange_latency_ms);
+    aggregate.public_ping_rtt_ms = mean(|s| s.public_ping_rtt_ms);
+    aggregate.public_ping_rtt_mean_ms = mean(|s| s.public_ping_rtt_mean_ms);
+    aggregate.public_ping_rtt_p95_ms = mean(|s| s.public_ping_rtt_p95_ms);
+    aggregate.public_ping_rtt_samples = Some(
+        instances
+            .iter()
+            .filter_map(|instance| instance.statistics.public_ping_rtt_samples)
+            .fold(0u64, u64::saturating_add),
+    );
+    aggregate.order_ack_rtt_ms = mean(|s| s.order_ack_rtt_ms);
+    aggregate.order_ack_rtt_mean_ms = mean(|s| s.order_ack_rtt_mean_ms);
+    aggregate.order_ack_rtt_p95_ms = mean(|s| s.order_ack_rtt_p95_ms);
+    aggregate.order_ack_rtt_samples = Some(
+        instances
+            .iter()
+            .filter_map(|instance| instance.statistics.order_ack_rtt_samples)
+            .fold(0u64, u64::saturating_add),
+    );
     aggregate.processing_latency_ms = mean(|s| s.processing_latency_ms);
     let (latency_sum, latency_count) = instances.iter().fold((0.0, 0u64), |(sum, count), i| {
         let n = i.statistics.latency_observations.unwrap_or(0);
@@ -757,8 +784,24 @@ fn render_statistics(
             stats.latency_observations.map(|v| v.to_string()),
         ),
         metric(
-            "Exchange→local ms",
+            "Feed event age ms",
             telemetry_number(stats.exchange_latency_ms),
+        ),
+        metric(
+            "Binance API RTT ms",
+            telemetry_number(stats.public_ping_rtt_ms),
+        ),
+        metric(
+            "Binance API RTT mean ms",
+            telemetry_number(stats.public_ping_rtt_mean_ms),
+        ),
+        metric(
+            "Binance API RTT p95 ms",
+            telemetry_number(stats.public_ping_rtt_p95_ms),
+        ),
+        metric(
+            "API RTT samples",
+            stats.public_ping_rtt_samples.map(|value| value.to_string()),
         ),
         metric("Latency p05 ms", telemetry_number(stats.latency_p05_ms)),
         metric("Latency p95 ms", telemetry_number(stats.latency_p95_ms)),
@@ -775,7 +818,23 @@ fn render_statistics(
             "Decision→order ms",
             telemetry_number(stats.decision_to_order_ms),
         ),
-        metric("Order→fill ms", telemetry_number(stats.order_to_fill_ms)),
+        metric(
+            "Order submit + fill lookup ms",
+            telemetry_number(stats.order_to_fill_ms),
+        ),
+        metric("Order ACK RTT ms", telemetry_number(stats.order_ack_rtt_ms)),
+        metric(
+            "Order ACK RTT mean ms",
+            telemetry_number(stats.order_ack_rtt_mean_ms),
+        ),
+        metric(
+            "Order ACK RTT p95 ms",
+            telemetry_number(stats.order_ack_rtt_p95_ms),
+        ),
+        metric(
+            "Order ACK samples",
+            stats.order_ack_rtt_samples.map(|value| value.to_string()),
+        ),
         metric("Tick→trade ms", telemetry_number(stats.tick_to_trade_ms)),
         metric("Memory MB", telemetry_number(stats.memory_mb)),
         metric("CPU %", telemetry_number(stats.cpu_percent)),
@@ -961,6 +1020,14 @@ mod aggregation_tests {
         item.statistics.latest_market_data = Some("1792249435161".into());
         item.statistics.latest_decision = Some("Hold".into());
         item.statistics.exchange_latency_ms = Some(12.0);
+        item.statistics.public_ping_rtt_ms = Some(20.0);
+        item.statistics.public_ping_rtt_mean_ms = Some(18.0);
+        item.statistics.public_ping_rtt_p95_ms = Some(25.0);
+        item.statistics.public_ping_rtt_samples = Some(4);
+        item.statistics.order_ack_rtt_ms = Some(80.0);
+        item.statistics.order_ack_rtt_mean_ms = Some(75.0);
+        item.statistics.order_ack_rtt_p95_ms = Some(90.0);
+        item.statistics.order_ack_rtt_samples = Some(2);
         item.statistics.processing_latency_ms = Some(0.25);
         item.statistics.latency_p95_ms = Some(0.4);
         item.statistics.clock_skew_mean_ms = Some(-3.0);
@@ -972,6 +1039,14 @@ mod aggregation_tests {
         assert_eq!(stats.latest_market_data.as_deref(), Some("1792249435161"));
         assert_eq!(stats.latest_decision.as_deref(), Some("Hold"));
         assert_eq!(stats.exchange_latency_ms, Some(12.0));
+        assert_eq!(stats.public_ping_rtt_ms, Some(20.0));
+        assert_eq!(stats.public_ping_rtt_mean_ms, Some(18.0));
+        assert_eq!(stats.public_ping_rtt_p95_ms, Some(25.0));
+        assert_eq!(stats.public_ping_rtt_samples, Some(4));
+        assert_eq!(stats.order_ack_rtt_ms, Some(80.0));
+        assert_eq!(stats.order_ack_rtt_mean_ms, Some(75.0));
+        assert_eq!(stats.order_ack_rtt_p95_ms, Some(90.0));
+        assert_eq!(stats.order_ack_rtt_samples, Some(2));
         assert_eq!(stats.processing_latency_ms, Some(0.25));
         assert_eq!(stats.latency_p95_ms, Some(0.4));
         assert_eq!(stats.clock_skew_mean_ms, Some(-3.0));

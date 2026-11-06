@@ -881,10 +881,9 @@ impl uets_gui::SnapshotSource for LiveDashboard {
                 .iter()
                 .filter_map(|item| {
                     let managed = self.instances.get_mut(&item.identity())?;
-                    let worker_running = managed
-                        .worker
-                        .as_mut()
-                        .is_some_and(|worker| worker.try_wait().is_ok_and(|status| status.is_none()));
+                    let worker_running = managed.worker.as_mut().is_some_and(|worker| {
+                        worker.try_wait().is_ok_and(|status| status.is_none())
+                    });
                     if !worker_running {
                         return None;
                     }
@@ -899,6 +898,14 @@ impl uets_gui::SnapshotSource for LiveDashboard {
                         latency_observations: stats.latency_observations.unwrap_or(0),
                         latency_p95_ms: stats.latency_p95_ms,
                         latency_p99_ms: stats.latency_p99_ms,
+                        public_ping_rtt_ms: stats.public_ping_rtt_ms,
+                        public_ping_rtt_mean_ms: stats.public_ping_rtt_mean_ms,
+                        public_ping_rtt_p95_ms: stats.public_ping_rtt_p95_ms,
+                        public_ping_rtt_samples: stats.public_ping_rtt_samples.unwrap_or(0),
+                        order_ack_rtt_ms: stats.order_ack_rtt_ms,
+                        order_ack_rtt_mean_ms: stats.order_ack_rtt_mean_ms,
+                        order_ack_rtt_p95_ms: stats.order_ack_rtt_p95_ms,
+                        order_ack_rtt_samples: stats.order_ack_rtt_samples.unwrap_or(0),
                     })
                 })
                 .collect::<Vec<_>>();
@@ -918,7 +925,7 @@ impl uets_gui::SnapshotSource for LiveDashboard {
                 .unwrap_or_default()
                 .as_millis() as u64;
             let record = TelemetryRecord {
-                schema: SchemaVersion::default(),
+                schema: SchemaVersion { major: 1, minor: 1 },
                 session_id: self.session_id.clone(),
                 timestamp_ms,
                 connection_count: connections.len(),

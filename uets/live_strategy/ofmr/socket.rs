@@ -91,6 +91,7 @@ struct OrderExecutor {
     sequence: u64,
     last_decision_to_order_ms: Option<f64>,
     last_order_to_fill_ms: Option<f64>,
+    last_order_ack_rtt_ms: Option<f64>,
 }
 
 #[cfg(any(unix, test))]
@@ -253,6 +254,7 @@ impl OrderExecutor {
             sequence: 0,
             last_decision_to_order_ms: None,
             last_order_to_fill_ms: None,
+            last_order_ack_rtt_ms: None,
         })
     }
 
@@ -267,6 +269,7 @@ impl OrderExecutor {
     ) -> Result<Vec<Fill>, String> {
         self.last_decision_to_order_ms = None;
         self.last_order_to_fill_ms = None;
+        self.last_order_ack_rtt_ms = None;
         if decision == Decision::Hold {
             return Ok(Vec::new());
         }
@@ -326,7 +329,9 @@ impl OrderExecutor {
         self.last_decision_to_order_ms = Some(decision_at.elapsed().as_secs_f64() * 1_000.0);
         if let Some(connector) = self.connector.as_mut() {
             let order_submitted_at = std::time::Instant::now();
-            let fills = connector.submit(&request).map_err(|error| {
+            let result = connector.submit(&request);
+            self.last_order_ack_rtt_ms = connector.last_order_ack_rtt_ms();
+            let fills = result.map_err(|error| {
                 format!(
                     "{} order {} failed: {error}",
                     self.mode,
@@ -595,7 +600,12 @@ pub fn run(socket_path: &str, symbol: &str) -> Result<(), String> {
         .map_err(|error| format!("UETS_STARTING_EQUITY must be a positive number: {error}"))?
         .unwrap_or(10_000.0);
     let mut account = StrategyAccount::new(starting_equity)?;
-    let mut telemetry = StrategyTelemetry::new(symbol, &account);
+    let ping_url = if executor.mode == "testnet" {
+        "https://testnet.binancefuture.com/fapi/v1/ping"
+    } else {
+        "https://fapi.binance.com/fapi/v1/ping"
+    };
+    let mut telemetry = StrategyTelemetry::new(symbol, &account, ping_url)?;
     // Live RocksDB link: live_db/<session>/ofmr@<asset>/ with trades/ +
     // portfolio/ keys. Session comes from the monitor env so every worker
     // of one `run` shares it; standalone workers mint their own.
@@ -719,8 +729,22 @@ pub fn run(socket_path: &str, symbol: &str) -> Result<(), String> {
             let previous_position = position;
             let bid_price = row.get("bid_price");
             let ask_price = row.get("ask_price");
-            let fills =
-                executor.act(symbol, decision, &mut position, price, bid_price, ask_price)?;
+            let fills_result =
+                executor.act(symbol, decision, &mut position, price, bid_price, ask_price);
+            telemetry.record_order_ack(executor.last_order_ack_rtt_ms);
+            let fills = match fills_result {
+                Ok(fills) => fills,
+                Err(error) => {
+                    telemetry.publish(
+                        Some(format!("{decision:?}")),
+                        Some(started.elapsed().as_nanos().min(u64::MAX as u128) as u64),
+                        executor.last_decision_to_order_ms,
+                        executor.last_order_to_fill_ms,
+                        &account,
+                    );
+                    return Err(error);
+                }
+            };
             account.apply_fills_and_mark(&fills, symbol, price);
             // live_db/trades: what the strategy saw (tick + features +
             // decision + fills), keyed by ticker/strategy/session. Fail-open.
@@ -862,6 +886,51 @@ fn portfolio_snapshot(
     }
 }
 
+#[cfg(any(unix, test))]
+#[derive(Clone, Copy, Debug, Default)]
+struct RttSummary {
+    latest_ms: Option<f64>,
+    mean_ms: Option<f64>,
+    p95_ms: Option<f64>,
+    samples: u64,
+}
+
+#[cfg(any(unix, test))]
+#[derive(Default)]
+struct RttWindow {
+    values_ms: std::collections::VecDeque<f64>,
+    total_samples: u64,
+}
+
+#[cfg(any(unix, test))]
+impl RttWindow {
+    const WINDOW_SIZE: usize = 300;
+
+    fn record(&mut self, value_ms: f64) {
+        self.values_ms.push_back(value_ms);
+        self.total_samples = self.total_samples.saturating_add(1);
+        if self.values_ms.len() > Self::WINDOW_SIZE {
+            self.values_ms.pop_front();
+        }
+    }
+
+    fn summary(&self) -> RttSummary {
+        let Some(latest_ms) = self.values_ms.back().copied() else {
+            return RttSummary::default();
+        };
+        let mean_ms = self.values_ms.iter().sum::<f64>() / self.values_ms.len() as f64;
+        let mut ordered = self.values_ms.iter().copied().collect::<Vec<_>>();
+        ordered.sort_by(f64::total_cmp);
+        let p95_index = ((ordered.len() as f64 * 0.95).ceil() as usize).saturating_sub(1);
+        RttSummary {
+            latest_ms: Some(latest_ms),
+            mean_ms: Some(mean_ms),
+            p95_ms: ordered.get(p95_index).copied(),
+            samples: self.total_samples,
+        }
+    }
+}
+
 #[cfg(unix)]
 struct StrategyTelemetry {
     socket: Option<std::os::unix::net::UnixDatagram>,
@@ -877,6 +946,8 @@ struct StrategyTelemetry {
     /// One-way exchange->local feed latency measured at socket receive
     /// (`received_time_ms - event_time_ms`), before any queueing here.
     exchange_latency_ms: Option<f64>,
+    public_ping: std::sync::Arc<std::sync::Mutex<RttWindow>>,
+    order_ack: RttWindow,
     /// RocksDB durability write time reported by the feed producer.
     persistence_write_ms: Option<f64>,
     persistence_errors: Option<u64>,
@@ -885,7 +956,7 @@ struct StrategyTelemetry {
 }
 #[cfg(unix)]
 impl StrategyTelemetry {
-    fn new(symbol: &str, account: &StrategyAccount) -> Self {
+    fn new(symbol: &str, account: &StrategyAccount, ping_url: &str) -> Result<Self, String> {
         use std::os::unix::net::UnixDatagram;
 
         let socket_path =
@@ -902,6 +973,51 @@ impl StrategyTelemetry {
                 None
             }
         };
+        let public_ping = std::sync::Arc::new(std::sync::Mutex::new(RttWindow::default()));
+        let ping_samples = std::sync::Arc::clone(&public_ping);
+        let ping_url = ping_url.to_string();
+        std::thread::Builder::new()
+            .name("uets-api-rtt".to_string())
+            .spawn(move || {
+                let client = match reqwest::blocking::Client::builder()
+                    .timeout(std::time::Duration::from_secs(5))
+                    .build()
+                {
+                    Ok(client) => client,
+                    Err(error) => {
+                        eprintln!("[telemetry] create Binance ping client failed: {error}");
+                        return;
+                    }
+                };
+                let mut warmup = true;
+                loop {
+                    let started = std::time::Instant::now();
+                    match client
+                        .get(&ping_url)
+                        .send()
+                        .and_then(|response| response.error_for_status())
+                        .and_then(|response| response.bytes().map(|_| ()))
+                    {
+                        Ok(()) => {
+                            if warmup {
+                                warmup = false;
+                            } else {
+                                let elapsed_ms = started.elapsed().as_secs_f64() * 1_000.0;
+                                ping_samples
+                                    .lock()
+                                    .unwrap_or_else(|error| error.into_inner())
+                                    .record(elapsed_ms);
+                            }
+                        }
+                        Err(error) => eprintln!("[telemetry] Binance ping failed: {error}"),
+                    }
+                    std::thread::sleep(
+                        std::time::Duration::from_secs(10).saturating_sub(started.elapsed()),
+                    );
+                }
+            })
+            .map_err(|error| format!("start Binance RTT telemetry thread: {error}"))?;
+
         let mut publisher = Self {
             socket,
             symbol: symbol.to_ascii_lowercase(),
@@ -914,6 +1030,8 @@ impl StrategyTelemetry {
             last_decision_to_order_ms: Some(0.0),
             last_order_to_fill_ms: Some(0.0),
             exchange_latency_ms: None,
+            public_ping,
+            order_ack: RttWindow::default(),
             persistence_write_ms: Some(0.0),
             persistence_errors: Some(0),
             persistence_queue: Some(0),
@@ -926,7 +1044,13 @@ impl StrategyTelemetry {
             None,
             account,
         );
-        publisher
+        Ok(publisher)
+    }
+
+    fn record_order_ack(&mut self, value_ms: Option<f64>) {
+        if let Some(value_ms) = value_ms.filter(|value| value.is_finite() && *value >= 0.0) {
+            self.order_ack.record(value_ms);
+        }
     }
 
     fn heartbeat(&mut self, account: &StrategyAccount) {
@@ -999,6 +1123,12 @@ impl StrategyTelemetry {
         // `or(Some(0.0))`: first sample primes the /proc delta, show 0.000 not n/a.
         let cpu_percent = self.cpu.sample().or(Some(0.0));
         let memory_mb = process_memory_mb();
+        let public_ping = self
+            .public_ping
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .summary();
+        let order_ack = self.order_ack.summary();
         // Tick-to-trade loop: feed one-way + compute + decision->order + order->fill.
         // This is how you prove orders arrive in time: compare the full loop
         // against the edge horizon (5m barriers). Loop << horizon = fast enough.
@@ -1086,6 +1216,14 @@ impl StrategyTelemetry {
             "order_to_fill_ms": self.last_order_to_fill_ms,
             "tick_to_trade_ms": tick_to_trade_ms,
             "exchange_latency_ms": self.exchange_latency_ms.or_else(|| self.last_event_time_ms.map(|event_time| (now_ms as i64 - event_time as i64) as f64)),
+            "public_ping_rtt_ms": public_ping.latest_ms,
+            "public_ping_rtt_mean_ms": public_ping.mean_ms,
+            "public_ping_rtt_p95_ms": public_ping.p95_ms,
+            "public_ping_rtt_samples": public_ping.samples,
+            "order_ack_rtt_ms": order_ack.latest_ms,
+            "order_ack_rtt_mean_ms": order_ack.mean_ms,
+            "order_ack_rtt_p95_ms": order_ack.p95_ms,
+            "order_ack_rtt_samples": order_ack.samples,
             "latency_p05_ms": self.latency.percentile(0.05).map(|value| value as f64 / 1_000_000.0),
             "latency_p95_ms": self.latency.percentile(0.95).map(|value| value as f64 / 1_000_000.0),
             "latency_p99_ms": self.latency.percentile(0.99).map(|value| value as f64 / 1_000_000.0),
@@ -1205,6 +1343,20 @@ pub fn run(_socket_path: &str, _symbol: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rtt_window_reports_latest_mean_and_p95() {
+        let mut window = RttWindow::default();
+        window.record(10.0);
+        window.record(20.0);
+        window.record(30.0);
+
+        let summary = window.summary();
+        assert_eq!(summary.latest_ms, Some(30.0));
+        assert_eq!(summary.mean_ms, Some(20.0));
+        assert_eq!(summary.p95_ms, Some(30.0));
+        assert_eq!(summary.samples, 3);
+    }
 
     #[test]
     fn decode_frame_parses_name_value_lines() {

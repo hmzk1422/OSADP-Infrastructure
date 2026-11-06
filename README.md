@@ -20,10 +20,17 @@ python -m pip install -r requirements.txt
 Once finished, continue to Run UETS to compile binary files
 
 ## Setup OSADP (Binary)
-Primarily used for VPS execution/low constraint environment. Download binary executable directly. We moved from OCI to AWS-E2C so for reference, you may follow this step.
-1. Go to AWS E2C website then create account and configure VPS (RSS key, Ubuntu recommended)
+Primarily used for VPS execution/low constraint environment. Download binary executable directly. We moved from OCI to AWS-EC2 so for reference, you may follow this step.
+1. Go to AWS EC2 website then create account and configure VPS (RSS key, Ubuntu recommended)
 2. Connect to VPS with `ssh -i "RSS KEY" ubuntu@localip`
-3. Install binary executable using curl. 
+3. Install binary executable using curl.
+  ```bash
+  curl -fL -O https://github.com/hmzk1422/OSADP-Infrastructure/releases/download/v4.0.0/uets-linux-x86_64-amazonlinux2023.zip
+  unzip uets-linux-x86_64-amazonlinux2023.zip
+  tar -xzf uets-linux-x86_64.tar.gz
+  cd uets-linux-x86_64
+  ./bin/uets help
+  ```
 
 ## Run UETS
 
