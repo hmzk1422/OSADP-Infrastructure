@@ -25,6 +25,7 @@ chrono = { version = "0.4", features = ["serde"] }
 # the feature layer cannot drift apart on schema or bar semantics.
 stream_handler = { path = "../components/pipelines/event_merger/live" }
 pyo3 = "0.29"
+reqwest = { version = "0.11", features = ["blocking"] }
 # Same major as what the `binance` crate pulls in (see Cargo.lock: 0.21.0) so
 # both resolve to one build. No TLS feature: tungstenite 0.21 enables
 # native-tls by default and the binance crate uses the vendored variant.

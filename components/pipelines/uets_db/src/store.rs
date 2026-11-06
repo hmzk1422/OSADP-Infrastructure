@@ -13,6 +13,72 @@ use thiserror::Error;
 
 use crate::schema::SchemaVersion;
 
+#[derive(serde::Deserialize, serde::Serialize)]
+struct LegacyTelemetryRecord {
+    schema: SchemaVersion,
+    session_id: String,
+    timestamp_ms: u64,
+    connection_count: usize,
+    total_ram_mb: f64,
+    total_cpu_percent: f64,
+    latency_mean_ms: Option<f64>,
+    latency_sum_ms: f64,
+    latency_observations: u64,
+    connections: Vec<LegacyConnectionTelemetry>,
+}
+
+#[derive(serde::Deserialize, serde::Serialize)]
+struct LegacyConnectionTelemetry {
+    strategy_id: String,
+    asset_id: String,
+    ram_mb: Option<f64>,
+    cpu_percent: Option<f64>,
+    latency_mean_ms: Option<f64>,
+    latency_sum_ms: f64,
+    latency_observations: u64,
+    latency_p95_ms: Option<f64>,
+    latency_p99_ms: Option<f64>,
+}
+
+impl From<LegacyTelemetryRecord> for TelemetryRecord {
+    fn from(record: LegacyTelemetryRecord) -> Self {
+        Self {
+            schema: record.schema,
+            session_id: record.session_id,
+            timestamp_ms: record.timestamp_ms,
+            connection_count: record.connection_count,
+            total_ram_mb: record.total_ram_mb,
+            total_cpu_percent: record.total_cpu_percent,
+            latency_mean_ms: record.latency_mean_ms,
+            latency_sum_ms: record.latency_sum_ms,
+            latency_observations: record.latency_observations,
+            connections: record
+                .connections
+                .into_iter()
+                .map(|connection| crate::schema::ConnectionTelemetry {
+                    strategy_id: connection.strategy_id,
+                    asset_id: connection.asset_id,
+                    ram_mb: connection.ram_mb,
+                    cpu_percent: connection.cpu_percent,
+                    latency_mean_ms: connection.latency_mean_ms,
+                    latency_sum_ms: connection.latency_sum_ms,
+                    latency_observations: connection.latency_observations,
+                    latency_p95_ms: connection.latency_p95_ms,
+                    latency_p99_ms: connection.latency_p99_ms,
+                    public_ping_rtt_ms: None,
+                    public_ping_rtt_mean_ms: None,
+                    public_ping_rtt_p95_ms: None,
+                    public_ping_rtt_samples: 0,
+                    order_ack_rtt_ms: None,
+                    order_ack_rtt_mean_ms: None,
+                    order_ack_rtt_p95_ms: None,
+                    order_ack_rtt_samples: 0,
+                })
+                .collect(),
+        }
+    }
+}
+
 /// Database errors.
 #[derive(Debug, Error)]
 pub enum DbError {
@@ -306,10 +372,15 @@ impl UetsDb {
             if !key.starts_with(prefix.as_bytes()) {
                 break;
             }
-            records.push(
-                bincode::deserialize(value.as_ref())
-                    .map_err(|e| DbError::Serialization(e.to_string()))?,
-            );
+            let record = match bincode::deserialize(value.as_ref()) {
+                Ok(record) => record,
+                Err(current_error) => {
+                    let legacy: LegacyTelemetryRecord = bincode::deserialize(value.as_ref())
+                        .map_err(|_| DbError::Serialization(current_error.to_string()))?;
+                    legacy.into()
+                }
+            };
+            records.push(record);
         }
         Ok(records)
     }
@@ -906,6 +977,97 @@ mod tests {
         assert!(report.is_clean());
         assert_eq!(report.trade_records, 1);
         assert_eq!(report.active_sessions, 1);
+
+        let _ = db.shutdown();
+        let _ = fs::remove_dir_all(&path);
+    }
+
+    #[test]
+    fn telemetry_round_trip_persists_rtt_summaries() {
+        let path = temp_db_path();
+        let db = UetsDb::open(&path).unwrap();
+        let record = TelemetryRecord {
+            schema: SchemaVersion { major: 1, minor: 1 },
+            session_id: "rtt_session".to_string(),
+            timestamp_ms: 456,
+            connection_count: 1,
+            total_ram_mb: 10.0,
+            total_cpu_percent: 5.0,
+            latency_mean_ms: Some(0.5),
+            latency_sum_ms: 1.0,
+            latency_observations: 2,
+            connections: vec![crate::schema::ConnectionTelemetry {
+                strategy_id: "ofmr".to_string(),
+                asset_id: "btcusdt".to_string(),
+                ram_mb: Some(10.0),
+                cpu_percent: Some(5.0),
+                latency_mean_ms: Some(0.5),
+                latency_sum_ms: 1.0,
+                latency_observations: 2,
+                latency_p95_ms: Some(0.8),
+                latency_p99_ms: Some(0.9),
+                public_ping_rtt_ms: Some(42.0),
+                public_ping_rtt_mean_ms: Some(40.0),
+                public_ping_rtt_p95_ms: Some(45.0),
+                public_ping_rtt_samples: 10,
+                order_ack_rtt_ms: Some(80.0),
+                order_ack_rtt_mean_ms: Some(75.0),
+                order_ack_rtt_p95_ms: Some(85.0),
+                order_ack_rtt_samples: 3,
+            }],
+        };
+        db.write_telemetry(&record).unwrap();
+
+        let records = db.query_telemetry("rtt_session").unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].schema.minor, 1);
+        assert_eq!(records[0].connections[0].public_ping_rtt_ms, Some(42.0));
+        assert_eq!(records[0].connections[0].public_ping_rtt_samples, 10);
+        assert_eq!(records[0].connections[0].order_ack_rtt_p95_ms, Some(85.0));
+        assert_eq!(records[0].connections[0].order_ack_rtt_samples, 3);
+
+        let _ = db.shutdown();
+        let _ = fs::remove_dir_all(&path);
+    }
+
+    #[test]
+    fn query_telemetry_reads_legacy_records_without_rtt_fields() {
+        let path = temp_db_path();
+        let db = UetsDb::open(&path).unwrap();
+        let legacy = LegacyTelemetryRecord {
+            schema: SchemaVersion::default(),
+            session_id: "legacy_session".to_string(),
+            timestamp_ms: 123,
+            connection_count: 1,
+            total_ram_mb: 10.0,
+            total_cpu_percent: 5.0,
+            latency_mean_ms: Some(0.5),
+            latency_sum_ms: 1.0,
+            latency_observations: 2,
+            connections: vec![LegacyConnectionTelemetry {
+                strategy_id: "ofmr".to_string(),
+                asset_id: "btcusdt".to_string(),
+                ram_mb: Some(10.0),
+                cpu_percent: Some(5.0),
+                latency_mean_ms: Some(0.5),
+                latency_sum_ms: 1.0,
+                latency_observations: 2,
+                latency_p95_ms: Some(0.8),
+                latency_p99_ms: Some(0.9),
+            }],
+        };
+        db.telemetry
+            .insert(
+                b"legacy_session|00000000000000000123",
+                bincode::serialize(&legacy).unwrap(),
+            )
+            .unwrap();
+
+        let records = db.query_telemetry("legacy_session").unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].connections[0].latency_p95_ms, Some(0.8));
+        assert_eq!(records[0].connections[0].public_ping_rtt_ms, None);
+        assert_eq!(records[0].connections[0].order_ack_rtt_samples, 0);
 
         let _ = db.shutdown();
         let _ = fs::remove_dir_all(&path);

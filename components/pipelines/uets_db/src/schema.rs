@@ -169,7 +169,7 @@ pub struct PortfolioRecord {
     pub win_rate: f64,
 }
 
-/// One session-wide live resource and strategy-latency sample.
+/// One session-wide live resource, strategy-latency, and network-RTT sample.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TelemetryRecord {
     pub schema: SchemaVersion,
@@ -199,6 +199,16 @@ pub struct ConnectionTelemetry {
     pub latency_observations: u64,
     pub latency_p95_ms: Option<f64>,
     pub latency_p99_ms: Option<f64>,
+    /// Latest successful Binance Futures public ping RTT in milliseconds.
+    pub public_ping_rtt_ms: Option<f64>,
+    pub public_ping_rtt_mean_ms: Option<f64>,
+    pub public_ping_rtt_p95_ms: Option<f64>,
+    pub public_ping_rtt_samples: u64,
+    /// Latest successful Binance order endpoint response RTT in milliseconds.
+    pub order_ack_rtt_ms: Option<f64>,
+    pub order_ack_rtt_mean_ms: Option<f64>,
+    pub order_ack_rtt_p95_ms: Option<f64>,
+    pub order_ack_rtt_samples: u64,
 }
 
 /// Session metadata — enables independent querying, reporting, archival

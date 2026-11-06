@@ -93,8 +93,14 @@ Each `run` also records a one-second telemetry snapshot in its own RocksDB at
 CPU across running strategy worker processes (feed-process overhead is not
 included), per-connection readings, and cumulative
 strategy-compute latency sum, observation count, arithmetic mean, p95, and p99
-since each worker started. RAM and CPU are point-in-time samples; latency stats
-cover all observations accumulated by each worker. Inspect
+since each worker started. It also stores Binance Futures public API ping RTT
+and order-acknowledgement RTT summaries per connection. Public ping RTT is
+sampled every 10 seconds without submitting an order; order-ack RTT measures
+the REST order request/response and is only available in `testnet` or
+`live-trade` mode (it is unavailable in `live-test`, where orders are simulated).
+The RTT means and p95s use each worker's most recent 300 successful samples.
+RAM and CPU are point-in-time samples; strategy-latency stats cover all
+observations accumulated by each worker. Inspect
 the latest samples with:
 
 ```sh

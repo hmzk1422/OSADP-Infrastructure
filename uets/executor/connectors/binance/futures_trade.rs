@@ -19,6 +19,8 @@ use crate::exchange::{ConnectorError, ExecutionConnector, Venue, VenueSpec};
 pub struct BinanceFuturesTrade {
     account: FuturesAccount,
     quote_asset: String,
+    /// Round-trip duration of the last order endpoint request, excluding fill-history lookup.
+    last_order_ack_rtt_ms: Option<f64>,
 }
 
 impl BinanceFuturesTrade {
@@ -28,6 +30,7 @@ impl BinanceFuturesTrade {
         Self {
             account,
             quote_asset: "USDT".to_string(),
+            last_order_ack_rtt_ms: None,
         }
     }
 
@@ -46,6 +49,11 @@ impl BinanceFuturesTrade {
         self.quote_asset = quote_asset.into().to_ascii_uppercase();
         self
     }
+
+    /// RTT observed around the exchange order request/response.
+    pub fn last_order_ack_rtt_ms(&self) -> Option<f64> {
+        self.last_order_ack_rtt_ms
+    }
 }
 
 impl Venue for BinanceFuturesTrade {
@@ -56,6 +64,7 @@ impl Venue for BinanceFuturesTrade {
 
 impl ExecutionConnector for BinanceFuturesTrade {
     fn submit(&mut self, request: &OrderRequest) -> Result<Vec<Fill>, ConnectorError> {
+        self.last_order_ack_rtt_ms = None;
         request.validate()?;
         if request.order_type == OrderType::Limit {
             return Err(ConnectorError::Unsupported(
@@ -84,29 +93,29 @@ impl ExecutionConnector for BinanceFuturesTrade {
             (OrderType::Limit, TimeInForce::Fok) => Some(BinanceTimeInForce::FOK),
             (OrderType::Market, _) => None,
         };
-        let response = self
-            .account
-            .custom_order(CustomOrderRequest {
-                symbol: request.symbol.clone(),
-                side: match request.side {
-                    Side::Buy => BinanceSide::Buy,
-                    Side::Sell => BinanceSide::Sell,
-                },
-                position_side: None,
-                order_type,
-                time_in_force,
-                qty: Some(request.qty),
-                reduce_only: Some(request.reduce_only),
-                price: request.limit_price,
-                stop_price: None,
-                close_position: None,
-                activation_price: None,
-                callback_rate: None,
-                working_type: None,
-                price_protect: None,
-                new_client_order_id: request.client_order_id.clone(),
-            })
-            .map_err(map_error)?;
+        let order_request_started = std::time::Instant::now();
+        let response = self.account.custom_order(CustomOrderRequest {
+            symbol: request.symbol.clone(),
+            side: match request.side {
+                Side::Buy => BinanceSide::Buy,
+                Side::Sell => BinanceSide::Sell,
+            },
+            position_side: None,
+            order_type,
+            time_in_force,
+            qty: Some(request.qty),
+            reduce_only: Some(request.reduce_only),
+            price: request.limit_price,
+            stop_price: None,
+            close_position: None,
+            activation_price: None,
+            callback_rate: None,
+            working_type: None,
+            price_protect: None,
+            new_client_order_id: request.client_order_id.clone(),
+        });
+        self.last_order_ack_rtt_ms = Some(order_request_started.elapsed().as_secs_f64() * 1_000.0);
+        let response = response.map_err(map_error)?;
 
         if response.executed_qty <= 0.0 {
             return Err(ConnectorError::Transport(format!(
