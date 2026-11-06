@@ -21,7 +21,6 @@
 //! builds everywhere; the live loop only runs on Unix.
 
 #[cfg(any(unix, test))]
-
 #[cfg(unix)]
 use crate::connectors::binance::BinanceFuturesTrade;
 #[cfg(any(unix, test))]
