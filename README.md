@@ -24,7 +24,8 @@ Primarily used for VPS execution/low constraint environment. Download binary exe
 1. Go to AWS EC2 website then create account and configure VPS (RSS key, Ubuntu recommended)
 2. Connect to VPS with `ssh -i "RSS KEY" ubuntu@localip`
 3. Install binary executable using curl.
-  ```curl -fL -O https://github.com/hmzk1422/OSADP-Infrastructure/releases/download/v4.0.0/uets-linux-x86_64.tar.gz
+  ```
+  curl -fL -O https://github.com/hmzk1422/OSADP-Infrastructure/releases/download/v4.0.0/uets-linux-x86_64.tar.gz
   tar -xzf uets-linux-x86_64.tar.gz
   cd uets-linux-x86_64
   ./bin/uets help
