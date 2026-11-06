@@ -70,7 +70,7 @@ jobs:
             --workdir /workspace \
             amazonlinux:2023 \
             bash -euc '
-              dnf install -y gcc gcc-c++ clang cmake make openssl-devel pkgconf-pkg-config perl python3 python3-devel curl tar gzip git
+              dnf install -y gcc gcc-c++ clang cmake make openssl-devel pkgconf-pkg-config perl python3 python3-devel tar gzip git
               curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
               source "$HOME/.cargo/env"
               export CARGO_TARGET_DIR=/tmp/uets-target
