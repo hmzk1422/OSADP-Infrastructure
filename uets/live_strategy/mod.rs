@@ -31,7 +31,10 @@ pub fn available_strategies() -> Vec<String> {
 /// Build a fresh bundle by name (independent state per call).
 pub fn load_strategy(name: &str) -> Result<LiveStrategy, String> {
     let base = name.split_once('@').map_or(name, |(strategy, _)| strategy);
-    if !available_strategies().iter().any(|available| available == base) {
+    if !available_strategies()
+        .iter()
+        .any(|available| available == base)
+    {
         return Err(format!(
             "unknown strategy folder '{base}' (discovered: {:?})",
             available_strategies()
@@ -39,9 +42,7 @@ pub fn load_strategy(name: &str) -> Result<LiveStrategy, String> {
     }
 
     match base {
-        "ofmr" => {
-            ofmr::load()
-        }
+        "ofmr" => ofmr::load(),
         "strategy2" => strategy2::load(),
         other => Err(format!(
             "strategy folder '{other}' has no compiled loader; add its module to live_strategy"
@@ -54,9 +55,10 @@ mod tests {
     use super::*;
     use crate::core::feature::FeatureRow;
 
-    fn row(price: f64) -> FeatureRow {
+    fn row(price: f64, event_time_ms: f64) -> FeatureRow {
         let mut r = FeatureRow::new();
         r.insert("price", price);
+        r.insert("event_time_ms", event_time_ms);
         r
     }
 
@@ -75,19 +77,33 @@ mod tests {
     #[test]
     fn discovery_lists_strategy_folders() {
         let dirs = discover_strategy_dirs();
-        assert!(available_strategies().contains(&"ofmr".to_string()), "got {dirs:?}");
-        assert!(available_strategies().contains(&"strategy2".to_string()), "got {dirs:?}");
+        assert!(
+            available_strategies().contains(&"ofmr".to_string()),
+            "got {dirs:?}"
+        );
+        assert!(
+            available_strategies().contains(&"strategy2".to_string()),
+            "got {dirs:?}"
+        );
     }
 
     #[test]
     fn step_is_isolated_per_strategy_and_symbol() {
         let mut runner = StrategyRunner::new();
-        runner.step("ofmr", "BTCUSDT", &row(100.0)).unwrap();
-        runner.step("strategy2", "BTCUSDT", &row(100.0)).unwrap();
+        runner
+            .step("ofmr", "BTCUSDT", &row(100.0, 1_000.0))
+            .unwrap();
+        runner
+            .step("strategy2", "BTCUSDT", &row(100.0, 1_000.0))
+            .unwrap();
         assert_eq!(runner.slot_count(), 2);
-        runner.step("ofmr", "BTCUSDT", &row(101.0)).unwrap();
+        runner
+            .step("ofmr", "BTCUSDT", &row(101.0, 2_000.0))
+            .unwrap();
         assert_eq!(runner.slot_count(), 2, "same slot reused");
-        runner.step("ofmr", "ETHUSDT", &row(100.0)).unwrap();
+        runner
+            .step("ofmr", "ETHUSDT", &row(100.0, 1_000.0))
+            .unwrap();
         assert_eq!(runner.slot_count(), 3);
     }
 }

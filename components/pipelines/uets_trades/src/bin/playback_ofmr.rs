@@ -1,9 +1,14 @@
 use std::collections::BTreeMap;
-use std::fs::File;
-use std::path::PathBuf;
+use std::fs::{self, File};
+use std::io::{BufWriter, Write};
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use arrow::array::{Array, Float64Array, Int32Array, TimestampMicrosecondArray};
+use arrow::array::{
+    Array, BooleanArray, Float64Array, Int32Array, Int64Array, LargeStringArray, StringArray,
+    TimestampMicrosecondArray, UInt64Array,
+};
+use arrow::record_batch::RecordBatch;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use uets::core::feature::FeatureRow;
 use uets::core::strategy::{Decision, MarketState, Position};
@@ -13,7 +18,9 @@ use uets::live_strategy::ofmr::{
     strategy::{OfmrStrategy, barrier_fractions_from_features},
 };
 use uets::live_strategy::{ComputeFeatures, StateBuilder};
-use uets_trades::playback::crypto_l2::{EventType, load_merged_parquet, prepare_playback};
+use uets_trades::playback::crypto_l2::{
+    EventType, MergedRow, load_merged_parquet, prepare_playback,
+};
 
 const STATE_SPACE_FEATURES: [&str; 15] = [
     "spread_bps_z",
@@ -91,6 +98,90 @@ impl ActiveBarriers {
         } else {
             price >= self.stop || price <= self.target
         }
+    }
+}
+
+struct ParityTradeState {
+    position: Position,
+    entry_price: f64,
+    entry_timestamp_ms: i64,
+    last_exit_time_ms: i64,
+    trades_this_hour: u32,
+    current_hour: Option<i64>,
+}
+
+impl Default for ParityTradeState {
+    fn default() -> Self {
+        Self {
+            position: Position::Flat,
+            entry_price: 0.0,
+            entry_timestamp_ms: 0,
+            last_exit_time_ms: 0,
+            trades_this_hour: 0,
+            current_hour: None,
+        }
+    }
+}
+
+fn parity_update(
+    strategy: &OfmrStrategy,
+    state: &mut ParityTradeState,
+    features: &FeatureRow,
+    timestamp_ms: i64,
+    price: f64,
+    settings: &Settings,
+) -> (i32, f64) {
+    let hour = timestamp_ms.div_euclid(3_600_000);
+    if state.current_hour != Some(hour) {
+        state.trades_this_hour = 0;
+        state.current_hour = Some(hour);
+    }
+
+    match state.position {
+        Position::Flat => {
+            if timestamp_ms - state.last_exit_time_ms
+                < (settings.trade.lockout_seconds * 1_000.0) as i64
+                || state.trades_this_hour >= settings.trade.max_trades_per_hour
+            {
+                return (0, 0.0);
+            }
+            let market = MarketState {
+                features: features.clone(),
+                position: Position::Flat,
+                sequence: timestamp_ms.div_euclid(1_000) as u64,
+            };
+            if strategy.decide(&market) != Decision::EnterLong {
+                return (0, 0.0);
+            }
+            let (stop_fraction, _) = barrier_fractions_from_features(features);
+            let stop_fraction = stop_fraction.max(settings.trade.stop_loss_bps / 10_000.0);
+            state.position = Position::Long;
+            state.entry_price = price;
+            state.entry_timestamp_ms = timestamp_ms;
+            state.trades_this_hour += 1;
+            (1, stop_fraction)
+        }
+        Position::Long => {
+            let entry_price = state.entry_price;
+            let (raw_stop_fraction, target_fraction) = barrier_fractions_from_features(features);
+            let stop_price = (entry_price * (1.0 - raw_stop_fraction))
+                .max(entry_price * (1.0 - settings.trade.stop_loss_bps / 10_000.0));
+            let target_price = (entry_price * (1.0 + target_fraction * 10.0))
+                .min(entry_price * (1.0 + settings.trade.take_profit_bps / 10_000.0));
+            let barrier_hit = price <= stop_price || price >= target_price;
+            let timeout = timestamp_ms - state.entry_timestamp_ms
+                > settings.feature.htf_timeframe_secs as i64 * 1_000;
+            if barrier_hit || timeout {
+                state.position = Position::Flat;
+                state.entry_price = 0.0;
+                state.entry_timestamp_ms = 0;
+                state.last_exit_time_ms = timestamp_ms;
+                (2, 0.0)
+            } else {
+                (0, raw_stop_fraction)
+            }
+        }
+        Position::Short => (0, 0.0),
     }
 }
 
@@ -445,7 +536,11 @@ fn evaluate_state_space_fold(
     for index in first_index + 1..=last_index {
         let day = rows[index].timestamp_ms.div_euclid(86_400_000);
         if day != current_day {
-            daily_returns.push(checked_relative_return(equity, day_start_equity, "daily equity")?);
+            daily_returns.push(checked_relative_return(
+                equity,
+                day_start_equity,
+                "daily equity",
+            )?);
             day_start_equity = equity;
             current_day = day;
         }
@@ -479,7 +574,11 @@ fn evaluate_state_space_fold(
     if active_side != 0.0 {
         equity *= 1.0 - fee_rate;
     }
-    daily_returns.push(checked_relative_return(equity, day_start_equity, "daily equity")?);
+    daily_returns.push(checked_relative_return(
+        equity,
+        day_start_equity,
+        "daily equity",
+    )?);
     let downside_square_sum: f64 = daily_returns
         .iter()
         .map(|daily_return| daily_return.min(0.0).powi(2))
@@ -513,7 +612,9 @@ fn checked_relative_return(
     label: &str,
 ) -> Result<f64, Box<dyn std::error::Error>> {
     if !value.is_finite() || value <= 0.0 || !base.is_finite() || base <= 0.0 {
-        return Err(format!("{label} numerator and denominator must be positive and finite").into());
+        return Err(
+            format!("{label} numerator and denominator must be positive and finite").into(),
+        );
     }
     let result = value / base - 1.0;
     if !result.is_finite() {
@@ -640,17 +741,192 @@ fn run_state_space(
     Ok(())
 }
 
+fn load_matched_parquet(
+    path: &Path,
+) -> Result<Vec<(i64, u64, MergedRow)>, Box<dyn std::error::Error>> {
+    let file = File::open(path)?;
+    let builder = ParquetRecordBatchReaderBuilder::try_new(file)?;
+    let mut reader = builder.with_batch_size(65_536).build()?;
+    let mut rows = Vec::new();
+
+    for batch in &mut reader {
+        let batch = batch?;
+        let timestamps = required_i64(&batch, "timestamp")?;
+        let sequences = required_u64(&batch, "event_sequence")?;
+        let event_types = required_array(&batch, "event_type")?;
+        let bid_prices = required_f64(&batch, "book_state__best_bid_price")?;
+        let bid_quantities = required_f64(&batch, "book_state__best_bid_qty")?;
+        let ask_prices = required_f64(&batch, "book_state__best_ask_price")?;
+        let ask_quantities = required_f64(&batch, "book_state__best_ask_qty")?;
+        let trade_ids = required_i64(&batch, "agg__agg_trade_id")?;
+        let trade_prices = required_f64(&batch, "agg__price")?;
+        let trade_quantities = required_f64(&batch, "agg__quantity")?;
+        let buyer_makers = required_bool(&batch, "agg__is_buyer_maker")?;
+
+        for index in 0..batch.num_rows() {
+            if timestamps.is_null(index) || sequences.is_null(index) {
+                return Err(
+                    invalid_data("matched row has a null timestamp or event_sequence").into(),
+                );
+            }
+            let timestamp_ns = timestamps.value(index);
+            if timestamp_ns < 0 {
+                return Err(invalid_data("matched row has a negative timestamp").into());
+            }
+            let raw_event_type = string_value(event_types, index)?;
+            let event_type = match raw_event_type.as_str() {
+                "LOB" => EventType::Lob,
+                "TRADE" => EventType::Trade,
+                "BOOKDEPTH" => EventType::Depth,
+                other => {
+                    return Err(
+                        invalid_data(format!("unsupported matched event_type {other:?}")).into(),
+                    );
+                }
+            };
+            let row = MergedRow {
+                timestamp_ms: timestamp_ns.div_euclid(1_000_000),
+                event_type: Some(event_type),
+                event_type_raw: raw_event_type,
+                best_bid_price: optional_f64(bid_prices, index),
+                best_bid_qty: optional_f64(bid_quantities, index),
+                best_ask_price: optional_f64(ask_prices, index),
+                best_ask_qty: optional_f64(ask_quantities, index),
+                agg_trade_id: optional_i64(trade_ids, index),
+                trade_price: optional_f64(trade_prices, index),
+                trade_qty: optional_f64(trade_quantities, index),
+                is_buyer_maker: optional_bool(buyer_makers, index),
+                ..MergedRow::default()
+            };
+            rows.push((timestamp_ns, sequences.value(index), row));
+        }
+    }
+    Ok(rows)
+}
+
+fn required_array<'a>(batch: &'a RecordBatch, name: &str) -> Result<&'a dyn Array, std::io::Error> {
+    batch
+        .column_by_name(name)
+        .map(|column| column.as_ref())
+        .ok_or_else(|| invalid_data(format!("matched Parquet is missing column {name:?}")))
+}
+
+fn required_f64<'a>(
+    batch: &'a RecordBatch,
+    name: &str,
+) -> Result<&'a Float64Array, std::io::Error> {
+    required_array(batch, name)?
+        .as_any()
+        .downcast_ref::<Float64Array>()
+        .ok_or_else(|| invalid_data(format!("matched column {name:?} must be Float64")))
+}
+
+fn required_i64<'a>(batch: &'a RecordBatch, name: &str) -> Result<&'a Int64Array, std::io::Error> {
+    required_array(batch, name)?
+        .as_any()
+        .downcast_ref::<Int64Array>()
+        .ok_or_else(|| invalid_data(format!("matched column {name:?} must be Int64")))
+}
+
+fn required_u64<'a>(batch: &'a RecordBatch, name: &str) -> Result<&'a UInt64Array, std::io::Error> {
+    required_array(batch, name)?
+        .as_any()
+        .downcast_ref::<UInt64Array>()
+        .ok_or_else(|| invalid_data(format!("matched column {name:?} must be UInt64")))
+}
+
+fn required_bool<'a>(
+    batch: &'a RecordBatch,
+    name: &str,
+) -> Result<&'a BooleanArray, std::io::Error> {
+    required_array(batch, name)?
+        .as_any()
+        .downcast_ref::<BooleanArray>()
+        .ok_or_else(|| invalid_data(format!("matched column {name:?} must be Boolean")))
+}
+
+fn string_value(array: &dyn Array, index: usize) -> Result<String, std::io::Error> {
+    if let Some(values) = array.as_any().downcast_ref::<StringArray>() {
+        return if values.is_null(index) {
+            Err(invalid_data("matched row has a null event_type"))
+        } else {
+            Ok(values.value(index).to_string())
+        };
+    }
+    if let Some(values) = array.as_any().downcast_ref::<LargeStringArray>() {
+        return if values.is_null(index) {
+            Err(invalid_data("matched row has a null event_type"))
+        } else {
+            Ok(values.value(index).to_string())
+        };
+    }
+    Err(invalid_data(
+        "matched column \"event_type\" must be String or LargeString",
+    ))
+}
+
+fn optional_f64(array: &Float64Array, index: usize) -> Option<f64> {
+    (!array.is_null(index)).then(|| array.value(index))
+}
+
+fn optional_i64(array: &Int64Array, index: usize) -> Option<i64> {
+    (!array.is_null(index)).then(|| array.value(index))
+}
+
+fn optional_bool(array: &BooleanArray, index: usize) -> Option<bool> {
+    (!array.is_null(index)).then(|| array.value(index))
+}
+
+fn invalid_data(message: impl Into<String>) -> std::io::Error {
+    std::io::Error::new(std::io::ErrorKind::InvalidData, message.into())
+}
+
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = std::env::args().skip(1);
-    let mut current_symbol: Option<String> = None;
+    let mut current_symbol = std::env::var("PARITY_SYMBOL")
+        .ok()
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_ascii_uppercase());
     let mut files: BTreeMap<String, Vec<PathBuf>> = BTreeMap::new();
     let mut state_space_path = None;
     let mut fold_specs: Vec<FoldSpec> = Vec::new();
+    let mut single_model: Option<PathBuf> = None;
+    let mut matched_root = std::env::var("PARITY_DATA_PATH")
+        .ok()
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from);
+    let mut tag = std::env::var("PARITY_TAG")
+        .ok()
+        .filter(|value| !value.is_empty());
+    let mut output_path = std::env::var("PARITY_RUST_OUT")
+        .ok()
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from);
+    let mut is_matched_input = false;
     while let Some(argument) = args.next() {
         match argument.as_str() {
             "--state-space" => {
                 state_space_path = Some(PathBuf::from(
                     args.next().ok_or("--state-space requires a Parquet path")?,
+                ));
+            }
+            "--matched-root" => {
+                matched_root = Some(PathBuf::from(
+                    args.next().ok_or("--matched-root requires a directory")?,
+                ));
+            }
+            "--tag" => {
+                tag = Some(args.next().ok_or("--tag requires a tag")?);
+            }
+            "--output" => {
+                output_path = Some(PathBuf::from(
+                    args.next().ok_or("--output requires a CSV path")?,
+                ));
+            }
+            "--model" => {
+                single_model = Some(PathBuf::from(
+                    args.next()
+                        .ok_or("--model requires a LightGBM model path")?,
                 ));
             }
             "--symbol" => {
@@ -709,8 +985,67 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             other => return Err(format!("unknown argument {other:?}").into()),
         }
     }
+    if let Some(model_path) = single_model {
+        if !fold_specs.is_empty() {
+            return Err("--model cannot be combined with --fold-model".into());
+        }
+        fold_specs.push(FoldSpec {
+            start_ms: i64::MIN,
+            end_ms: i64::MAX,
+            model_path,
+            expected_test_rows: None,
+            expected_train_rows: None,
+        });
+    }
+    if let Some(root) = matched_root {
+        is_matched_input = true;
+        if state_space_path.is_some() {
+            return Err("--matched-root cannot be combined with --state-space".into());
+        }
+        if !files.is_empty() {
+            return Err("--matched-root cannot be combined with --file".into());
+        }
+        let symbol = current_symbol
+            .as_ref()
+            .ok_or("--symbol or PARITY_SYMBOL is required with --matched-root")?;
+        let symbol_dir = if root
+            .file_name()
+            .is_some_and(|name| name.to_string_lossy().eq_ignore_ascii_case(symbol))
+        {
+            root
+        } else {
+            root.join(symbol)
+        };
+        let entries = fs::read_dir(&symbol_dir)
+            .map_err(|error| format!("read matched directory {}: {error}", symbol_dir.display()))?;
+        let mut matched_files = Vec::new();
+        for entry in entries {
+            let path = entry
+                .map_err(|error| format!("read entry under {}: {error}", symbol_dir.display()))?
+                .path();
+            let matches = path.is_file()
+                && path.file_name().is_some_and(|name| {
+                    let name = name.to_string_lossy();
+                    name.starts_with("merged_")
+                        && name.ends_with(".parquet")
+                        && tag.as_ref().is_none_or(|value| name.contains(value))
+                });
+            if matches {
+                matched_files.push(path);
+            }
+        }
+        matched_files.sort();
+        if matched_files.is_empty() {
+            return Err(format!(
+                "no merged_*.parquet files for symbol {symbol:?}, tag {tag:?} under {}",
+                symbol_dir.display()
+            )
+            .into());
+        }
+        files.insert(symbol.clone(), matched_files);
+    }
     if fold_specs.is_empty() {
-        return Err("OFMR playback requires purged walk-forward fold models; refusing to use a single all-data model".into());
+        return Err("provide a purged --fold-model or an explicit parity --model".into());
     }
     if state_space_path.is_none() && files.is_empty() {
         return Err("usage: playback_ofmr (--state-space PATH | --symbol SYMBOL --file PATH [--file PATH ...]) --fold-model START_MS END_MS MODEL_PATH [...]".into());
@@ -719,6 +1054,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Err(
             "choose either --state-space or CryptoL2 --symbol/--file input, not both".into(),
         );
+    }
+    if state_space_path.is_some() && output_path.is_some() {
+        return Err("--output is supported only for raw matched input".into());
     }
     fold_specs.sort_by_key(|fold| fold.start_ms);
     for pair in fold_specs.windows(2) {
@@ -753,16 +1091,66 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(path) = state_space_path {
         return run_state_space(&path, &models, &settings);
     }
-    println!("symbol,fold,timestamp_ms,price,position,risk_fraction");
+    let emit_stdout = output_path.is_none();
+    let parity_mode = !emit_stdout;
+    if emit_stdout {
+        println!("symbol,fold,timestamp_ms,price,position,risk_fraction");
+    }
+    let mut parity_output = if let Some(path) = output_path {
+        if let Some(parent) = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+        {
+            fs::create_dir_all(parent)?;
+        }
+        let mut writer = BufWriter::new(File::create(&path)?);
+        write!(writer, "timestamp_ms,price,decision,position,risk_fraction")?;
+        for index in 0..15 {
+            write!(writer, ",Column_{index}")?;
+        }
+        writeln!(writer)?;
+        Some(writer)
+    } else {
+        None
+    };
 
     for (symbol, paths) in files {
-        let mut rows = Vec::new();
-        for path in paths {
-            rows.extend(load_merged_parquet(&path, &symbol)?);
-        }
-        let playback = prepare_playback(rows, &symbol);
+        let rows = if is_matched_input {
+            let mut ordered = Vec::new();
+            for path in paths {
+                ordered.extend(load_matched_parquet(&path)?);
+            }
+            ordered.sort_by_key(|(timestamp_ns, sequence, _)| (*timestamp_ns, *sequence));
+            ordered
+                .into_iter()
+                .map(|(_, _, row)| row)
+                .collect::<Vec<_>>()
+        } else {
+            let mut rows = Vec::new();
+            for path in paths {
+                rows.extend(load_merged_parquet(&path, &symbol)?);
+            }
+            prepare_playback(rows, &symbol).rows
+        };
+        let rows = if parity_mode && is_matched_input {
+            densify_seconds(rows)
+        } else {
+            rows
+        };
         let mut features = OfmrFeatures::with_settings(settings.clone());
+        if parity_mode && is_matched_input {
+            if let Some(last_orderbook_time_ms) = rows
+                .iter()
+                .filter(|row| row.event_type == Some(EventType::Lob))
+                .map(|row| row.timestamp_ms)
+                .max()
+            {
+                features.set_terminal_orderbook_time_ms(last_orderbook_time_ms);
+            }
+        }
         let mut position = Position::Flat;
+        let mut last_reported_position = Position::Flat;
+        let mut parity_state = ParityTradeState::default();
         let mut barriers: Option<ActiveBarriers> = None;
         let mut active_fold: Option<usize> = None;
         let mut entry_timestamp_ms: Option<i64> = None;
@@ -770,12 +1158,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         let mut last_bid_amount = None;
         let mut last_ask_price = None;
         let mut last_ask_amount = None;
+        let mut last_trade_price = None;
         let mut current_second = None;
         let mut bar_features: Option<FeatureRow> = None;
         let mut bar_mid = 0.0;
         let mut bar_exit_price: Option<f64> = None;
 
-        for row in &playback.rows {
+        for row in &rows {
             if row.event_type == Some(EventType::Lob) {
                 if row.best_bid_price.is_some() {
                     last_bid_price = row.best_bid_price;
@@ -793,82 +1182,123 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
             let second = row.timestamp_ms.div_euclid(1_000);
             if current_second.is_some_and(|previous| previous != second) {
-                let bar_second = current_second
-                    .ok_or("previous bar timestamp missing while closing a bar")?;
+                let bar_second =
+                    current_second.ok_or("previous bar timestamp missing while closing a bar")?;
                 if let (Some(computed), Some(fold_index)) = (
                     bar_features.take(),
                     current_second.and_then(|ms| fold_at(&models, ms * 1_000)),
-                ) {
+                ) && features_ready(&computed)
+                {
                     if active_fold != Some(fold_index) {
                         position = Position::Flat;
+                        parity_state.position = Position::Flat;
+                        parity_state.entry_price = 0.0;
+                        parity_state.entry_timestamp_ms = 0;
                         barriers = None;
                         entry_timestamp_ms = None;
                         active_fold = Some(fold_index);
                     }
-                    let state = MarketState {
-                        features: computed.clone(),
-                        position,
-                        sequence: second as u64,
-                    };
-                    let decision = if bar_exit_price.is_none() {
-                        models[fold_index].strategy.decide(&state)
+                    let report_price = if parity_mode {
+                        last_trade_price.unwrap_or(bar_mid)
                     } else {
-                        Decision::Hold
+                        bar_exit_price.unwrap_or(bar_mid)
                     };
-                    let entry_allowed = computed
-                        .get("Column_5")
-                        .is_some_and(|rsi| rsi < settings.trade.rsi_filter_threshold);
-                    let (stop_fraction, target_fraction) =
-                        barrier_fractions_from_features(&computed);
-                    let barrier_allowed = (settings.trade.min_barrier_pct
-                        ..=settings.trade.max_barrier_pct)
-                        .contains(&stop_fraction);
-                    match (position, decision) {
-                        (Position::Flat, Decision::EnterLong)
-                            if entry_allowed && barrier_allowed =>
-                        {
-                            position = Position::Long;
-                            entry_timestamp_ms = Some(bar_second * 1_000);
-                            barriers = Some(ActiveBarriers::new(
-                                bar_mid,
-                                position,
-                                stop_fraction,
-                                target_fraction,
-                            ));
+                    let (action, risk) = if parity_mode {
+                        let (action, risk) = parity_update(
+                            &models[fold_index].strategy,
+                            &mut parity_state,
+                            &computed,
+                            bar_second * 1_000,
+                            report_price,
+                            &settings,
+                        );
+                        position = parity_state.position;
+                        (action, risk)
+                    } else {
+                        let state = MarketState {
+                            features: computed.clone(),
+                            position,
+                            sequence: second as u64,
+                        };
+                        let decision = if bar_exit_price.is_none() {
+                            models[fold_index].strategy.decide(&state)
+                        } else {
+                            Decision::Hold
+                        };
+                        let (stop_fraction, target_fraction) =
+                            barrier_fractions_from_features(&computed);
+                        let entry_allowed = computed
+                            .get("Column_5")
+                            .is_some_and(|rsi| rsi < settings.trade.rsi_filter_threshold);
+                        let barrier_allowed = (settings.trade.min_barrier_pct
+                            ..=settings.trade.max_barrier_pct)
+                            .contains(&stop_fraction);
+                        match (position, decision) {
+                            (Position::Flat, Decision::EnterLong)
+                                if entry_allowed && barrier_allowed =>
+                            {
+                                position = Position::Long;
+                                entry_timestamp_ms = Some(bar_second * 1_000);
+                                barriers = Some(ActiveBarriers::new(
+                                    bar_mid,
+                                    position,
+                                    stop_fraction,
+                                    target_fraction,
+                                ));
+                            }
+                            (Position::Flat, Decision::EnterShort)
+                                if entry_allowed && barrier_allowed =>
+                            {
+                                position = Position::Short;
+                                entry_timestamp_ms = Some(bar_second * 1_000);
+                                barriers = Some(ActiveBarriers::new(
+                                    bar_mid,
+                                    position,
+                                    stop_fraction,
+                                    target_fraction,
+                                ));
+                            }
+                            (Position::Long | Position::Short, Decision::Exit) => {
+                                position = Position::Flat;
+                                barriers = None;
+                                entry_timestamp_ms = None;
+                            }
+                            _ => {}
                         }
-                        (Position::Flat, Decision::EnterShort)
-                            if entry_allowed && barrier_allowed =>
-                        {
-                            position = Position::Short;
-                            entry_timestamp_ms = Some(bar_second * 1_000);
-                            barriers = Some(ActiveBarriers::new(
-                                bar_mid,
-                                position,
-                                stop_fraction,
-                                target_fraction,
-                            ));
-                        }
-                        (Position::Long | Position::Short, Decision::Exit) => {
-                            position = Position::Flat;
-                            barriers = None;
-                            entry_timestamp_ms = None;
-                        }
-                        _ => {}
-                    }
+                        (
+                            transition_code(last_reported_position, position),
+                            barriers.map_or(0.0, |active| active.risk_fraction),
+                        )
+                    };
                     let side = match position {
                         Position::Flat => 0,
                         Position::Long => 1,
                         Position::Short => -1,
                     };
-                    let risk = barriers.map_or(0.0, |active| active.risk_fraction);
-                    let report_price = bar_exit_price.unwrap_or(bar_mid);
-                    println!(
-                        "{symbol},{},{},{report_price},{side},{risk}",
-                        fold_index + 1,
-                        bar_second * 1_000
-                    );
+                    if emit_stdout {
+                        println!(
+                            "{symbol},{},{},{report_price},{side},{risk}",
+                            fold_index + 1,
+                            bar_second * 1_000
+                        );
+                    }
+                    if let Some(writer) = parity_output.as_mut() {
+                        write_parity_row(
+                            writer,
+                            bar_second * 1_000,
+                            report_price,
+                            action,
+                            side,
+                            risk,
+                            &computed,
+                        )?;
+                    }
+                    last_reported_position = position;
                 } else {
                     position = Position::Flat;
+                    parity_state.position = Position::Flat;
+                    parity_state.entry_price = 0.0;
+                    parity_state.entry_timestamp_ms = 0;
                     barriers = None;
                     active_fold = None;
                     entry_timestamp_ms = None;
@@ -876,9 +1306,20 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 bar_exit_price = None;
             }
             current_second = Some(second);
+            if let Some(price) = row.trade_price {
+                last_trade_price = Some(price);
+            }
 
             let mut raw = FeatureRow::new();
             raw.insert("event_time_ms", row.timestamp_ms as f64);
+            raw.insert(
+                "is_lob_event",
+                if row.event_type == Some(EventType::Lob) {
+                    1.0
+                } else {
+                    0.0
+                },
+            );
             if let Some(value) = last_bid_price {
                 raw.insert("bid_price", value);
             }
@@ -920,24 +1361,32 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             if let Some(fold_index) = fold_at(&models, row.timestamp_ms) {
                 if active_fold != Some(fold_index) {
                     position = Position::Flat;
+                    parity_state.position = Position::Flat;
+                    parity_state.entry_price = 0.0;
+                    parity_state.entry_timestamp_ms = 0;
                     barriers = None;
                     entry_timestamp_ms = None;
                     active_fold = Some(fold_index);
                 }
-                let price = row.trade_price.unwrap_or(mid);
-                let barrier_hit = barriers.is_some_and(|active| active.hit(price));
-                let horizon_hit = entry_timestamp_ms.is_some_and(|entry_ms| {
-                    row.timestamp_ms.saturating_sub(entry_ms)
-                        >= settings.trade.label_horizon_seconds as i64 * 1_000
-                });
-                if barrier_hit || horizon_hit {
-                    position = Position::Flat;
-                    barriers = None;
-                    entry_timestamp_ms = None;
-                    bar_exit_price = Some(price);
+                if !parity_mode {
+                    let price = row.trade_price.unwrap_or(mid);
+                    let barrier_hit = barriers.is_some_and(|active| active.hit(price));
+                    let horizon_hit = entry_timestamp_ms.is_some_and(|entry_ms| {
+                        row.timestamp_ms.saturating_sub(entry_ms)
+                            >= settings.trade.label_horizon_seconds as i64 * 1_000
+                    });
+                    if barrier_hit || horizon_hit {
+                        position = Position::Flat;
+                        barriers = None;
+                        entry_timestamp_ms = None;
+                        bar_exit_price = Some(price);
+                    }
                 }
             } else {
                 position = Position::Flat;
+                parity_state.position = Position::Flat;
+                parity_state.entry_price = 0.0;
+                parity_state.entry_timestamp_ms = 0;
                 barriers = None;
                 active_fold = None;
                 entry_timestamp_ms = None;
@@ -948,67 +1397,164 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             bar_features,
             current_second,
             current_second.and_then(|ms| fold_at(&models, ms * 1_000)),
-        ) {
+        ) && features_ready(&computed)
+        {
             if active_fold != Some(fold_index) {
                 position = Position::Flat;
+                parity_state.position = Position::Flat;
+                parity_state.entry_price = 0.0;
+                parity_state.entry_timestamp_ms = 0;
                 barriers = None;
             }
-            let state = MarketState {
-                features: computed.clone(),
-                position,
-                sequence: second as u64,
-            };
-            let decision = if bar_exit_price.is_none() {
-                models[fold_index].strategy.decide(&state)
+            let report_price = if parity_mode {
+                last_trade_price.unwrap_or(bar_mid)
             } else {
-                Decision::Hold
+                bar_exit_price.or(last_trade_price).unwrap_or(bar_mid)
             };
-            let entry_allowed = computed
-                .get("Column_5")
-                .is_some_and(|rsi| rsi < settings.trade.rsi_filter_threshold);
-            let (stop_fraction, target_fraction) = barrier_fractions_from_features(&computed);
-            let barrier_allowed = (settings.trade.min_barrier_pct..=settings.trade.max_barrier_pct)
-                .contains(&stop_fraction);
-            match (position, decision) {
-                (Position::Flat, Decision::EnterLong) if entry_allowed && barrier_allowed => {
-                    position = Position::Long;
-                    barriers = Some(ActiveBarriers::new(
-                        bar_mid,
-                        position,
-                        stop_fraction,
-                        target_fraction,
-                    ));
+            let (action, risk) = if parity_mode {
+                let (action, risk) = parity_update(
+                    &models[fold_index].strategy,
+                    &mut parity_state,
+                    &computed,
+                    second * 1_000,
+                    report_price,
+                    &settings,
+                );
+                position = parity_state.position;
+                (action, risk)
+            } else {
+                let state = MarketState {
+                    features: computed.clone(),
+                    position,
+                    sequence: second as u64,
+                };
+                let decision = if bar_exit_price.is_none() {
+                    models[fold_index].strategy.decide(&state)
+                } else {
+                    Decision::Hold
+                };
+                let entry_allowed = computed
+                    .get("Column_5")
+                    .is_some_and(|rsi| rsi < settings.trade.rsi_filter_threshold);
+                let (stop_fraction, target_fraction) = barrier_fractions_from_features(&computed);
+                let barrier_allowed = (settings.trade.min_barrier_pct
+                    ..=settings.trade.max_barrier_pct)
+                    .contains(&stop_fraction);
+                match (position, decision) {
+                    (Position::Flat, Decision::EnterLong) if entry_allowed && barrier_allowed => {
+                        position = Position::Long;
+                        barriers = Some(ActiveBarriers::new(
+                            bar_mid,
+                            position,
+                            stop_fraction,
+                            target_fraction,
+                        ));
+                    }
+                    (Position::Flat, Decision::EnterShort) if entry_allowed && barrier_allowed => {
+                        position = Position::Short;
+                        barriers = Some(ActiveBarriers::new(
+                            bar_mid,
+                            position,
+                            stop_fraction,
+                            target_fraction,
+                        ));
+                    }
+                    (Position::Long | Position::Short, Decision::Exit) => {
+                        position = Position::Flat;
+                        barriers = None;
+                    }
+                    _ => {}
                 }
-                (Position::Flat, Decision::EnterShort) if entry_allowed && barrier_allowed => {
-                    position = Position::Short;
-                    barriers = Some(ActiveBarriers::new(
-                        bar_mid,
-                        position,
-                        stop_fraction,
-                        target_fraction,
-                    ));
-                }
-                (Position::Long | Position::Short, Decision::Exit) => {
-                    position = Position::Flat;
-                    barriers = None;
-                }
-                _ => {}
-            }
+                (
+                    transition_code(last_reported_position, position),
+                    barriers.map_or(0.0, |active| active.risk_fraction),
+                )
+            };
             let side = match position {
                 Position::Flat => 0,
                 Position::Long => 1,
                 Position::Short => -1,
             };
-            let risk = barriers.map_or(0.0, |active| active.risk_fraction);
-            let report_price = bar_exit_price.unwrap_or(bar_mid);
-            println!(
-                "{symbol},{},{},{report_price},{side},{risk}",
-                fold_index + 1,
-                second * 1_000
-            );
+            if emit_stdout {
+                println!(
+                    "{symbol},{},{},{report_price},{side},{risk}",
+                    fold_index + 1,
+                    second * 1_000
+                );
+            }
+            if let Some(writer) = parity_output.as_mut() {
+                write_parity_row(
+                    writer,
+                    second * 1_000,
+                    report_price,
+                    action,
+                    side,
+                    risk,
+                    &computed,
+                )?;
+            }
         }
     }
+    if let Some(writer) = parity_output.as_mut() {
+        writer.flush()?;
+    }
     Ok(())
+}
+
+fn transition_code(previous: Position, current: Position) -> i32 {
+    match (previous, current) {
+        (Position::Flat, Position::Long) => 1,
+        (Position::Flat, Position::Short) => -1,
+        (Position::Long | Position::Short, Position::Flat) => 2,
+        _ => 0,
+    }
+}
+
+fn features_ready(features: &FeatureRow) -> bool {
+    (0..15).all(|index| {
+        features
+            .get(&format!("Column_{index}"))
+            .is_some_and(f64::is_finite)
+    })
+}
+
+fn densify_seconds(rows: Vec<MergedRow>) -> Vec<MergedRow> {
+    let mut dense = Vec::with_capacity(rows.len());
+    let mut previous_second: Option<i64> = None;
+    for row in rows {
+        let second = row.timestamp_ms.div_euclid(1_000);
+        if let Some(previous) = previous_second {
+            for missing_second in previous.saturating_add(1)..second {
+                dense.push(MergedRow {
+                    timestamp_ms: missing_second.saturating_mul(1_000),
+                    ..MergedRow::default()
+                });
+            }
+        }
+        dense.push(row);
+        previous_second = Some(second);
+    }
+    dense
+}
+
+fn write_parity_row(
+    writer: &mut BufWriter<File>,
+    timestamp_ms: i64,
+    price: f64,
+    decision: i32,
+    position: i32,
+    risk_fraction: f64,
+    features: &FeatureRow,
+) -> Result<(), std::io::Error> {
+    write!(
+        writer,
+        "{timestamp_ms},{price},{decision},{position},{risk_fraction}"
+    )?;
+    for index in 0..15 {
+        let value = features.get(&format!("Column_{index}")).unwrap_or(0.0);
+        write!(writer, ",{value}")?;
+    }
+    writeln!(writer)
 }
 
 fn main() -> ExitCode {

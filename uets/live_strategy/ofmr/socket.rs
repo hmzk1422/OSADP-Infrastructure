@@ -1186,55 +1186,173 @@ impl StrategyTelemetry {
         } else {
             0.0
         };
-        let statistics = serde_json::json!({
-            "status": "enabled",
-            "starting_equity": account.portfolio.starting_cash(),
-            "equity": current_equity,
-            "cash": cash,
-            "realized_pnl": realized_pnl,
-            "unrealized_pnl": unrealized_pnl,
-            "exposure": account.portfolio.gross_exposure(&marks),
-            "open_positions": if holding.is_flat() { 0 } else { 1 },
-            "stop_loss_pct": stop_loss_pct,
-            "take_profit_pct": take_profit_pct,
-            "price_vs_entry_pct": price_vs_entry_pct,
-            "trades": stats.trades,
-            "win_rate": stats.win_rate,
-            "sortino": sortino,
-            "expectancy_rr": if account.r_trades > 0 { account.r_multiple_sum / account.r_trades as f64 } else { 0.0 },
-            "expectancy_trades": account.r_trades,
-            "max_drawdown": stats.max_drawdown,
-            "cumulative_return": stats.cumulative_return,
-            "absolute_return": current_equity - account.portfolio.starting_cash(),
-            "latest_market_data": self.last_event_time_ms.map(|time| time.to_string()),
-            "latest_decision": self.last_decision,
-            "processing_latency_ms": self.last_processing_ms,
-            "processing_latency_mean_ms": self.latency.mean_ns().map(|value| value / 1_000_000.0),
-            "latency_sum_ms": self.latency.sum_ns() as f64 / 1_000_000.0,
-            "latency_observations": self.latency.count(),
-            "decision_to_order_ms": self.last_decision_to_order_ms,
-            "order_to_fill_ms": self.last_order_to_fill_ms,
-            "tick_to_trade_ms": tick_to_trade_ms,
-            "exchange_latency_ms": self.exchange_latency_ms.or_else(|| self.last_event_time_ms.map(|event_time| (now_ms as i64 - event_time as i64) as f64)),
-            "public_ping_rtt_ms": public_ping.latest_ms,
-            "public_ping_rtt_mean_ms": public_ping.mean_ms,
-            "public_ping_rtt_p95_ms": public_ping.p95_ms,
-            "public_ping_rtt_samples": public_ping.samples,
-            "order_ack_rtt_ms": order_ack.latest_ms,
-            "order_ack_rtt_mean_ms": order_ack.mean_ms,
-            "order_ack_rtt_p95_ms": order_ack.p95_ms,
-            "order_ack_rtt_samples": order_ack.samples,
-            "latency_p05_ms": self.latency.percentile(0.05).map(|value| value as f64 / 1_000_000.0),
-            "latency_p95_ms": self.latency.percentile(0.95).map(|value| value as f64 / 1_000_000.0),
-            "latency_p99_ms": self.latency.percentile(0.99).map(|value| value as f64 / 1_000_000.0),
-            "clock_skew_mean_ms": skew.mean_us.map(|value| value / 1_000.0),
-            "clock_skew_max_ms": skew.max_abs_us.map(|value| value as f64 / 1_000.0),
-            "memory_mb": memory_mb,
-            "cpu_percent": cpu_percent,
-            "persistence_queue": self.persistence_queue,
-            "persistence_write_ms": self.persistence_write_ms,
-            "persistence_errors": self.persistence_errors,
-        });
+        let mut statistics = serde_json::Map::new();
+        statistics.extend([
+            ("status".into(), serde_json::json!("enabled")),
+            (
+                "starting_equity".into(),
+                serde_json::json!(account.portfolio.starting_cash()),
+            ),
+            ("equity".into(), serde_json::json!(current_equity)),
+            ("cash".into(), serde_json::json!(cash)),
+            ("realized_pnl".into(), serde_json::json!(realized_pnl)),
+            ("unrealized_pnl".into(), serde_json::json!(unrealized_pnl)),
+            (
+                "exposure".into(),
+                serde_json::json!(account.portfolio.gross_exposure(&marks)),
+            ),
+            (
+                "open_positions".into(),
+                serde_json::json!(if holding.is_flat() { 0 } else { 1 }),
+            ),
+            ("stop_loss_pct".into(), serde_json::json!(stop_loss_pct)),
+            ("take_profit_pct".into(), serde_json::json!(take_profit_pct)),
+            (
+                "price_vs_entry_pct".into(),
+                serde_json::json!(price_vs_entry_pct),
+            ),
+            ("trades".into(), serde_json::json!(stats.trades)),
+            ("win_rate".into(), serde_json::json!(stats.win_rate)),
+            ("sortino".into(), serde_json::json!(sortino)),
+            (
+                "expectancy_rr".into(),
+                serde_json::json!(if account.r_trades > 0 {
+                    account.r_multiple_sum / account.r_trades as f64
+                } else {
+                    0.0
+                }),
+            ),
+            (
+                "expectancy_trades".into(),
+                serde_json::json!(account.r_trades),
+            ),
+            ("max_drawdown".into(), serde_json::json!(stats.max_drawdown)),
+            (
+                "cumulative_return".into(),
+                serde_json::json!(stats.cumulative_return),
+            ),
+            (
+                "absolute_return".into(),
+                serde_json::json!(current_equity - account.portfolio.starting_cash()),
+            ),
+            (
+                "latest_market_data".into(),
+                serde_json::json!(self.last_event_time_ms.map(|time| time.to_string())),
+            ),
+            (
+                "latest_decision".into(),
+                serde_json::json!(self.last_decision),
+            ),
+            (
+                "processing_latency_ms".into(),
+                serde_json::json!(self.last_processing_ms),
+            ),
+            (
+                "processing_latency_mean_ms".into(),
+                serde_json::json!(self.latency.mean_ns().map(|value| value / 1_000_000.0)),
+            ),
+            (
+                "latency_sum_ms".into(),
+                serde_json::json!(self.latency.sum_ns() as f64 / 1_000_000.0),
+            ),
+            (
+                "latency_observations".into(),
+                serde_json::json!(self.latency.count()),
+            ),
+            (
+                "decision_to_order_ms".into(),
+                serde_json::json!(self.last_decision_to_order_ms),
+            ),
+            (
+                "order_to_fill_ms".into(),
+                serde_json::json!(self.last_order_to_fill_ms),
+            ),
+            (
+                "tick_to_trade_ms".into(),
+                serde_json::json!(tick_to_trade_ms),
+            ),
+            (
+                "exchange_latency_ms".into(),
+                serde_json::json!(self.exchange_latency_ms.or_else(|| self
+                    .last_event_time_ms
+                    .map(|event_time| (now_ms as i64 - event_time as i64) as f64))),
+            ),
+            (
+                "public_ping_rtt_ms".into(),
+                serde_json::json!(public_ping.latest_ms),
+            ),
+            (
+                "public_ping_rtt_mean_ms".into(),
+                serde_json::json!(public_ping.mean_ms),
+            ),
+            (
+                "public_ping_rtt_p95_ms".into(),
+                serde_json::json!(public_ping.p95_ms),
+            ),
+            (
+                "public_ping_rtt_samples".into(),
+                serde_json::json!(public_ping.samples),
+            ),
+            (
+                "order_ack_rtt_ms".into(),
+                serde_json::json!(order_ack.latest_ms),
+            ),
+            (
+                "order_ack_rtt_mean_ms".into(),
+                serde_json::json!(order_ack.mean_ms),
+            ),
+            (
+                "order_ack_rtt_p95_ms".into(),
+                serde_json::json!(order_ack.p95_ms),
+            ),
+            (
+                "order_ack_rtt_samples".into(),
+                serde_json::json!(order_ack.samples),
+            ),
+            (
+                "latency_p05_ms".into(),
+                serde_json::json!(self
+                    .latency
+                    .percentile(0.05)
+                    .map(|value| value as f64 / 1_000_000.0)),
+            ),
+            (
+                "latency_p95_ms".into(),
+                serde_json::json!(self
+                    .latency
+                    .percentile(0.95)
+                    .map(|value| value as f64 / 1_000_000.0)),
+            ),
+            (
+                "latency_p99_ms".into(),
+                serde_json::json!(self
+                    .latency
+                    .percentile(0.99)
+                    .map(|value| value as f64 / 1_000_000.0)),
+            ),
+            (
+                "clock_skew_mean_ms".into(),
+                serde_json::json!(skew.mean_us.map(|value| value / 1_000.0)),
+            ),
+            (
+                "clock_skew_max_ms".into(),
+                serde_json::json!(skew.max_abs_us.map(|value| value as f64 / 1_000.0)),
+            ),
+            ("memory_mb".into(), serde_json::json!(memory_mb)),
+            ("cpu_percent".into(), serde_json::json!(cpu_percent)),
+            (
+                "persistence_queue".into(),
+                serde_json::json!(self.persistence_queue),
+            ),
+            (
+                "persistence_write_ms".into(),
+                serde_json::json!(self.persistence_write_ms),
+            ),
+            (
+                "persistence_errors".into(),
+                serde_json::json!(self.persistence_errors),
+            ),
+        ]);
         let snapshot = serde_json::json!({
             "strategy_id": "ofmr",
             "asset_id": self.symbol,
@@ -1304,7 +1422,11 @@ fn process_cpu_ticks() -> Option<u64> {
 #[cfg(all(unix, target_os = "linux"))]
 fn process_clock_ticks() -> f64 {
     let ticks = unsafe { libc::sysconf(libc::_SC_CLK_TCK) };
-    if ticks > 0 { ticks as f64 } else { 100.0 }
+    if ticks > 0 {
+        ticks as f64
+    } else {
+        100.0
+    }
 }
 
 /// No procfs on this Unix flavor: CPU% stays n/a.

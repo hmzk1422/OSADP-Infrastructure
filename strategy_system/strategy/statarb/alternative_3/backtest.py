@@ -662,7 +662,7 @@ if __name__ == "__main__":
         ds = DatasetConfig(train_bars=5_000, fwd_bars=(500, 1_000, 2_500, 5_000), step=1_000, top_k=20, max_origins=250, n_jobs=1, seed=7)
         variants = build_halflife_models(store, SYMBOLS, TARGET, GATE_RANGES, discover_cfg, ds)
 
-    common = dict(entry_z=2.0, capital=10_000, risk_fraction=0.02, rr=1.0, barrier_size=1.0, fee_bps=2.0, slippage_bps=1.0,
+    common = dict(entry_z=2.0, capital=10_000, risk_fraction=0.02, rr=1.0, barrier_size=1.0, fee_bps=0.0, slippage_bps=0.0,
                   feature_score_mode="filter", strategy_side=1, zscore_mode="rolling", barrier_mode="hilo")
     strategies = {
         "formula stop | train half-life": StrategySpec(None, dict(common)),

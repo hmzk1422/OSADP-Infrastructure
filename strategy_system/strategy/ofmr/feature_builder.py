@@ -61,11 +61,6 @@ import polars as pl
 from numpy.lib.stride_tricks import sliding_window_view
 from indicators import get_wilders_rsi, sma
 
-import lightgbm as lgb
-from sklearn.metrics import precision_score, recall_score, classification_report
-import shap
-from sklearn.inspection import permutation_importance
-
 os.environ["POLARS_MAX_THREADS"] = "4"
 
 from ml_shared_config import *

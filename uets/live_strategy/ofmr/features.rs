@@ -9,199 +9,523 @@
 //! Missing semantics: emit insert_missing while history is too short,
 //! never zero.
 
-use std::collections::VecDeque;
-
 use crate::core::feature::FeatureRow;
-use crate::live_strategy::ofmr::settings::Settings;
 use crate::live_strategy::ComputeFeatures;
-use stream_handler::{Reconstructor, Sample, Timeframe};
+use crate::live_strategy::ofmr::settings::{FeatureSettings, Settings};
 
 pub const N_FEATURES: usize = 15;
 
-// Must match the numeric BARRIER_VOL_BAR_WINDOW in the Python calculation.
-const BARRIER_VOL_BAR_WINDOW: usize = 100;
-
 pub fn output_column_names() -> Vec<String> {
-    (0..N_FEATURES)
-        .map(|i| format!("Column_{i}"))
-        .collect()
-}
-
-/// Matches Polars rolling_std(ddof=0, min_samples=2).
-///
-/// The deque is already capped to BARRIER_VOL_BAR_WINDOW, so the
-/// calculation uses the available values up to that window size.
-fn rolling_population_std(values: &VecDeque<f64>) -> Option<f64> {
-    if values.len() < 2 {
-        return None;
-    }
-
-    let n = values.len() as f64;
-    let mean = values.iter().sum::<f64>() / n;
-
-    let variance = values
-        .iter()
-        .map(|value| (value - mean).powi(2))
-        .sum::<f64>()
-        / n;
-
-    let std = variance.sqrt();
-    std.is_finite().then_some(std)
-}
-
-fn rolling_zscore(
-    window: &VecDeque<f64>,
-    value: f64,
-    min_size: usize,
-) -> Option<f64> {
-    if window.len() < min_size {
-        return None;
-    }
-
-    let n = window.len() as f64;
-    let mean = window.iter().sum::<f64>() / n;
-
-    let variance = window
-        .iter()
-        .map(|v| (v - mean) * (v - mean))
-        .sum::<f64>()
-        / (n - 1.0).max(1.0);
-
-    let std = variance.sqrt();
-
-    if std == 0.0 {
-        return Some(0.0);
-    }
-
-    Some((value - mean) / std)
-}
-
-fn push_window<T: Clone>(window: &mut VecDeque<T>, cap: usize, value: T) {
-    if cap == 0 {
-        return;
-    }
-
-    if window.len() >= cap {
-        window.pop_front();
-    }
-
-    window.push_back(value);
+    (0..N_FEATURES).map(|i| format!("Column_{i}")).collect()
 }
 
 #[derive(Clone, Debug)]
-struct RsiState {
-    window: usize,
-    avg_gain: Option<f64>,
-    avg_loss: Option<f64>,
-    prev_price: Option<f64>,
-    seeded: bool,
-    seed_count: usize,
+struct RawBar {
+    close: Option<f64>,
+    spread_bps: Option<f64>,
+    depth_imbalance: Option<f64>,
+    bid_low: Option<f64>,
+    ask_high: Option<f64>,
+    cvd_delta: f64,
+    has_trade: bool,
+    volume: f64,
+    inst_buy: f64,
+    inst_sell: f64,
+    retail_buy: f64,
+    retail_sell: f64,
+    tick_rules: Vec<i32>,
 }
 
-impl RsiState {
-    fn new(window: usize) -> Self {
+impl RawBar {
+    fn new(timeframe_secs: usize) -> Self {
         Self {
-            window,
-            avg_gain: None,
-            avg_loss: None,
-            prev_price: None,
-            seeded: false,
-            seed_count: 0,
+            close: None,
+            spread_bps: None,
+            depth_imbalance: None,
+            bid_low: None,
+            ask_high: None,
+            cvd_delta: 0.0,
+            has_trade: false,
+            volume: 0.0,
+            inst_buy: 0.0,
+            inst_sell: 0.0,
+            retail_buy: 0.0,
+            retail_sell: 0.0,
+            tick_rules: vec![0; timeframe_secs],
         }
     }
 
-    fn next(&mut self, price: f64) -> Option<f64> {
-        let Some(prev) = self.prev_price else {
-            self.prev_price = Some(price);
-            return None;
-        };
+    fn empty(timeframe_secs: usize, previous_close: Option<f64>) -> Self {
+        Self {
+            close: previous_close,
+            ..Self::new(timeframe_secs)
+        }
+    }
+}
 
-        let delta = price - prev;
-        self.prev_price = Some(price);
+#[derive(Clone, Copy, Debug)]
+struct BarFeatures {
+    values: [Option<f64>; N_FEATURES],
+    bar_vol_std: Option<f64>,
+}
 
-        let gain = delta.max(0.0);
-        let loss = (-delta).max(0.0);
+impl Default for BarFeatures {
+    fn default() -> Self {
+        Self {
+            values: [None; N_FEATURES],
+            bar_vol_std: None,
+        }
+    }
+}
 
-        if !self.seeded {
-            self.seed_count += 1;
+struct ResearchFeatureState {
+    timeframe_secs: usize,
+    feature_settings: FeatureSettings,
+    current_bar_index: Option<i64>,
+    first_bar_index: Option<i64>,
+    current_bar: Option<RawBar>,
+    raw_bars: Vec<RawBar>,
+    computed_bars: Vec<BarFeatures>,
+    previous_trade_price: Option<f64>,
+    terminal_bar_index: Option<i64>,
+}
 
-            let g = self.avg_gain.unwrap_or(0.0) + gain;
-            let l = self.avg_loss.unwrap_or(0.0) + loss;
+impl ResearchFeatureState {
+    fn new(settings: &Settings) -> Self {
+        Self {
+            timeframe_secs: settings.feature.htf_timeframe_secs.max(1) as usize,
+            feature_settings: settings.feature.clone(),
+            current_bar_index: None,
+            first_bar_index: None,
+            current_bar: None,
+            raw_bars: Vec::new(),
+            computed_bars: Vec::new(),
+            previous_trade_price: None,
+            terminal_bar_index: None,
+        }
+    }
 
-            self.avg_gain = Some(g);
-            self.avg_loss = Some(l);
+    fn observe(&mut self, row: &FeatureRow, event_time_ms: i64) -> FeatureRow {
+        let timeframe_ms = self.timeframe_secs as i64 * 1_000;
+        let bar_index = event_time_ms.div_euclid(timeframe_ms);
+        if let Some(terminal_bar_index) = self.terminal_bar_index
+            && bar_index >= terminal_bar_index
+        {
+            return self.output_for_bar(terminal_bar_index.saturating_sub(1));
+        }
+        if self.current_bar_index != Some(bar_index) {
+            self.close_current_bar(bar_index);
+            self.current_bar_index = Some(bar_index);
+            self.first_bar_index.get_or_insert(bar_index);
+            self.current_bar = Some(RawBar::new(self.timeframe_secs));
+        }
 
-            if self.seed_count >= self.window {
-                self.avg_gain = Some(g / self.window as f64);
-                self.avg_loss = Some(l / self.window as f64);
-                self.seeded = true;
+        let is_trade = row.get("price").is_some();
+        let is_book = row
+            .get("is_lob_event")
+            .map(|value| value != 0.0)
+            .unwrap_or(!is_trade);
+        let bar = self.current_bar.as_mut().expect("current bar initialized");
+        if is_book {
+            if let (Some(bid), Some(ask)) = (row.get("bid_price"), row.get("ask_price")) {
+                if bid > 0.0 && ask > 0.0 {
+                    let mid = (bid + ask) / 2.0;
+                    bar.close = Some(mid);
+                    bar.bid_low = Some(bar.bid_low.map_or(bid, |value| value.min(bid)));
+                    bar.ask_high = Some(bar.ask_high.map_or(ask, |value| value.max(ask)));
+                    bar.spread_bps = Some((ask - bid) / mid * 10_000.0);
+                    if let (Some(bid_amount), Some(ask_amount)) =
+                        (row.get("bid_amount"), row.get("ask_amount"))
+                    {
+                        bar.depth_imbalance =
+                            Some((bid_amount - ask_amount) / (bid_amount + ask_amount + 1e-9));
+                    }
+                }
+            }
+        }
+
+        if let Some(price) = row.get("price") {
+            let amount = row.get("amount").unwrap_or(0.0);
+            let is_buyer_maker = row
+                .get("is_buyer_maker")
+                .map(|value| value != 0.0)
+                .unwrap_or(false);
+            let tick_rule = match self.previous_trade_price {
+                Some(previous) if price > previous => 1,
+                Some(previous) if price < previous => -1,
+                _ => 0,
+            };
+            self.previous_trade_price = Some(price);
+            let second_offset = event_time_ms
+                .div_euclid(1_000)
+                .rem_euclid(self.timeframe_secs as i64) as usize;
+            if let Some(value) = bar.tick_rules.get_mut(second_offset) {
+                *value = tick_rule;
             }
 
-            return None;
+            let signed_amount = if is_buyer_maker { -amount } else { amount };
+            bar.has_trade = true;
+            bar.cvd_delta += signed_amount;
+            bar.volume += amount;
+            if amount >= 0.05 {
+                if signed_amount >= 0.0 {
+                    bar.inst_buy += amount;
+                } else {
+                    bar.inst_sell += amount;
+                }
+            } else if signed_amount >= 0.0 {
+                bar.retail_buy += amount;
+            } else {
+                bar.retail_sell += amount;
+            }
         }
 
-        let ag = (self.avg_gain.unwrap() * (self.window as f64 - 1.0)
-            + gain)
-            / self.window as f64;
-
-        let al = (self.avg_loss.unwrap() * (self.window as f64 - 1.0)
-            + loss)
-            / self.window as f64;
-
-        self.avg_gain = Some(ag);
-        self.avg_loss = Some(al);
-
-        if al == 0.0 {
-            return Some(100.0);
-        }
-
-        let rs = ag / al;
-        Some(100.0 - 100.0 / (1.0 + rs))
+        self.output_for_bar(bar_index)
     }
+
+    fn close_current_bar(&mut self, next_index: i64) {
+        let Some(current_index) = self.current_bar_index else {
+            return;
+        };
+        let Some(bar) = self.current_bar.take() else {
+            return;
+        };
+        self.raw_bars.push(bar);
+        let mut previous_close = self.raw_bars.last().and_then(|bar| bar.close);
+        self.computed_bars = calculate_research_features(&self.raw_bars, &self.feature_settings);
+
+        for _ in current_index.saturating_add(1)..next_index {
+            let empty = RawBar::empty(self.timeframe_secs, previous_close);
+            self.raw_bars.push(empty);
+            self.computed_bars =
+                calculate_research_features(&self.raw_bars, &self.feature_settings);
+            previous_close = self.raw_bars.last().and_then(|bar| bar.close);
+        }
+    }
+
+    fn output_for_bar(&self, bar_index: i64) -> FeatureRow {
+        let mut output = FeatureRow::new();
+        for index in 0..N_FEATURES {
+            output.insert_missing(format!("Column_{index}"));
+        }
+        output.insert_missing("bar_vol_std");
+        let Some(first_bar_index) = self.first_bar_index else {
+            return output;
+        };
+        let Some(price_index) = bar_index.checked_sub(1) else {
+            return output;
+        };
+        let Some(orderflow_index) = bar_index.checked_sub(2) else {
+            return output;
+        };
+        if price_index < first_bar_index || orderflow_index < first_bar_index {
+            return output;
+        }
+        let price_offset = (price_index - first_bar_index) as usize;
+        let orderflow_offset = (orderflow_index - first_bar_index) as usize;
+        let (Some(price_features), Some(orderflow_features)) = (
+            self.computed_bars.get(price_offset),
+            self.computed_bars.get(orderflow_offset),
+        ) else {
+            return output;
+        };
+        for index in 0..N_FEATURES {
+            let features = if (1..=6).contains(&index) {
+                price_features
+            } else {
+                orderflow_features
+            };
+            let value = features.values[index];
+            match value {
+                Some(value) if value.is_finite() => output.insert(format!("Column_{index}"), value),
+                _ => output.insert_missing(format!("Column_{index}")),
+            }
+        }
+        match price_features.bar_vol_std {
+            Some(value) if value.is_finite() => output.insert("bar_vol_std", value),
+            _ => output.insert_missing("bar_vol_std"),
+        }
+        output
+    }
+}
+
+fn rolling_mean(values: &[Option<f64>], index: usize, window: usize) -> Option<f64> {
+    let start = index.checked_add(1)?.checked_sub(window)?;
+    let slice = &values[start..=index];
+    if slice.iter().any(Option::is_none) {
+        return None;
+    }
+    Some(slice.iter().map(|value| value.unwrap()).sum::<f64>() / window as f64)
+}
+
+fn rolling_zscore_at(
+    values: &[Option<f64>],
+    index: usize,
+    window: usize,
+    epsilon: f64,
+) -> Option<f64> {
+    let start = index.checked_add(1)?.checked_sub(window)?;
+    let slice = &values[start..=index];
+    let observations = slice.iter().copied().collect::<Option<Vec<_>>>()?;
+    let mean = observations.iter().sum::<f64>() / window as f64;
+    let variance = observations
+        .iter()
+        .map(|value| (value - mean).powi(2))
+        .sum::<f64>()
+        / (window - 1).max(1) as f64;
+    let std = variance.sqrt();
+    let value = observations[window - 1];
+    Some((value - mean) / (std + epsilon))
+}
+
+fn wilder_rsi(closes: &[Option<f64>], window: usize) -> Vec<Option<f64>> {
+    let mut output = vec![None; closes.len()];
+    if closes.len() < 2 {
+        return output;
+    }
+    let mut differences = Vec::with_capacity(closes.len() - 1);
+    for pair in closes.windows(2) {
+        match (pair[0], pair[1]) {
+            (Some(previous), Some(current)) => differences.push(Some(current - previous)),
+            _ => differences.push(None),
+        }
+    }
+    if differences.iter().any(Option::is_none) {
+        return output;
+    }
+    let changes = differences
+        .iter()
+        .map(|value| value.unwrap())
+        .collect::<Vec<_>>();
+    if changes.len() <= window {
+        for index in 1..=changes.len() {
+            output[index] = Some(0.0);
+        }
+        return output;
+    }
+    let gains = changes
+        .iter()
+        .map(|value| value.max(0.0))
+        .collect::<Vec<_>>();
+    let losses = changes
+        .iter()
+        .map(|value| (-value).max(0.0))
+        .collect::<Vec<_>>();
+    let mut average_gain = vec![0.0; changes.len()];
+    let mut average_loss = vec![0.0; changes.len()];
+    average_gain[window] = gains[..window].iter().sum::<f64>() / window as f64;
+    average_loss[window] = losses[..window].iter().sum::<f64>() / window as f64;
+    for index in window + 1..changes.len() {
+        average_gain[index] =
+            (average_gain[index - 1] * (window - 1) as f64 + gains[index]) / window as f64;
+        average_loss[index] =
+            (average_loss[index - 1] * (window - 1) as f64 + losses[index]) / window as f64;
+    }
+    for index in window..changes.len() {
+        let relative_strength = average_gain[index] / (average_loss[index] + 1e-10);
+        output[index + 1] = Some(100.0 - 100.0 / (1.0 + relative_strength));
+    }
+    for index in 1..=window.min(output.len().saturating_sub(1)) {
+        output[index] = Some(0.0);
+    }
+    output
+}
+
+fn tick_autocorrelation(ticks: &[i32]) -> f64 {
+    if ticks.len() <= 5 {
+        return 0.0;
+    }
+    let left = &ticks[..ticks.len() - 1];
+    let right = &ticks[1..];
+    let left_mean = left.iter().map(|value| *value as f64).sum::<f64>() / left.len() as f64;
+    let right_mean = right.iter().map(|value| *value as f64).sum::<f64>() / right.len() as f64;
+    let covariance = left
+        .iter()
+        .zip(right)
+        .map(|(left, right)| (*left as f64 - left_mean) * (*right as f64 - right_mean))
+        .sum::<f64>();
+    let left_variance = left
+        .iter()
+        .map(|value| (*value as f64 - left_mean).powi(2))
+        .sum::<f64>();
+    let right_variance = right
+        .iter()
+        .map(|value| (*value as f64 - right_mean).powi(2))
+        .sum::<f64>();
+    let denominator = (left_variance * right_variance).sqrt();
+    if denominator == 0.0 {
+        0.0
+    } else {
+        covariance / denominator
+    }
+}
+
+fn calculate_research_features(bars: &[RawBar], settings: &FeatureSettings) -> Vec<BarFeatures> {
+    let count = bars.len();
+    let mut output = vec![BarFeatures::default(); count];
+    let mut closes = Vec::with_capacity(count);
+    let mut last_close = None;
+    for bar in bars {
+        if let Some(close) = bar.close {
+            last_close = Some(close);
+        }
+        closes.push(last_close);
+    }
+
+    let rsi_2 = wilder_rsi(&closes, settings.rsi_2_window);
+    let rsi_14 = wilder_rsi(&closes, settings.rsi_14_window);
+    let sma_14 = (0..count)
+        .map(|index| rolling_mean(&rsi_14, index, settings.sma_14_window))
+        .collect::<Vec<_>>();
+    let mut ma_slope = vec![Some(0.0); count];
+    let mut ma_values = vec![None; count];
+    for (index, value) in ma_values.iter_mut().enumerate() {
+        *value = rolling_mean(&closes, index, settings.ma_slope_window);
+    }
+    for index in 0..count {
+        if index > 0 {
+            ma_slope[index] = match (ma_values[index], ma_values[index - 1]) {
+                (Some(current), Some(previous)) => Some(current - previous),
+                _ => Some(0.0),
+            };
+        }
+    }
+    let mut ma_accel = vec![Some(0.0); count];
+    for index in 1..count {
+        ma_accel[index] = Some(ma_slope[index].unwrap_or(0.0) - ma_slope[index - 1].unwrap_or(0.0));
+    }
+    let price_roc_3 = (0..count)
+        .map(|index| {
+            match (
+                index.checked_sub(settings.price_roc_window_3),
+                closes[index],
+            ) {
+                (Some(previous), Some(current)) => {
+                    closes[previous].map(|old| (current / old) - 1.0)
+                }
+                _ => None,
+            }
+        })
+        .collect::<Vec<_>>();
+    let rsi_z = (0..count)
+        .map(|index| {
+            Some(rolling_zscore_at(&rsi_2, index, settings.rsi_z_window, 1e-9).unwrap_or(0.0))
+        })
+        .collect::<Vec<_>>();
+    let spread_values = bars
+        .iter()
+        .map(|bar| Some(bar.spread_bps.unwrap_or(0.0)))
+        .collect::<Vec<_>>();
+    let depth_values = bars
+        .iter()
+        .map(|bar| Some(bar.depth_imbalance.unwrap_or(0.0)))
+        .collect::<Vec<_>>();
+    let cvd_values = bars
+        .iter()
+        .map(|bar| Some(bar.cvd_delta))
+        .collect::<Vec<_>>();
+    let first_trade_index = bars.iter().position(|bar| bar.has_trade);
+    let mut cvd_cumulative = Vec::with_capacity(count);
+    let mut cumulative = 0.0;
+    for (index, value) in bars.iter().enumerate() {
+        if first_trade_index.is_some_and(|first| index >= first) {
+            cumulative += value.cvd_delta;
+        }
+        cvd_cumulative.push(cumulative);
+    }
+    let cvd_slope = (0..count)
+        .map(|index| {
+            first_trade_index
+                .filter(|first| index >= first.saturating_add(5))
+                .map(|_| cvd_cumulative[index] - cvd_cumulative[index - 5])
+                .or(Some(0.0))
+        })
+        .collect::<Vec<_>>();
+    let price_ranges = bars
+        .iter()
+        .map(|bar| bar.ask_high.zip(bar.bid_low).map(|(ask, bid)| ask - bid))
+        .collect::<Vec<_>>();
+    let mut last_price_range = None;
+    let absorption = bars
+        .iter()
+        .zip(&price_ranges)
+        .map(|(bar, price_range)| {
+            if price_range.is_some() {
+                last_price_range = *price_range;
+            }
+            Some(bar.cvd_delta / (last_price_range.unwrap_or(0.0) + 1e-9))
+        })
+        .collect::<Vec<_>>();
+    let delta_divergence = bars
+        .iter()
+        .map(|bar| Some((bar.inst_buy - bar.inst_sell) - (bar.retail_buy - bar.retail_sell)))
+        .collect::<Vec<_>>();
+    let inst_ratio = bars
+        .iter()
+        .map(|bar| Some((bar.inst_buy + bar.inst_sell) / (bar.volume + 1e-9)))
+        .collect::<Vec<_>>();
+    let mut close_returns = vec![None; count];
+    for index in 1..count {
+        close_returns[index] = match (closes[index - 1], closes[index]) {
+            (Some(previous), Some(current)) if previous != 0.0 => Some(current / previous - 1.0),
+            _ => None,
+        };
+    }
+
+    for index in 0..count {
+        let mut volatility_values = Vec::new();
+        let start = index
+            .saturating_add(1)
+            .saturating_sub(settings.barrier_vol_bar_window);
+        for value in &close_returns[start..=index] {
+            if let Some(value) = value {
+                volatility_values.push(*value);
+            }
+        }
+        let bar_vol_std = if volatility_values.len() >= 2 {
+            let mean = volatility_values.iter().sum::<f64>() / volatility_values.len() as f64;
+            Some(
+                (volatility_values
+                    .iter()
+                    .map(|value| (value - mean).powi(2))
+                    .sum::<f64>()
+                    / volatility_values.len() as f64)
+                    .sqrt(),
+            )
+        } else {
+            None
+        };
+        output[index] = BarFeatures {
+            values: [
+                rolling_zscore_at(&spread_values, index, settings.deeplob_z_window, 1e-9)
+                    .or(Some(0.0)),
+                ma_slope[index],
+                rsi_z[index]
+                    .zip(ma_slope[index])
+                    .map(|(rsi, slope)| rsi * slope),
+                ma_accel[index],
+                price_roc_3[index],
+                rsi_2[index],
+                sma_14[index],
+                Some(0.0),
+                rolling_zscore_at(&cvd_values, index, 10, 1e-9).or(Some(0.0)),
+                rolling_zscore_at(&cvd_slope, index, 10, 1e-9).or(Some(0.0)),
+                rolling_zscore_at(&absorption, index, 10, 1e-9).or(Some(0.0)),
+                Some(tick_autocorrelation(&bars[index].tick_rules)),
+                inst_ratio[index],
+                rolling_zscore_at(&delta_divergence, index, 10, 1e-9).or(Some(0.0)),
+                rolling_zscore_at(&depth_values, index, 10, 1e-9).or(Some(0.0)),
+            ],
+            bar_vol_std,
+        };
+    }
+    output
 }
 
 /// Per-symbol streaming feature state.
 /// One instance per (strategy x symbol).
 pub struct OfmrFeatures {
-    config: Settings,
-    /// LTF reconstructor (default 1s): closed LTF bars feed the micro
-    /// orderflow state. HTF reconstructor (default 300s): closed HTF bars
-    /// feed the macro state + close-to-close returns. Both consume the SAME
-    /// raw tick sample — neither derives from the other.
-    ltf: Reconstructor,
-    htf: Reconstructor,
-
-    mid_prices: VecDeque<f64>,
-    rsi_2: RsiState,
-    rsi_14: RsiState,
-    rsi_14_window: VecDeque<f64>,
-    rsi_history: VecDeque<f64>,
-    spread_bps_window: VecDeque<f64>,
-    ma5_prices: VecDeque<f64>,
-    prev_ma5: Option<f64>,
-    prev_ma_slope: Option<f64>,
-    ofi_window: VecDeque<f64>,
-    prev_ofi: Option<f64>,
-    cvd: f64,
-    cvd_delta_window: VecDeque<f64>,
-    cvd_slope_window: VecDeque<f64>,
-    #[allow(dead_code)]
-    prev_cvd: Option<f64>,
-    tick_rule_window: VecDeque<i32>,
-    prev_trade_price: Option<f64>,
-    inst_buy_vol: f64,
-    inst_sell_vol: f64,
-    retail_buy_vol: f64,
-    retail_sell_vol: f64,
-    total_volume: f64,
-    depth_imbalance_window: VecDeque<f64>,
-    abs_ratio_window: VecDeque<f64>,
-    delta_divergence_window: VecDeque<f64>,
-    sequence: u64,
-
-    // One-minute close-to-close volatility state.
-    previous_completed_close: Option<f64>,
-    minute_returns: VecDeque<f64>,
+    research: ResearchFeatureState,
 }
 
 impl OfmrFeatures {
@@ -211,64 +535,13 @@ impl OfmrFeatures {
 
     pub fn with_settings(config: Settings) -> Self {
         Self {
-            ltf: Reconstructor::new(Timeframe::Seconds(
-                config.feature.ltf_timeframe_secs.max(1),
-            )),
-            htf: Reconstructor::new(Timeframe::Seconds(
-                config.feature.htf_timeframe_secs.max(1),
-            )),
-            config,
-
-            mid_prices: VecDeque::with_capacity(200),
-            rsi_2: RsiState::new(2),
-            rsi_14: RsiState::new(14),
-            rsi_14_window: VecDeque::with_capacity(14),
-            rsi_history: VecDeque::with_capacity(60),
-            spread_bps_window: VecDeque::with_capacity(60),
-            ma5_prices: VecDeque::with_capacity(10),
-            prev_ma5: None,
-            prev_ma_slope: None,
-            ofi_window: VecDeque::with_capacity(60),
-            prev_ofi: None,
-            cvd: 0.0,
-            cvd_delta_window: VecDeque::with_capacity(60),
-            cvd_slope_window: VecDeque::with_capacity(60),
-            prev_cvd: None,
-            tick_rule_window: VecDeque::with_capacity(60),
-            prev_trade_price: None,
-            inst_buy_vol: 0.0,
-            inst_sell_vol: 0.0,
-            retail_buy_vol: 0.0,
-            retail_sell_vol: 0.0,
-            total_volume: 0.0,
-            depth_imbalance_window: VecDeque::with_capacity(60),
-            abs_ratio_window: VecDeque::with_capacity(60),
-            delta_divergence_window: VecDeque::with_capacity(60),
-            sequence: 0,
-
-            previous_completed_close: None,
-            minute_returns: VecDeque::with_capacity(
-                BARRIER_VOL_BAR_WINDOW,
-            ),
+            research: ResearchFeatureState::new(&config),
         }
     }
 
-    /// Feed one CLOSED HTF bar into the macro state + close-to-close
-    /// returns. ONLY non-empty HTF bars arrive here (macro drop_empty=True);
-    /// LTF data never touches this path.
-    fn feed_htf_bar(&mut self, close: f64) {
-        if let Some(previous_close) = self.previous_completed_close
-            && previous_close.is_finite() && previous_close > 0.0 {
-                let ret = close / previous_close - 1.0;
-                if ret.is_finite() {
-                    push_window(
-                        &mut self.minute_returns,
-                        self.config.feature.barrier_vol_bar_window,
-                        ret,
-                    );
-                }
-            }
-        self.previous_completed_close = Some(close);
+    pub fn set_terminal_orderbook_time_ms(&mut self, timestamp_ms: i64) {
+        let timeframe_ms = self.research.timeframe_secs as i64 * 1_000;
+        self.research.terminal_bar_index = Some(timestamp_ms.div_euclid(timeframe_ms));
     }
 }
 
@@ -280,379 +553,13 @@ impl Default for OfmrFeatures {
 
 impl ComputeFeatures for OfmrFeatures {
     fn compute(&mut self, row: &FeatureRow) -> Result<FeatureRow, String> {
-        self.sequence += 1;
-
-        let bid = row.get("bid_price");
-        let ask = row.get("ask_price");
-        let trade_price = row.get("price");
-        let trade_amount = row.get("amount").unwrap_or(0.0);
-
-        let is_buyer_maker = row
-            .get("is_buyer_maker")
-            .map(|v| v != 0.0)
-            .unwrap_or(false);
-
-        let mid = match (bid, ask) {
-            (Some(b), Some(a)) if b > 0.0 && a > 0.0 => (b + a) / 2.0,
-            _ => trade_price.unwrap_or(0.0),
-        };
-
-        // Feed the shared sample into both timeframe reconstructors. Neither
-        // reconstructor derives from the other — they bucket the same raw tick
-        // stream onto independent HTF/LTF grids.
         let event_time_ms = row
             .get("event_time_ms")
-            .unwrap_or(0.0)
-            .max(0.0) as i64;
-        let sample = Sample {
-            timestamp_ms: event_time_ms,
-            price: mid,
-            has_trade: trade_price.is_some(),
-            quantity: trade_amount,
-            is_buyer_maker,
-            bid_price: row.get("bid_price"),
-            bid_amount: row.get("bid_amount").unwrap_or(0.0),
-            ask_price: row.get("ask_price"),
-            ask_amount: row.get("ask_amount").unwrap_or(0.0),
-        };
-
-        // HTF (macro): only non-empty closed bars drive the close-to-close
-        // returns behind `bar_vol_std`. Empty HTF bars are skipped
-        // (macro `drop_empty=True` in research).
-        for bar in self.htf.push(sample) {
-            if !bar.empty {
-                self.feed_htf_bar(bar.close);
-            }
+            .ok_or_else(|| "OFMR feature input is missing event_time_ms".to_string())?;
+        if !event_time_ms.is_finite() || event_time_ms < 0.0 {
+            return Err(format!("invalid OFMR event_time_ms: {event_time_ms}"));
         }
-        // LTF (micro): the same sample maintains the 1s grid. Completed LTF
-        // bars are available here; per-tick micro columns below are computed
-        // straight off the raw row as before.
-        let _ltf_bars = self.ltf.push(sample);
-
-        push_window(
-            &mut self.mid_prices,
-            200,
-            if mid > 0.0 { mid } else { 0.0 },
-        );
-
-        let rsi_2_val = if mid > 0.0 {
-            self.rsi_2.next(mid)
-        } else {
-            None
-        };
-
-        let rsi_14_val = if mid > 0.0 {
-            self.rsi_14.next(mid)
-        } else {
-            None
-        };
-
-        push_window(&mut self.ma5_prices, 5, mid);
-
-        let ma5 = if self.ma5_prices.len() == 5 {
-            self.ma5_prices.iter().sum::<f64>() / 5.0
-        } else {
-            mid
-        };
-
-        let ma_slope = self.prev_ma5.map(|p| ma5 - p).unwrap_or(0.0);
-        self.prev_ma5 = Some(ma5);
-
-        let spread_bps = match (bid, ask) {
-            (Some(b), Some(a)) if b > 0.0 && a > 0.0 && mid > 0.0 => {
-                (a - b) / mid * 10_000.0
-            }
-            _ => 0.0,
-        };
-
-        push_window(&mut self.spread_bps_window, 60, spread_bps);
-
-        let spread_bps_z =
-            rolling_zscore(&self.spread_bps_window, spread_bps, 10);
-        
-        // 1. Price ROC using settings configuration windows (3 and 5)
-        let roc_w3 = self.config.feature.price_roc_window_3;
-        let price_roc_3 = if self.mid_prices.len() > roc_w3 {
-            let len = self.mid_prices.len();
-            let prev_price = self.mid_prices[len - 1 - roc_w3];
-
-            if prev_price > 0.0 {
-                (mid - prev_price) / prev_price
-            } else {
-                0.0
-            }
-        } else {
-            0.0
-        };
-
-        let roc_w5 = self.config.feature.price_roc_window_5;
-        let _price_roc_5 = if self.mid_prices.len() > roc_w5 {
-            let len = self.mid_prices.len();
-            let prev_price = self.mid_prices[len - 1 - roc_w5];
-
-            if prev_price > 0.0 {
-                (mid - prev_price) / prev_price
-            } else {
-                0.0
-            }
-        } else {
-            0.0
-        };
-
-        push_window(
-            &mut self.rsi_14_window,
-            self.config.feature.rsi_14_window,
-            rsi_14_val.unwrap_or(50.0),
-        );
-
-        let sma_14 = if self.rsi_14_window.len() == self.config.feature.rsi_14_window {
-            self.rsi_14_window.iter().sum::<f64>() / self.config.feature.rsi_14_window as f64
-        } else {
-            rsi_14_val.unwrap_or(50.0)
-        };
-
-        let ma_accel = self
-            .prev_ma_slope
-            .map(|p| ma_slope - p)
-            .unwrap_or(0.0);
-
-        self.prev_ma_slope = Some(ma_slope);
-
-        // 2. RSI Z-Score using rsi_z_window setting
-        let rsi_val_unwrap = rsi_2_val.unwrap_or(50.0);
-        let rsi_z = rolling_zscore(&self.mid_prices, rsi_val_unwrap, self.config.feature.rsi_z_window)
-            .unwrap_or(0.0);
-
-        // 3. RSI ROC using rsi_roc_window_3 and rsi_roc_window_5 settings
-        push_window(&mut self.rsi_history, 60, rsi_val_unwrap);
-        let rsi_roc_w3 = self.config.feature.rsi_roc_window_3;
-        let _rsi_roc_3 = if self.rsi_history.len() > rsi_roc_w3 {
-            let len = self.rsi_history.len();
-            let prev = self.rsi_history[len - 1 - rsi_roc_w3];
-            rsi_val_unwrap - prev
-        } else {
-            0.0
-        };
-
-        let rsi_roc_w5 = self.config.feature.rsi_roc_window_5;
-        let _rsi_roc_5 = if self.rsi_history.len() > rsi_roc_w5 {
-            let len = self.rsi_history.len();
-            let prev = self.rsi_history[len - 1 - rsi_roc_w5];
-            rsi_val_unwrap - prev
-        } else {
-            0.0
-        };
-
-        let rsi_x_ma = rsi_z * ma_slope;
-
-        let tick_rule = match trade_price {
-            Some(p) => {
-                let tr = match self.prev_trade_price {
-                    Some(pp) if p > pp => 1,
-                    Some(pp) if p < pp => -1,
-                    _ => 0,
-                };
-
-                self.prev_trade_price = Some(p);
-                tr
-            }
-            None => 0,
-        };
-
-        let ofi_raw = spread_bps;
-        
-        let orderflow_min_size = self.config.feature.orderflow_z_window;
-
-        push_window(&mut self.ofi_window, 60, ofi_raw);
-
-        let ofi_diff = self.prev_ofi.map(|p| ofi_raw - p).unwrap_or(0.0);
-        self.prev_ofi = Some(ofi_raw);
-        let cvd_delta = match trade_price {
-            Some(_) => {
-                if is_buyer_maker {
-                    -trade_amount
-                } else {
-                    trade_amount
-                }
-            }
-            None => 0.0,
-        };
-
-        push_window(&mut self.cvd_delta_window, 60, ofi_diff);
-
-        let ofi_z = rolling_zscore(&self.ofi_window, ofi_diff, orderflow_min_size);
-
-        let _cvd_delta_z = rolling_zscore(&self.cvd_delta_window, cvd_delta, orderflow_min_size);
-        self.cvd += cvd_delta;
-
-        push_window(&mut self.cvd_delta_window, 60, cvd_delta);
-
-        let cvd_delta_z =
-            rolling_zscore(&self.cvd_delta_window, cvd_delta, 10);
-
-        let cvd_slope = if self.cvd_delta_window.len() >= 5 {
-            let len = self.cvd_delta_window.len();
-            let prev = self.cvd_delta_window[len - 5];
-            self.cvd - prev
-        } else {
-            0.0
-        };
-
-        push_window(&mut self.cvd_slope_window, 60, cvd_slope);
-
-        let cvd_slope_z = rolling_zscore(&self.cvd_slope_window, cvd_slope, orderflow_min_size);
-
-        push_window(&mut self.tick_rule_window, 60, tick_rule);
-
-        let tick_autocorr = if self.tick_rule_window.len() > 5 {
-            let vals: Vec<f64> = self
-                .tick_rule_window
-                .iter()
-                .map(|&v| v as f64)
-                .collect();
-
-            let n = vals.len();
-            let a = &vals[..n - 1];
-            let b = &vals[1..];
-
-            let ma = a.iter().sum::<f64>() / n as f64;
-            let mb = b.iter().sum::<f64>() / n as f64;
-
-            let sa = a
-                .iter()
-                .map(|v| (v - ma) * (v - ma))
-                .sum::<f64>()
-                .sqrt();
-
-            let sb = b
-                .iter()
-                .map(|v| (v - mb) * (v - mb))
-                .sum::<f64>()
-                .sqrt();
-
-            if sa == 0.0 || sb == 0.0 {
-                0.0
-            } else {
-                let cov: f64 = a
-                    .iter()
-                    .zip(b.iter())
-                    .map(|(x, y)| (x - ma) * (y - mb))
-                    .sum();
-
-                cov / (sa * sb)
-            }
-        } else {
-            0.0
-        };
-
-        let retail_threshold = 0.05 * trade_amount.max(1.0);
-
-        if trade_amount < retail_threshold {
-            if is_buyer_maker {
-                self.retail_sell_vol += trade_amount;
-            } else {
-                self.retail_buy_vol += trade_amount;
-            }
-        } else if is_buyer_maker {
-            self.inst_sell_vol += trade_amount;
-        } else {
-            self.inst_buy_vol += trade_amount;
-        }
-
-        self.total_volume += trade_amount;
-
-        let inst_ratio = if self.total_volume > 0.0 {
-            (self.inst_buy_vol + self.inst_sell_vol)
-                / (self.total_volume + 1e-9)
-        } else {
-            0.0
-        };
-
-        let deeplob_min_size = self.config.feature.deeplob_z_window;
-        let depth_imbalance = match (bid, ask) {
-            (Some(b), Some(a)) if b > 0.0 && a > 0.0 => {
-                let ba = row.get("bid_amount").unwrap_or(0.0);
-                let aa = row.get("ask_amount").unwrap_or(0.0);
-                let denom = ba + aa + 1e-9;
-
-                (ba - aa) / denom
-            }
-            _ => 0.0,
-        };
-
-        push_window(
-            &mut self.depth_imbalance_window,
-            60,
-            depth_imbalance,
-        );
-
-        let depth_imbalance_z =
-            rolling_zscore(&self.depth_imbalance_window, depth_imbalance, deeplob_min_size);
-
-        let price_range = match (bid, ask) {
-            (Some(b), Some(a)) if a > b => a - b,
-            _ => 0.0,
-        };
-
-        let abs_ratio = if price_range > 0.0 {
-            cvd_delta.abs() / (price_range + 1e-9)
-        } else {
-            0.0
-        };
-
-        push_window(&mut self.abs_ratio_window, 60, abs_ratio);
-
-        let absorption_z =
-            rolling_zscore(&self.abs_ratio_window, abs_ratio, 10);
-
-        let delta_divergence = (self.inst_buy_vol - self.inst_sell_vol)
-            - (self.retail_buy_vol - self.retail_sell_vol);
-
-        push_window(
-            &mut self.delta_divergence_window,
-            60,
-            delta_divergence,
-        );
-
-        let delta_divergence_z = rolling_zscore(
-            &self.delta_divergence_window,
-            delta_divergence,
-            10,
-        );
-
-        let mut out = FeatureRow::new();
-
-        // Preserve the existing 15 model features.
-        out.insert("Column_0", spread_bps_z.unwrap_or(0.0));
-        out.insert("Column_1", ma_slope);
-        out.insert("Column_2", rsi_x_ma);
-        out.insert("Column_3", ma_accel);
-        out.insert("Column_4", price_roc_3);
-        out.insert("Column_5", rsi_2_val.unwrap_or(50.0));
-        out.insert("Column_6", sma_14);
-        out.insert("Column_7", ofi_z.unwrap_or(0.0));
-        out.insert("Column_8", cvd_delta_z.unwrap_or(0.0));
-        out.insert("Column_9", cvd_slope_z.unwrap_or(0.0));
-        out.insert("Column_10", absorption_z.unwrap_or(0.0));
-        out.insert("Column_11", tick_autocorr);
-        out.insert("Column_12", inst_ratio);
-        out.insert("Column_13", delta_divergence_z.unwrap_or(0.0));
-        out.insert("Column_14", depth_imbalance_z.unwrap_or(0.0));
-
-        // Same semantics as:
-        // close.pct_change().rolling_std(
-        //     window_size=BARRIER_VOL_BAR_WINDOW,
-        //     min_samples=2,
-        //     ddof=0,
-        // )
-        //
-        // Keep volatility separate from Column_0..Column_14.
-        match rolling_population_std(&self.minute_returns) {
-            Some(volatility) => out.insert("bar_vol_std", volatility),
-            None => out.insert_missing("bar_vol_std"),
-        }
-
-        Ok(out)
+        Ok(self.research.observe(row, event_time_ms as i64))
     }
 
     fn output_names(&self) -> Vec<String> {
@@ -664,34 +571,13 @@ impl ComputeFeatures for OfmrFeatures {
 mod tests {
     use super::*;
 
-    fn tick(
-        price: f64,
-        bid: f64,
-        ask: f64,
-        amount: f64,
-        buyer_maker: bool,
-    ) -> FeatureRow {
+    fn book_tick(price: f64, event_time_ms: f64) -> FeatureRow {
         let mut row = FeatureRow::new();
-
-        row.insert("price", price);
-        row.insert("amount", amount);
-        row.insert("bid_price", bid);
-        row.insert("ask_price", ask);
+        row.insert("bid_price", price - 0.01);
+        row.insert("ask_price", price + 0.01);
         row.insert("bid_amount", 1.0);
         row.insert("ask_amount", 1.0);
-        row.insert(
-            "is_buyer_maker",
-            if buyer_maker { 1.0 } else { 0.0 },
-        );
-
-        row
-    }
-
-    fn timed_tick(
-        price: f64,
-        event_time_ms: f64,
-    ) -> FeatureRow {
-        let mut row = tick(price, price - 0.01, price + 0.01, 1.0, false);
+        row.insert("is_lob_event", 1.0);
         row.insert("event_time_ms", event_time_ms);
         row
     }
@@ -699,69 +585,51 @@ mod tests {
     #[test]
     fn output_names_are_column_0_to_14() {
         let names = output_column_names();
-
         assert_eq!(names.len(), 15);
         assert_eq!(names[0], "Column_0");
         assert_eq!(names[14], "Column_14");
     }
 
     #[test]
-    fn first_tick_returns_all_columns() {
-        let mut features = OfmrFeatures::new();
-
-        let row = features
-            .compute(&tick(100.0, 99.99, 100.01, 1.0, false))
-            .unwrap();
-
-        for i in 0..15 {
-            assert!(
-                row.contains(&format!("Column_{i}")),
-                "missing Column_{i}"
-            );
+    fn warmup_emits_missing_feature_columns() {
+        let mut features = OfmrFeatures::with_settings(Settings::default());
+        let row = features.compute(&book_tick(100.0, 1_000.0)).unwrap();
+        for index in 0..N_FEATURES {
+            assert!(row.contains(&format!("Column_{index}")));
+            assert!(row.get(&format!("Column_{index}")).is_none());
         }
     }
 
     #[test]
-    fn rolling_zscore_returns_none_when_window_short() {
-        let window: VecDeque<f64> = VecDeque::from([1.0, 2.0]);
-
-        assert!(rolling_zscore(&window, 3.0, 10).is_none());
+    fn rolling_zscore_requires_full_window() {
+        let values = [Some(1.0), Some(2.0)];
+        assert!(rolling_zscore_at(&values, 1, 10, 1e-9).is_none());
     }
 
     #[test]
-    fn rolling_zscore_returns_zero_when_std_zero() {
-        let window: VecDeque<f64> = VecDeque::from([5.0; 10]);
-
-        assert_eq!(rolling_zscore(&window, 5.0, 10).unwrap(), 0.0);
+    fn rolling_zscore_matches_zero_variance_research_behavior() {
+        let values = [Some(5.0); 10];
+        assert_eq!(rolling_zscore_at(&values, 9, 10, 1e-9).unwrap(), 0.0);
     }
 
     #[test]
-    fn population_std_uses_ddof_zero() {
-        let values: VecDeque<f64> = VecDeque::from([1.0, 3.0]);
-
-        // Population variance = ((1 - 2)^2 + (3 - 2)^2) / 2 = 1.
-        assert!((rolling_population_std(&values).unwrap() - 1.0).abs() < 1e-12);
+    fn wilder_rsi_matches_research_seed_alignment() {
+        let closes = [1.0, 2.0, 3.0, 8.0, 9.0].map(Some);
+        let rsi = wilder_rsi(&closes, 2);
+        assert_eq!(rsi[1], Some(0.0));
+        assert_eq!(rsi[2], Some(0.0));
+        assert!(rsi[3].unwrap() > 99.999);
     }
 
     #[test]
-    fn population_std_is_missing_with_fewer_than_two_returns() {
-        let values: VecDeque<f64> = VecDeque::from([0.01]);
-
-        assert!(rolling_population_std(&values).is_none());
-    }
-
-    #[test]
-    fn volatility_uses_htf_close_to_close_returns() {
+    fn output_uses_features_from_two_closed_bars_earlier() {
         let mut config = Settings::default();
-        config.feature.htf_timeframe_secs = 60;
+        config.feature.htf_timeframe_secs = 1;
         let mut features = OfmrFeatures::with_settings(config);
-        features.compute(&timed_tick(100.0, 1_000.0)).unwrap();
-        features.compute(&timed_tick(100.0, 59_000.0)).unwrap();
-        features.compute(&timed_tick(110.0, 119_000.0)).unwrap();
-        features.compute(&timed_tick(121.0, 179_000.0)).unwrap();
-        features.compute(&timed_tick(121.0, 239_000.0)).unwrap();
-        assert_eq!(features.minute_returns.len(), 2);
-        let volatility = rolling_population_std(&features.minute_returns).unwrap();
-        assert!(volatility.abs() < 1e-12);
+        features.compute(&book_tick(100.0, 0.0)).unwrap();
+        features.compute(&book_tick(101.0, 1_000.0)).unwrap();
+        let row = features.compute(&book_tick(102.0, 2_000.0)).unwrap();
+        assert_eq!(row.get("Column_7"), Some(0.0));
+        assert_eq!(row.get("Column_1"), Some(0.0));
     }
 }
