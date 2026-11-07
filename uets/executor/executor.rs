@@ -1755,7 +1755,14 @@ mod strategy_tests {
             let features = switch.feature_builder_mut().unwrap();
             let mut input = row(100.0);
             input.insert("event_time_ms", 1_000.0);
-            let computed = features.compute(&input).unwrap();
+            let computed_result = features.compute(&input);
+            assert!(
+                computed_result.is_ok(),
+                "OFMR feature computation failed: {computed_result:?}"
+            );
+            let Some(computed) = computed_result.ok() else {
+                return;
+            };
             for i in 0..15 {
                 assert!(
                     computed.contains(&format!("Column_{i}")),

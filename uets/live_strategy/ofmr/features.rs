@@ -105,13 +105,13 @@ impl ResearchFeatureState {
         }
     }
 
-    fn observe(&mut self, row: &FeatureRow, event_time_ms: i64) -> FeatureRow {
+    fn observe(&mut self, row: &FeatureRow, event_time_ms: i64) -> Result<FeatureRow, String> {
         let timeframe_ms = self.timeframe_secs as i64 * 1_000;
         let bar_index = event_time_ms.div_euclid(timeframe_ms);
         if let Some(terminal_bar_index) = self.terminal_bar_index
             && bar_index >= terminal_bar_index
         {
-            return self.output_for_bar(terminal_bar_index.saturating_sub(1));
+            return Ok(self.output_for_bar(terminal_bar_index.saturating_sub(1)));
         }
         if self.current_bar_index != Some(bar_index) {
             self.close_current_bar(bar_index);
@@ -125,7 +125,10 @@ impl ResearchFeatureState {
             .get("is_lob_event")
             .map(|value| value != 0.0)
             .unwrap_or(!is_trade);
-        let bar = self.current_bar.as_mut().expect("current bar initialized");
+        let bar = self
+            .current_bar
+            .as_mut()
+            .ok_or_else(|| "OFMR current bar was not initialized".to_string())?;
         if is_book {
             if let (Some(bid), Some(ask)) = (row.get("bid_price"), row.get("ask_price")) {
                 if bid > 0.0 && ask > 0.0 {
@@ -180,7 +183,7 @@ impl ResearchFeatureState {
             }
         }
 
-        self.output_for_bar(bar_index)
+        Ok(self.output_for_bar(bar_index))
     }
 
     fn close_current_bar(&mut self, next_index: i64) {
@@ -250,12 +253,13 @@ impl ResearchFeatureState {
 }
 
 fn rolling_mean(values: &[Option<f64>], index: usize, window: usize) -> Option<f64> {
-    let start = index.checked_add(1)?.checked_sub(window)?;
-    let slice = &values[start..=index];
-    if slice.iter().any(Option::is_none) {
+    if window == 0 {
         return None;
     }
-    Some(slice.iter().map(|value| value.unwrap()).sum::<f64>() / window as f64)
+    let start = index.checked_add(1)?.checked_sub(window)?;
+    let slice = &values[start..=index];
+    let observations = slice.iter().copied().collect::<Option<Vec<_>>>()?;
+    Some(observations.iter().sum::<f64>() / window as f64)
 }
 
 fn rolling_zscore_at(
@@ -264,6 +268,9 @@ fn rolling_zscore_at(
     window: usize,
     epsilon: f64,
 ) -> Option<f64> {
+    if window == 0 {
+        return None;
+    }
     let start = index.checked_add(1)?.checked_sub(window)?;
     let slice = &values[start..=index];
     let observations = slice.iter().copied().collect::<Option<Vec<_>>>()?;
@@ -290,13 +297,9 @@ fn wilder_rsi(closes: &[Option<f64>], window: usize) -> Vec<Option<f64>> {
             _ => differences.push(None),
         }
     }
-    if differences.iter().any(Option::is_none) {
+    let Some(changes) = differences.into_iter().collect::<Option<Vec<_>>>() else {
         return output;
-    }
-    let changes = differences
-        .iter()
-        .map(|value| value.unwrap())
-        .collect::<Vec<_>>();
+    };
     if changes.len() <= window {
         for index in 1..=changes.len() {
             output[index] = Some(0.0);
@@ -450,10 +453,22 @@ fn calculate_research_features(bars: &[RawBar], settings: &FeatureSettings) -> V
         .iter()
         .zip(&price_ranges)
         .map(|(bar, price_range)| {
-            if price_range.is_some() {
-                last_price_range = *price_range;
+            if let Some(price_range) =
+                price_range.filter(|range| range.is_finite() && *range >= 0.0)
+            {
+                last_price_range = Some(price_range);
             }
-            Some(bar.cvd_delta / (last_price_range.unwrap_or(0.0) + 1e-9))
+            let Some(price_range) = last_price_range else {
+                return Some(0.0);
+            };
+            let scale = price_range + 1e-9;
+            Some(
+                if bar.cvd_delta.is_finite() && scale.is_finite() && scale > 0.0 {
+                    bar.cvd_delta / scale
+                } else {
+                    0.0
+                },
+            )
         })
         .collect::<Vec<_>>();
     let delta_divergence = bars
@@ -559,7 +574,7 @@ impl ComputeFeatures for OfmrFeatures {
         if !event_time_ms.is_finite() || event_time_ms < 0.0 {
             return Err(format!("invalid OFMR event_time_ms: {event_time_ms}"));
         }
-        Ok(self.research.observe(row, event_time_ms as i64))
+        self.research.observe(row, event_time_ms as i64)
     }
 
     fn output_names(&self) -> Vec<String> {
