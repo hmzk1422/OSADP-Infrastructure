@@ -1753,7 +1753,9 @@ mod strategy_tests {
         // Its feature builder computes Column_0..Column_14...
         let outputs = {
             let features = switch.feature_builder_mut().unwrap();
-            let computed = features.compute(&row(100.0)).unwrap();
+            let mut input = row(100.0);
+            input.insert("event_time_ms", 1_000.0);
+            let computed = features.compute(&input).unwrap();
             for i in 0..15 {
                 assert!(
                     computed.contains(&format!("Column_{i}")),

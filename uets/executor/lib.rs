@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 #[path = "../aggregator/mod.rs"]
 pub mod aggregator;
 pub mod connectors;

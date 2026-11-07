@@ -1,0 +1,12 @@
+[package]
+name = "live_parity_test"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "live_parity_test"
+path = "src/main.rs"
+
+[workspace]
+
+[dependencies]

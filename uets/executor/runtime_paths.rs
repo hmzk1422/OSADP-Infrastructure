@@ -8,6 +8,22 @@ fn has_runtime_config(root: &Path) -> bool {
         || root.join("config").join("execution.yaml").is_file()
 }
 
+fn normalize_runtime_root(root: &Path) -> PathBuf {
+    if root.join("config").join("execution.yaml").is_file() {
+        if let Some(parent) = root.parent() {
+            if parent
+                .join("uets")
+                .join("config")
+                .join("execution.yaml")
+                .is_file()
+            {
+                return parent.to_path_buf();
+            }
+        }
+    }
+    root.to_path_buf()
+}
+
 fn resolve_workspace_root(
     explicit_home: Option<&Path>,
     current_dir: Option<&Path>,
@@ -26,18 +42,18 @@ fn resolve_workspace_root(
 
     if let Some(current_dir) = current_dir {
         if has_runtime_config(current_dir) {
-            return current_dir.to_path_buf();
+            return normalize_runtime_root(current_dir);
         }
     }
 
     if let Some(executable) = executable {
         if let Some(parent) = executable.parent() {
             if has_runtime_config(parent) {
-                return parent.to_path_buf();
+                return normalize_runtime_root(parent);
             }
             if let Some(root) = parent.parent() {
                 if has_runtime_config(root) {
-                    return root.to_path_buf();
+                    return normalize_runtime_root(root);
                 }
             }
         }
@@ -129,6 +145,20 @@ mod tests {
         assert_eq!(
             resolve_workspace_root(None, None, Some(&bin.join("uets")), Path::new("source"),),
             deployment
+        );
+    }
+
+    #[test]
+    fn package_directory_uses_the_workspace_root_when_running_cargo_tests() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = temp.path();
+        let package = workspace.join("uets");
+        std::fs::create_dir_all(package.join("config")).unwrap();
+        std::fs::write(package.join("config/execution.yaml"), "mode: live-test\n").unwrap();
+
+        assert_eq!(
+            resolve_workspace_root(None, Some(&package), None, Path::new("source")),
+            workspace
         );
     }
 }

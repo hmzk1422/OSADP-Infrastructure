@@ -30,9 +30,14 @@ from uets.playback import (
 import uets.playback as playback_module
 
 
-def _write_cryptol2_fixtures(directory: Path) -> None:
+def _write_cryptol2_fixtures(directory: Path, duration_seconds: int = 80) -> None:
     rng = np.random.default_rng(20261022)
-    timestamps = np.arange(1_800_000_000_000, 1_800_000_080_000, 1_000)
+    start_ms = 1_800_000_000_000
+    timestamps = np.arange(
+        start_ms,
+        start_ms + duration_seconds * 1_000,
+        1_000,
+    )
     for symbol in ("BTCUSDT", "ETHUSDT"):
         log_returns = rng.normal(0.0, 0.001, size=timestamps.size)
         prices = 100.0 * np.exp(np.cumsum(log_returns))
@@ -180,15 +185,23 @@ class PlaybackRunnerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="uets-ofmr-playback-") as temp:
             work = Path(temp)
             cryptol2 = work / "cryptol2"
-            _write_cryptol2_fixtures(cryptol2)
+            warmup_seconds = 7_200
+            test_seconds = 80
+            _write_cryptol2_fixtures(
+                cryptol2,
+                duration_seconds=warmup_seconds + test_seconds,
+            )
             catalog_path = work / "catalog.json"
             catalog_path.write_text(
                 json.dumps({
                     "models": [{
                         "fold": 1,
                         "model": str(ROOT / "uets" / "models" / "ofmr" / "trader.txt"),
-                        "test_start_ms": 1_800_000_000_000,
-                        "test_end_ms": 1_800_000_080_000,
+                        "test_start_ms": 1_800_000_000_000 + warmup_seconds * 1_000,
+                        "test_end_ms": (
+                            1_800_000_000_000
+                            + (warmup_seconds + test_seconds - 1) * 1_000
+                        ),
                     }],
                 }),
                 encoding="utf-8",
