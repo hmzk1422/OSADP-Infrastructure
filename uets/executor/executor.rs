@@ -1011,7 +1011,7 @@ impl LiveDashboard {
                 continue;
             }
             let deadline = *instance.restart_after.get_or_insert_with(|| {
-                now + crate::aggregator::supervisor::backoff(instance.restart_attempts + 1)
+                now + uets::aggregator::supervisor::backoff(instance.restart_attempts + 1)
             });
             if now >= deadline {
                 eprintln!("[supervisor] {identity}: {reason}; restarting");
@@ -1063,9 +1063,60 @@ impl LiveDashboard {
                 instance.healthy_since = None;
                 instance.restart_after = Some(
                     std::time::Instant::now()
-                        + crate::aggregator::supervisor::backoff(instance.restart_attempts + 1),
+                        + uets::aggregator::supervisor::backoff(instance.restart_attempts + 1),
                 );
                 Err(error)
+            }
+        }
+
+        fn service_checkpoint_request(&self) {
+            let request = self
+                .control_dir
+                .join(format!("{}.checkpoint.request", self.session_id));
+            if !request.is_file() {
+                return;
+            }
+            let response = self
+                .control_dir
+                .join(format!("{}.checkpoint.response", self.session_id));
+            let result = (|| -> Result<(), String> {
+                let destination = std::fs::read_to_string(&request)
+                    .map_err(|error| format!("read checkpoint request: {error}"))?;
+                let destination = PathBuf::from(destination.trim());
+                if destination.as_os_str().is_empty() {
+                    return Err("checkpoint destination is empty".into());
+                }
+                if destination.exists() {
+                    return Err(format!(
+                        "checkpoint destination already exists: {}",
+                        destination.display()
+                    ));
+                }
+                let db = self
+                    .telemetry_db
+                    .as_ref()
+                    .ok_or_else(|| "telemetry database is unavailable".to_string())?;
+                db.create_checkpoint(&destination)
+                    .map_err(|error| format!("create RocksDB checkpoint: {error}"))?;
+                Ok(())
+            })();
+            let response_tmp =
+                response.with_extension(format!("response.{}.tmp", std::process::id()));
+            let response_text = match result {
+                Ok(()) => "ok".to_string(),
+                Err(error) => format!("error: {error}"),
+            };
+            if let Err(error) = std::fs::write(&response_tmp, response_text) {
+                eprintln!("[live_db] write checkpoint response failed: {error}");
+                return;
+            }
+            if let Err(error) = std::fs::rename(&response_tmp, &response) {
+                eprintln!("[live_db] publish checkpoint response failed: {error}");
+                let _ = std::fs::remove_file(response_tmp);
+                return;
+            }
+            if let Err(error) = std::fs::remove_file(request) {
+                eprintln!("[live_db] remove checkpoint request failed: {error}");
             }
         }
     }
@@ -1183,56 +1234,6 @@ impl uets_gui::SnapshotSource for LiveDashboard {
             self.last_telemetry_sample = std::time::Instant::now();
         }
         snapshot
-    }
-
-    fn service_checkpoint_request(&self) {
-        let request = self
-            .control_dir
-            .join(format!("{}.checkpoint.request", self.session_id));
-        if !request.is_file() {
-            return;
-        }
-        let response = self
-            .control_dir
-            .join(format!("{}.checkpoint.response", self.session_id));
-        let result = (|| -> Result<(), String> {
-            let destination = std::fs::read_to_string(&request)
-                .map_err(|error| format!("read checkpoint request: {error}"))?;
-            let destination = PathBuf::from(destination.trim());
-            if destination.as_os_str().is_empty() {
-                return Err("checkpoint destination is empty".into());
-            }
-            if destination.exists() {
-                return Err(format!(
-                    "checkpoint destination already exists: {}",
-                    destination.display()
-                ));
-            }
-            let db = self
-                .telemetry_db
-                .as_ref()
-                .ok_or_else(|| "telemetry database is unavailable".to_string())?;
-            db.create_checkpoint(&destination)
-                .map_err(|error| format!("create RocksDB checkpoint: {error}"))?;
-            Ok(())
-        })();
-        let response_tmp = response.with_extension(format!("response.{}.tmp", std::process::id()));
-        let response_text = match result {
-            Ok(()) => "ok".to_string(),
-            Err(error) => format!("error: {error}"),
-        };
-        if let Err(error) = std::fs::write(&response_tmp, response_text) {
-            eprintln!("[live_db] write checkpoint response failed: {error}");
-            return;
-        }
-        if let Err(error) = std::fs::rename(&response_tmp, &response) {
-            eprintln!("[live_db] publish checkpoint response failed: {error}");
-            let _ = std::fs::remove_file(response_tmp);
-            return;
-        }
-        if let Err(error) = std::fs::remove_file(request) {
-            eprintln!("[live_db] remove checkpoint request failed: {error}");
-        }
     }
 
     fn control(&mut self, command: uets_gui::StrategyCommand) -> Result<(), String> {
