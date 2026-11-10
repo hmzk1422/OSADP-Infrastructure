@@ -131,6 +131,18 @@ impl ReorderBuffer {
         out
     }
 
+    /// Discard pending events and reset the watermark after switching feeds.
+    ///
+    /// Keeping a previous venue's watermark or buffered deltas can make valid
+    /// events from the replacement feed appear late or apply against the
+    /// wrong order-book sequence.
+    pub fn clear(&mut self) {
+        self.pending.clear();
+        self.heap.clear();
+        self.watermark_ms = i64::MIN;
+        self.arrival = 0;
+    }
+
     pub fn late_dropped(&self) -> u64 {
         self.late_dropped
     }
@@ -173,8 +185,8 @@ impl ReorderBuffer {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::event::{DiffFrame, Source, Trade};
+    use super::*;
 
     fn trade(ts: i64, id: u64) -> MarketEvent {
         MarketEvent::Trade(Trade {
@@ -250,5 +262,15 @@ mod tests {
         buffer.push(trade(200, 2));
         let times: Vec<i64> = buffer.flush().iter().map(|e| e.event_time_ms()).collect();
         assert_eq!(times, vec![100, 200, 300]);
+    }
+
+    #[test]
+    fn clear_resets_pending_events_and_watermark() {
+        let mut buffer = ReorderBuffer::new(1_000, 1024);
+        buffer.push(trade(10_000, 1));
+        buffer.clear();
+        assert!(buffer.is_empty());
+        assert!(buffer.push(trade(1, 2)).is_empty());
+        assert_eq!(buffer.flush().len(), 1);
     }
 }

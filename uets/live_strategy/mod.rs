@@ -6,7 +6,7 @@
 //!   traits.rs     # ComputeFeatures + StateBuilder contracts
 //!   runner.rs     # StrategyRunner: per-(strategy x symbol) state
 //!   ofmr/         # OFMR strategy: LightGBM inference over Column_0..Column_14
-//!   strategy2/    # YOUR strategy: same shape, independent state
+//!   example_strategy/ # Minimal reference strategy for new implementations
 //! ```
 //!
 //! Flow per row: `compute_feature` first, `state_builder` second, back to
@@ -14,7 +14,7 @@
 
 pub mod live_db;
 pub mod ofmr;
-pub mod strategy2;
+pub mod example_strategy;
 pub mod traits;
 
 pub mod runner;
@@ -25,7 +25,7 @@ pub use traits::{ComputeFeatures, LiveStrategy, StateBuilder};
 
 /// Strategies compiled into this binary.
 pub fn available_strategies() -> Vec<String> {
-    vec!["ofmr".to_string(), "strategy2".to_string()]
+    vec!["ofmr".to_string(), "example_strategy".to_string()]
 }
 
 /// Build a fresh bundle by name (independent state per call).
@@ -43,7 +43,7 @@ pub fn load_strategy(name: &str) -> Result<LiveStrategy, String> {
 
     match base {
         "ofmr" => ofmr::load(),
-        "strategy2" => strategy2::load(),
+        "example_strategy" => example_strategy::load(),
         other => Err(format!(
             "strategy folder '{other}' has no compiled loader; add its module to live_strategy"
         )),
@@ -82,7 +82,7 @@ mod tests {
             "got {dirs:?}"
         );
         assert!(
-            available_strategies().contains(&"strategy2".to_string()),
+            available_strategies().contains(&"example_strategy".to_string()),
             "got {dirs:?}"
         );
     }
@@ -94,7 +94,7 @@ mod tests {
             .step("ofmr", "BTCUSDT", &row(100.0, 1_000.0))
             .unwrap();
         runner
-            .step("strategy2", "BTCUSDT", &row(100.0, 1_000.0))
+            .step("example_strategy", "BTCUSDT", &row(100.0, 1_000.0))
             .unwrap();
         assert_eq!(runner.slot_count(), 2);
         runner

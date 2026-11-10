@@ -15,7 +15,7 @@ equality for trade-path columns.
 Example for OFMR on one day of matched BTCUSDT data:
 
 ```powershell
-cargo run --manifest-path components\pipelines\live_parity_test\Cargo.toml -- `
+cargo run --manifest-path unit-tests\production_check\live_parity_test\Cargo.toml -- `
   --data-path market_data\matched `
   --symbol BTCUSDT `
   --tag 2025-06-30 `
@@ -37,7 +37,24 @@ cargo run --manifest-path components\pipelines\live_parity_test\Cargo.toml -- `
 
 `--feature-cols` and `--trade-cols` describe the output schema; they are not
 fixed by the runner. Output CSVs are written under
-`build\live_parity_test\` by default.
+`build\production_check\` by default.
+
+## Select a configured strategy
+
+`run_strategy_parity.py` selects the Python and Rust programs and schemas for
+each configured live strategy. OFMR compares the causal Python path with the
+Rust `playback_ofmr` binary. The reference strategy uses a tiny CSV fixture to
+show how to add a paired Python/Rust implementation:
+
+```powershell
+python unit-tests\production_check\run_strategy_parity.py --strategy example_strategy
+python unit-tests\production_check\run_strategy_parity.py --strategy ofmr --data-path market_data\matched --symbol BTCUSDT --tag 2025-06-30
+```
+
+Keep the profile in `run_strategy_parity.py` aligned with each bundle under
+`uets\live_strategy\` and its Python counterpart under
+`strategy_system\strategy\`. New live bundles without a Python baseline must
+be called out explicitly rather than silently omitted from the profile.
 
 ## Separate research-artifact parity
 

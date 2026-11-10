@@ -1,0 +1,10 @@
+[Unit]
+Description=Check UETS archive threshold daily at midnight UTC
+
+[Timer]
+OnCalendar=*-*-* 00:00:00 UTC
+Persistent=true
+Unit=uets-cloud-archive.service
+
+[Install]
+WantedBy=timers.target

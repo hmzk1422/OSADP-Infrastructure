@@ -1,4 +1,4 @@
-//! strategy2/state_builder.rs — YOUR rules for strategy2.
+//! Threshold rules for the reference strategy.
 //!
 //! Pure: computed features in, `Decision` out. Static rules today; read your
 //! own `model.onnx` here in Phase 2 (load once in `new()`, score in
@@ -7,14 +7,13 @@
 use crate::core::strategy::{Decision, MarketState, Position};
 use crate::live_strategy::StateBuilder;
 
-/// Example: threshold on `dz`. Replace with your rules.
-pub struct Strategy2Rules {
+pub struct ExampleRules {
     pub feature: String,
     pub long_above: f64,
     pub short_below: f64,
 }
 
-impl Strategy2Rules {
+impl ExampleRules {
     pub fn new() -> Self {
         Self {
             feature: "dz".to_string(),
@@ -24,13 +23,13 @@ impl Strategy2Rules {
     }
 }
 
-impl Default for Strategy2Rules {
+impl Default for ExampleRules {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl StateBuilder for Strategy2Rules {
+impl StateBuilder for ExampleRules {
     fn decide(&self, state: &MarketState) -> Decision {
         let Some(value) = state.features.get(&self.feature) else {
             return Decision::Hold;
@@ -72,10 +71,22 @@ mod tests {
 
     #[test]
     fn signals_on_deviation() {
-        let r = Strategy2Rules::new();
+        let r = ExampleRules::new();
         assert_eq!(r.decide(&state(Some(2.0))), Decision::EnterLong);
         assert_eq!(r.decide(&state(Some(-2.0))), Decision::EnterShort);
         assert_eq!(r.decide(&state(Some(0.0))), Decision::Hold);
         assert_eq!(r.decide(&state(None)), Decision::Hold);
+    }
+
+    #[test]
+    fn does_not_stack_an_entry_while_a_position_is_open() {
+        assert_eq!(
+            ExampleRules::new().decide(&MarketState {
+                features: state(Some(2.0)).features,
+                position: Position::Long,
+                sequence: 2,
+            }),
+            Decision::Hold
+        );
     }
 }

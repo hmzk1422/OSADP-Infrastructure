@@ -133,9 +133,12 @@ fn print_help() {
          \x20 strategies               list compiled vs on-disk strategy bundles\n\
          \x20 strategy <strategy>@<asset> run one strategy socket consumer\n\
          \x20 run <strategy>@pwf|mc|cpcv ... run offline research evaluations\n\
-         \x20                         research runs before any requested live instances\n\
+         \x20                         research runs before any requested live instances
+         \x20                         live flag: --reuse-rocksdb resumes the last run session\n\
          \x20 playback [--config PATH] run offline evaluation from the UETS YAML settings\n\
          \x20 db [SESSION [STRAT@ASSET]]  inspect live_db contents (trades + portfolio + telemetry)\n\
+         \x20 db checkpoint SESSION DIR  create a consistent telemetry RocksDB checkpoint\n\
+         \x20 db verify-checkpoint SESSION DIR  open and verify a telemetry checkpoint\n\
          \x20 user-stream             REST listen-key lifecycle (needs API key)\n\
          \x20 user-stream-ws          account/order update stream (needs API key)\n\
          \x20 help                    show this message\n\
@@ -498,6 +501,65 @@ fn split_run_requests(requested: &[String]) -> (Vec<String>, Vec<String>) {
     (research, live)
 }
 
+#[cfg(any(unix, test))]
+fn choose_session_id(
+    live_db_root: &std::path::Path,
+    reuse_rocksdb: bool,
+) -> Result<String, String> {
+    std::fs::create_dir_all(live_db_root).map_err(|error| {
+        format!(
+            "create live database root {}: {error}",
+            live_db_root.display()
+        )
+    })?;
+    let marker = live_db_root.join("current_session");
+    if reuse_rocksdb {
+        match std::fs::read_to_string(&marker) {
+            Ok(value) => {
+                let session_id = value.trim();
+                if session_id.is_empty()
+                    || !session_id
+                        .chars()
+                        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-'))
+                {
+                    return Err(format!("invalid session id in {}", marker.display()));
+                }
+                eprintln!("[live_db] reusing session={session_id}");
+                return Ok(session_id.to_string());
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                eprintln!(
+                    "[live_db] --reuse-rocksdb requested but no previous session exists; creating one"
+                );
+            }
+            Err(error) => {
+                return Err(format!(
+                    "read live database session {}: {error}",
+                    marker.display()
+                ));
+            }
+        }
+    }
+
+    let session_id = live_strategy::live_db::new_session_id();
+    let mut marker_file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .open(&marker)
+        .map_err(|error| format!("write live database session {}: {error}", marker.display()))?;
+    use std::io::Write;
+    writeln!(marker_file, "{session_id}")
+        .and_then(|()| marker_file.sync_all())
+        .map_err(|error| {
+            format!(
+                "persist live database session {}: {error}",
+                marker.display()
+            )
+        })?;
+    Ok(session_id)
+}
+
 #[cfg(unix)]
 struct LiveProcesses(Vec<std::process::Child>);
 
@@ -514,7 +576,7 @@ impl Drop for LiveProcesses {
 }
 
 #[cfg(unix)]
-fn run_live_system(requested: &[String]) -> Result<(), String> {
+fn run_live_system(requested: &[String], reuse_rocksdb: bool) -> Result<(), String> {
     use uets_gui::{Monitor, SocketSnapshotSource};
 
     let root = uets::runtime_paths::workspace_root();
@@ -528,7 +590,7 @@ fn run_live_system(requested: &[String]) -> Result<(), String> {
     let live_db_root = std::env::var("UETS_LIVE_DB")
         .map(PathBuf::from)
         .unwrap_or_else(|_| live_strategy::live_db::default_live_db_root());
-    let session_id = live_strategy::live_db::new_session_id();
+    let session_id = choose_session_id(&live_db_root, reuse_rocksdb)?;
     let telemetry_path = live_db_root.join("telemetry").join(&session_id);
     std::fs::create_dir_all(&telemetry_path).map_err(|error| {
         format!(
@@ -565,6 +627,17 @@ fn run_live_system(requested: &[String]) -> Result<(), String> {
         })
         .unwrap_or_default();
 
+    let control_dir = live_db_root.join("control");
+    std::fs::create_dir_all(&control_dir)
+        .map_err(|error| format!("create live database control directory: {error}"))?;
+    let active_file = control_dir.join(format!("{session_id}.active"));
+    std::fs::write(&active_file, format!("{}\n", std::process::id())).map_err(|error| {
+        format!(
+            "write live database active marker {}: {error}",
+            active_file.display()
+        )
+    })?;
+
     let mut dashboard = LiveDashboard {
         snapshots,
         gui_socket,
@@ -574,6 +647,8 @@ fn run_live_system(requested: &[String]) -> Result<(), String> {
         live_db_root,
         session_id,
         telemetry_db,
+        control_dir,
+        active_file,
         last_telemetry_sample: std::time::Instant::now() - std::time::Duration::from_secs(1),
         instances: std::collections::BTreeMap::new(),
     };
@@ -615,6 +690,9 @@ struct ManagedInstance {
     worker: Option<std::process::Child>,
     feed: Option<std::process::Child>,
     enabled: bool,
+    restart_attempts: u32,
+    restart_after: Option<std::time::Instant>,
+    healthy_since: Option<std::time::Instant>,
 }
 
 #[cfg(unix)]
@@ -627,6 +705,8 @@ struct LiveDashboard {
     live_db_root: PathBuf,
     session_id: String,
     telemetry_db: Option<uets_db::UetsDb>,
+    control_dir: PathBuf,
+    active_file: PathBuf,
     last_telemetry_sample: std::time::Instant,
     instances: std::collections::BTreeMap<String, ManagedInstance>,
 }
@@ -634,11 +714,32 @@ struct LiveDashboard {
 #[cfg(unix)]
 impl LiveDashboard {
     fn process_log(log_dir: &std::path::Path, file: &str) -> Result<std::fs::File, String> {
+        const MAX_LOG_BYTES: u64 = 10 * 1024 * 1024;
+        const ROTATED_LOG_SUFFIX: &str = ".1";
+        let path = log_dir.join(file);
+        if path
+            .metadata()
+            .is_ok_and(|metadata| metadata.len() > MAX_LOG_BYTES)
+        {
+            let rotated = path.with_extension(format!(
+                "{}{}",
+                path.extension()
+                    .and_then(|value| value.to_str())
+                    .unwrap_or("log"),
+                ROTATED_LOG_SUFFIX
+            ));
+            if rotated.exists() {
+                std::fs::remove_file(&rotated).map_err(|error| {
+                    format!("remove old rotated log {}: {error}", rotated.display())
+                })?;
+            }
+            std::fs::rename(&path, &rotated)
+                .map_err(|error| format!("rotate process log {}: {error}", path.display()))?;
+        }
         std::fs::OpenOptions::new()
             .create(true)
-            .write(true)
-            .truncate(true)
-            .open(log_dir.join(file))
+            .append(true)
+            .open(&path)
             .map_err(|error| format!("open logs/uets/{file}: {error}"))
     }
 
@@ -684,6 +785,9 @@ impl LiveDashboard {
                 worker: None,
                 feed: None,
                 enabled: false,
+                restart_attempts: 0,
+                restart_after: None,
+                healthy_since: None,
             },
         );
         Ok(())
@@ -699,12 +803,16 @@ impl LiveDashboard {
         if instance.enabled {
             return Err(format!("{identity} is already enabled"));
         }
-        if instance
-            .worker
-            .as_mut()
-            .is_some_and(|child| child.try_wait().ok().flatten().is_some())
-        {
-            instance.worker = None;
+        if let Some(worker) = instance.worker.as_mut() {
+            match worker.try_wait() {
+                Ok(Some(_)) => instance.worker = None,
+                Ok(None) => {}
+                Err(error) => {
+                    return Err(format!(
+                        "inspect {identity} worker before enabling: {error}"
+                    ));
+                }
+            }
         }
         let worker_was_running = instance.worker.is_some();
         if instance.worker.is_none() {
@@ -785,6 +893,8 @@ impl LiveDashboard {
                 .map_err(|error| format!("start feed for {identity}: {error}"))?,
         );
         instance.enabled = true;
+        instance.healthy_since = Some(Instant::now());
+        instance.restart_after = None;
         let mut status_snapshot = self
             .snapshots
             .snapshot()
@@ -820,6 +930,9 @@ impl LiveDashboard {
             let _ = feed.wait();
         }
         instance.enabled = false;
+        instance.healthy_since = None;
+        instance.restart_after = None;
+        instance.restart_attempts = 0;
         snapshot.strategy_id = instance.strategy.clone();
         snapshot.asset_id = instance.asset.clone();
         snapshot.statistics.status = Some("disabled".into());
@@ -843,35 +956,161 @@ impl LiveDashboard {
         self.snapshots.forget_instance(identity);
         Ok(())
     }
+
+    fn supervise_children(&mut self) -> std::collections::BTreeMap<String, String> {
+        use std::time::{Duration, Instant};
+
+        const RESTART_LIMIT: u32 = 5;
+        const HEALTHY_RESET: Duration = Duration::from_secs(3600);
+
+        let now = Instant::now();
+        let mut restart = Vec::new();
+        let mut errors = std::collections::BTreeMap::new();
+        for (identity, instance) in &mut self.instances {
+            if !instance.enabled {
+                continue;
+            }
+            if instance
+                .healthy_since
+                .is_some_and(|since| since.elapsed() >= HEALTHY_RESET)
+            {
+                instance.restart_attempts = 0;
+            }
+
+            let mut reason = None;
+            for (name, child) in [
+                ("feed", &mut instance.feed),
+                ("worker", &mut instance.worker),
+            ] {
+                if let Some(process) = child.as_mut() {
+                    match process.try_wait() {
+                        Ok(Some(status)) => {
+                            *child = None;
+                            reason.get_or_insert_with(|| format!("{name} exited with {status}"));
+                        }
+                        Ok(None) => {}
+                        Err(error) => {
+                            reason.get_or_insert_with(|| {
+                                format!("could not inspect {name} process: {error}")
+                            });
+                        }
+                    }
+                } else {
+                    reason.get_or_insert_with(|| format!("{name} process is not running"));
+                }
+            }
+
+            let Some(reason) = reason else {
+                continue;
+            };
+            if instance.restart_attempts >= RESTART_LIMIT {
+                errors.insert(
+                    identity.clone(),
+                    format!("{reason}; automatic restart limit ({RESTART_LIMIT}) reached"),
+                );
+                continue;
+            }
+            let deadline = *instance.restart_after.get_or_insert_with(|| {
+                now + crate::aggregator::supervisor::backoff(instance.restart_attempts + 1)
+            });
+            if now >= deadline {
+                eprintln!("[supervisor] {identity}: {reason}; restarting");
+                restart.push((identity.clone(), reason));
+            } else {
+                errors.insert(
+                    identity.clone(),
+                    format!("{reason}; restart scheduled at {deadline:?}"),
+                );
+            }
+        }
+
+        for (identity, reason) in restart {
+            if let Err(error) = self.restart_instance(&identity, &reason) {
+                errors.insert(
+                    identity.clone(),
+                    format!("{reason}; restart failed: {error}"),
+                );
+            }
+        }
+        errors
+    }
+
+    fn restart_instance(&mut self, identity: &str, reason: &str) -> Result<(), String> {
+        let Some(instance) = self.instances.get_mut(identity) else {
+            return Err(format!("unknown strategy {identity}"));
+        };
+        if !instance.enabled {
+            return Ok(());
+        }
+
+        stop_child(&mut instance.feed, &format!("{identity} feed"))?;
+        stop_child(&mut instance.worker, &format!("{identity} worker"))?;
+        instance.enabled = false;
+        instance.restart_attempts += 1;
+        instance.restart_after = None;
+        eprintln!(
+            "[supervisor] restarting {identity} after {reason} (attempt {})",
+            instance.restart_attempts
+        );
+
+        match self.enable(identity) {
+            Ok(()) => Ok(()),
+            Err(error) => {
+                let Some(instance) = self.instances.get_mut(identity) else {
+                    return Err(error);
+                };
+                instance.enabled = true;
+                instance.healthy_since = None;
+                instance.restart_after = Some(
+                    std::time::Instant::now()
+                        + crate::aggregator::supervisor::backoff(instance.restart_attempts + 1),
+                );
+                Err(error)
+            }
+        }
+    }
+}
+
+#[cfg(unix)]
+fn stop_child(child: &mut Option<std::process::Child>, label: &str) -> Result<(), String> {
+    let Some(mut process) = child.take() else {
+        return Ok(());
+    };
+    if process
+        .try_wait()
+        .map_err(|error| format!("inspect {label}: {error}"))?
+        .is_none()
+    {
+        if let Err(kill_error) = process.kill() {
+            if process
+                .try_wait()
+                .map_err(|error| format!("inspect {label} after kill error: {error}"))?
+                .is_none()
+            {
+                return Err(format!("stop {label}: {kill_error}"));
+            }
+        }
+    }
+    process
+        .wait()
+        .map_err(|error| format!("reap {label}: {error}"))?;
+    Ok(())
 }
 
 #[cfg(unix)]
 impl uets_gui::SnapshotSource for LiveDashboard {
     fn snapshot(&mut self) -> uets_gui::DashboardSnapshot {
+        self.service_checkpoint_request();
+        let supervisor_errors = self.supervise_children();
         let mut snapshot = self.snapshots.snapshot();
         for instance in &mut snapshot.instances {
             let identity = instance.identity();
-            if let Some(managed) = self.instances.get_mut(&identity) {
-                if let Some(feed) = managed.feed.as_mut() {
-                    if let Ok(Some(status)) = feed.try_wait() {
-                        if !status.success() {
-                            instance.statistics.status = Some("error".into());
-                            instance.statistics.last_error = Some(format!(
-                                "feed exited ({status}); see logs/uets/feed_{}.log",
-                                managed.asset
-                            ));
-                        }
-                    }
-                }
-                if let Some(worker) = managed.worker.as_mut() {
-                    if let Ok(Some(status)) = worker.try_wait() {
-                        instance.statistics.status = Some("error".into());
-                        instance.statistics.last_error = Some(format!(
-                            "strategy worker exited ({status}); see logs/uets/strategy_{}_{}.log",
-                            managed.strategy, managed.asset
-                        ));
-                    }
-                }
+            if let Some(error) = supervisor_errors.get(&identity) {
+                instance.statistics.status = Some("error".into());
+                instance.statistics.last_error = Some(format!(
+                    "{error}; inspect logs/uets/feed_{}.log and logs/uets/strategy_{}_{}.log",
+                    instance.asset_id, instance.strategy_id, instance.asset_id
+                ));
             }
         }
         if self.last_telemetry_sample.elapsed() >= std::time::Duration::from_secs(1) {
@@ -946,6 +1185,56 @@ impl uets_gui::SnapshotSource for LiveDashboard {
         snapshot
     }
 
+    fn service_checkpoint_request(&self) {
+        let request = self
+            .control_dir
+            .join(format!("{}.checkpoint.request", self.session_id));
+        if !request.is_file() {
+            return;
+        }
+        let response = self
+            .control_dir
+            .join(format!("{}.checkpoint.response", self.session_id));
+        let result = (|| -> Result<(), String> {
+            let destination = std::fs::read_to_string(&request)
+                .map_err(|error| format!("read checkpoint request: {error}"))?;
+            let destination = PathBuf::from(destination.trim());
+            if destination.as_os_str().is_empty() {
+                return Err("checkpoint destination is empty".into());
+            }
+            if destination.exists() {
+                return Err(format!(
+                    "checkpoint destination already exists: {}",
+                    destination.display()
+                ));
+            }
+            let db = self
+                .telemetry_db
+                .as_ref()
+                .ok_or_else(|| "telemetry database is unavailable".to_string())?;
+            db.create_checkpoint(&destination)
+                .map_err(|error| format!("create RocksDB checkpoint: {error}"))?;
+            Ok(())
+        })();
+        let response_tmp = response.with_extension(format!("response.{}.tmp", std::process::id()));
+        let response_text = match result {
+            Ok(()) => "ok".to_string(),
+            Err(error) => format!("error: {error}"),
+        };
+        if let Err(error) = std::fs::write(&response_tmp, response_text) {
+            eprintln!("[live_db] write checkpoint response failed: {error}");
+            return;
+        }
+        if let Err(error) = std::fs::rename(&response_tmp, &response) {
+            eprintln!("[live_db] publish checkpoint response failed: {error}");
+            let _ = std::fs::remove_file(response_tmp);
+            return;
+        }
+        if let Err(error) = std::fs::remove_file(request) {
+            eprintln!("[live_db] remove checkpoint request failed: {error}");
+        }
+    }
+
     fn control(&mut self, command: uets_gui::StrategyCommand) -> Result<(), String> {
         match command {
             uets_gui::StrategyCommand::Add(identity) => self.add(identity),
@@ -968,6 +1257,16 @@ impl uets_gui::SnapshotSource for LiveDashboard {
 #[cfg(unix)]
 impl Drop for LiveDashboard {
     fn drop(&mut self) {
+        let marker_pid = std::fs::read_to_string(&self.active_file)
+            .ok()
+            .and_then(|value| value.trim().parse::<u32>().ok());
+        if marker_pid == Some(std::process::id()) {
+            if let Err(error) = std::fs::remove_file(&self.active_file) {
+                if error.kind() != std::io::ErrorKind::NotFound {
+                    eprintln!("[live_db] remove active marker failed: {error}");
+                }
+            }
+        }
         if let Some(db) = self.telemetry_db.as_ref() {
             if let Err(error) = db.flush() {
                 eprintln!("[live_db] telemetry flush failed: {error}");
@@ -987,7 +1286,7 @@ impl Drop for LiveDashboard {
 }
 
 #[cfg(not(unix))]
-fn run_live_system(_requested: &[String]) -> Result<(), String> {
+fn run_live_system(_requested: &[String], _reuse_rocksdb: bool) -> Result<(), String> {
     Err("the live UETS runner requires Unix-domain sockets; run it on Linux or in Docker".into())
 }
 
@@ -1699,7 +1998,7 @@ mod record {
 
 #[cfg(test)]
 mod strategy_tests {
-    //! Test 2: the executor knows strategy1 and strategy2 are present and can
+    //! The executor knows the compiled strategies and can switch bundles.
     //! switch their state builders / feature builders on demand.
 
     use super::*;
@@ -1727,10 +2026,10 @@ mod strategy_tests {
         let switch = StrategySwitch::new();
         let available = switch.available();
         assert!(available.iter().any(|name| name == "ofmr"));
-        assert!(available.iter().any(|name| name == "strategy2"));
+        assert!(available.iter().any(|name| name == "example_strategy"));
         let discovered = switch.discovered();
         assert!(discovered.contains(&"ofmr".to_string()));
-        assert!(discovered.contains(&"strategy2".to_string()));
+        assert!(discovered.contains(&"example_strategy".to_string()));
         for dir in &discovered {
             assert!(
                 available.iter().any(|name| name == dir),
@@ -1784,16 +2083,16 @@ mod strategy_tests {
             sequence: 1,
         };
         assert_eq!(builder.decide(&st), Decision::Hold);
-        // strategy2's rule would hold on this state: it reads `dz`.
-        let other = live_strategy::load_strategy("strategy2").unwrap();
+        // The example rule reads its own `dz` feature.
+        let other = live_strategy::load_strategy("example_strategy").unwrap();
         assert_eq!(other.builder.decide(&state("dz", 2.0)), Decision::EnterLong);
     }
 
     #[test]
-    fn selecting_strategy2_returns_strategy2s_builders() {
+    fn selecting_example_strategy_returns_its_builders() {
         let mut switch = StrategySwitch::new();
-        switch.select("strategy2").unwrap();
-        assert_eq!(switch.active(), Some("strategy2"));
+        switch.select("example_strategy").unwrap();
+        assert_eq!(switch.active(), Some("example_strategy"));
 
         let outputs = {
             let features = switch.feature_builder_mut().unwrap();
@@ -1815,7 +2114,7 @@ mod strategy_tests {
         let mut switch = StrategySwitch::new();
         for (name, feature) in [
             ("ofmr", "Column_0"),
-            ("strategy2", "dz"),
+            ("example_strategy", "dz"),
             ("ofmr", "Column_0"),
         ] {
             switch.select(name).unwrap();
@@ -2053,7 +2352,22 @@ mod record_args_tests {
 ///   dev_test db <SESSION>            — list trades + portfolio for a session
 ///   dev_test db <SESSION> <STRAT@ASSET>  — list trades + portfolio for one instance
 fn cmd_db(args: &[String]) -> Result<(), String> {
-    let root: PathBuf = PathBuf::from(default_live_db_dir());
+    if args
+        .first()
+        .is_some_and(|argument| argument == "checkpoint")
+    {
+        return cmd_db_checkpoint(&args[1..]);
+    }
+    if args
+        .first()
+        .is_some_and(|argument| argument == "verify-checkpoint")
+    {
+        return cmd_db_verify_checkpoint(&args[1..]);
+    }
+
+    let root: PathBuf = std::env::var_os("UETS_LIVE_DB")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(default_live_db_dir()));
 
     let session = args.first().map(String::as_str).filter(|s| !s.is_empty());
     let instance = args.get(1).map(String::as_str).filter(|s| !s.is_empty());
@@ -2089,6 +2403,173 @@ fn cmd_db(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+fn cmd_db_verify_checkpoint(args: &[String]) -> Result<(), String> {
+    let [session_id, checkpoint_path] = args else {
+        return Err("usage: dev_test db verify-checkpoint <SESSION> <CHECKPOINT_DIR>".into());
+    };
+    let db = UetsDb::open(checkpoint_path)
+        .map_err(|error| format!("open telemetry checkpoint: {error}"))?;
+    let records = db
+        .query_telemetry(session_id)
+        .map_err(|error| format!("read telemetry checkpoint: {error}"))?;
+    println!(
+        "checkpoint valid: session={session_id} telemetry_records={}",
+        records.len()
+    );
+    db.shutdown()
+        .map_err(|error| format!("close telemetry checkpoint: {error}"))?;
+    Ok(())
+}
+
+fn cmd_db_checkpoint(args: &[String]) -> Result<(), String> {
+    let [session_id, destination] = args else {
+        return Err("usage: dev_test db checkpoint <SESSION> <OUTPUT_DIR>".into());
+    };
+    if session_id.is_empty()
+        || !session_id.chars().all(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | '-')
+        })
+        || session_id == "."
+        || session_id == ".."
+    {
+        return Err("invalid session ID".into());
+    }
+
+    let live_db_root = std::env::var_os("UETS_LIVE_DB")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(default_live_db_dir()));
+    let database = live_db_root.join("telemetry").join(session_id);
+    if !database.is_dir() {
+        return Err(format!(
+            "telemetry RocksDB not found: {}",
+            database.display()
+        ));
+    }
+    let destination = PathBuf::from(destination);
+    if destination.exists() {
+        return Err(format!(
+            "checkpoint destination already exists: {}",
+            destination.display()
+        ));
+    }
+    if destination
+        .to_string_lossy()
+        .chars()
+        .any(|character| matches!(character, '\n' | '\r'))
+    {
+        return Err("checkpoint destination cannot contain line breaks".into());
+    }
+    if let Some(parent) = destination
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        std::fs::create_dir_all(parent)
+            .map_err(|error| format!("create checkpoint parent {}: {error}", parent.display()))?;
+    }
+
+    let control_dir = live_db_root.join("control");
+    let active_file = control_dir.join(format!("{session_id}.active"));
+    let pid = std::fs::read_to_string(&active_file)
+        .ok()
+        .and_then(|contents| contents.trim().parse::<u32>().ok());
+
+    if pid.is_some_and(process_is_running) {
+        request_live_checkpoint(&control_dir, session_id, &destination)?;
+    } else {
+        if active_file.exists() {
+            std::fs::remove_file(&active_file).map_err(|error| {
+                format!(
+                    "remove stale live database marker {}: {error}",
+                    active_file.display()
+                )
+            })?;
+        }
+        let db = UetsDb::open(&database)
+            .map_err(|error| format!("open telemetry RocksDB for checkpoint: {error}"))?;
+        db.create_checkpoint(&destination)
+            .map_err(|error| format!("create telemetry RocksDB checkpoint: {error}"))?;
+    }
+    println!("checkpoint created: {}", destination.display());
+    Ok(())
+}
+
+fn process_is_running(pid: u32) -> bool {
+    #[cfg(unix)]
+    {
+        // A permission error means the process exists but belongs to another user.
+        // SAFETY: signal 0 performs no delivery and only checks process existence.
+        unsafe {
+            libc::kill(pid as libc::pid_t, 0) == 0
+                || std::io::Error::last_os_error().kind() == std::io::ErrorKind::PermissionDenied
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = pid;
+        false
+    }
+}
+
+fn request_live_checkpoint(
+    control_dir: &std::path::Path,
+    session_id: &str,
+    destination: &std::path::Path,
+) -> Result<(), String> {
+    use std::io::Write;
+    use std::time::{Duration, Instant};
+
+    std::fs::create_dir_all(control_dir)
+        .map_err(|error| format!("create checkpoint control directory: {error}"))?;
+    let request = control_dir.join(format!("{session_id}.checkpoint.request"));
+    let response = control_dir.join(format!("{session_id}.checkpoint.response"));
+    if response.exists() {
+        std::fs::remove_file(&response)
+            .map_err(|error| format!("remove previous checkpoint response: {error}"))?;
+    }
+    let request_tmp = request.with_extension(format!("request.{}.tmp", std::process::id()));
+    let mut request_file = std::fs::OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(&request_tmp)
+        .map_err(|error| {
+            format!(
+                "create checkpoint request {}: {error}",
+                request_tmp.display()
+            )
+        })?;
+    writeln!(request_file, "{}", destination.display())
+        .and_then(|()| request_file.sync_all())
+        .map_err(|error| format!("write checkpoint request: {error}"))?;
+    std::fs::rename(&request_tmp, &request)
+        .map_err(|error| format!("publish checkpoint request: {error}"))?;
+
+    let deadline = Instant::now() + Duration::from_secs(60);
+    loop {
+        if response.is_file() {
+            let result = std::fs::read_to_string(&response)
+                .map_err(|error| format!("read checkpoint response: {error}"))?;
+            std::fs::remove_file(&response)
+                .map_err(|error| format!("remove checkpoint response: {error}"))?;
+            return if result.trim() == "ok" {
+                Ok(())
+            } else {
+                Err(result
+                    .trim()
+                    .strip_prefix("error: ")
+                    .unwrap_or(result.trim())
+                    .to_string())
+            };
+        }
+        if Instant::now() >= deadline {
+            if request.exists() {
+                let _ = std::fs::remove_file(&request);
+            }
+            return Err("timed out waiting for the live UETS process to checkpoint RocksDB".into());
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
 fn list_session_dirs(root: &std::path::Path, stage: &str) -> Vec<String> {
     let stage_dir = root.join(stage);
     let mut out = Vec::new();
@@ -2122,20 +2603,29 @@ fn print_all_sessions(root: &std::path::Path) -> Result<(), String> {
         let trades = if trades_path.is_dir() {
             UetsDb::open(trades_path)
                 .and_then(|db| db.query_trades(&QueryFilter::new().session(sid)))
-                .map_err(|e| e.to_string())?.len()
-        } else { 0 };
+                .map_err(|e| e.to_string())?
+                .len()
+        } else {
+            0
+        };
         let portfolio_path = root.join("portfolio").join(sid);
         let portfolios = if portfolio_path.is_dir() {
             UetsDb::open(portfolio_path)
                 .and_then(|db| db.query_portfolio(&QueryFilter::new().session(sid)))
-                .map_err(|e| e.to_string())?.len()
-        } else { 0 };
+                .map_err(|e| e.to_string())?
+                .len()
+        } else {
+            0
+        };
         let telemetry_path = root.join("telemetry").join(sid);
         let telemetry = if telemetry_path.is_dir() {
             UetsDb::open(telemetry_path)
                 .and_then(|db| db.query_telemetry(sid))
-                .map_err(|e| e.to_string())?.len()
-        } else { 0 };
+                .map_err(|e| e.to_string())?
+                .len()
+        } else {
+            0
+        };
         println!(
             "  {}  trades={} portfolio={} telemetry={}",
             sid, trades, portfolios, telemetry
@@ -2283,6 +2773,12 @@ fn main() -> ExitCode {
             return run_record(&rest);
         }
         "run" => {
+            let reuse_rocksdb = rest.iter().any(|argument| argument == "--reuse-rocksdb");
+            let requested: Vec<String> = rest
+                .iter()
+                .filter(|argument| argument.as_str() != "--reuse-rocksdb")
+                .cloned()
+                .collect();
             let (mode, configured_playbacks) = match configured_execution_mode() {
                 Ok(config) => config,
                 Err(error) => {
@@ -2291,10 +2787,14 @@ fn main() -> ExitCode {
                 }
             };
             if mode == "playback" {
-                let requested = if rest.is_empty() {
+                if reuse_rocksdb {
+                    eprintln!("--reuse-rocksdb can only be used with live run mode");
+                    return ExitCode::FAILURE;
+                }
+                let requested = if requested.is_empty() {
                     configured_playbacks
                 } else {
-                    rest.clone()
+                    requested
                 };
                 if requested.is_empty() {
                     eprintln!("mode is playback but playback.playback_strategies is empty");
@@ -2302,14 +2802,14 @@ fn main() -> ExitCode {
                 }
                 return run_research_batch(&requested);
             }
-            let (research, live) = split_run_requests(&rest);
+            let (research, live) = split_run_requests(&requested);
             if !research.is_empty() {
                 let result = run_research_batch(&research);
                 if result != ExitCode::SUCCESS || live.is_empty() {
                     return result;
                 }
             }
-            return match run_live_system(&live) {
+            return match run_live_system(&live, reuse_rocksdb) {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(error) => {
                     eprintln!("UETS runtime failed: {error}");
@@ -2489,5 +2989,27 @@ mod strategy_instance_tests {
             live,
             vec!["ofmr@btcusdt".to_string(), "ofmr@ethusdt".to_string()]
         );
+    }
+
+    #[test]
+    fn reuse_flag_keeps_the_previous_session_database() {
+        let directory = tempfile::tempdir().unwrap();
+        let first = super::choose_session_id(directory.path(), false).unwrap();
+        let reused = super::choose_session_id(directory.path(), true).unwrap();
+        assert_eq!(first, reused);
+
+        let fresh = super::choose_session_id(directory.path(), false).unwrap();
+        assert_ne!(first, fresh);
+        assert_eq!(
+            super::choose_session_id(directory.path(), true).unwrap(),
+            fresh
+        );
+    }
+
+    #[test]
+    fn reuse_flag_rejects_path_like_session_markers() {
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::write(directory.path().join("current_session"), "../outside").unwrap();
+        assert!(super::choose_session_id(directory.path(), true).is_err());
     }
 }

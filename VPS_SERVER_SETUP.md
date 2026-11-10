@@ -1,9 +1,7 @@
 # UETS VPS Server Setup and Storage Operations
 
-This guide covers installing the compiled UETS package on an Ubuntu x86_64 VPS,
-running it, monitoring host resources without creating another log, and the
-planned storage-archival workflow.
-- Live running: Supportable only with tmux as of the moment
+This guide covers running the compiled UETS binary under a restart watchdog,
+monitoring host resources, and archiving telemetry RocksDB checkpoints to S3.
 - Example setup:
 ```bash
 
@@ -15,7 +13,7 @@ mkdir -p "$HOME/uets-data/live_db"
 
 tmux new-session -d -s uets \
   -c "$HOME/uets-linux-x86_64" \
-  "export UETS_LIVE_DB=\"$HOME/uets-data/live_db\"; exec ./bin/uets run ofmr@btcusdt"
+  "export UETS_LIVE_DB=\"$HOME/uets-data/live_db\"; exec ./restart_uets.sh ofmr@btcusdt"
 
 tmux attach -t uets # To Attach
 
@@ -24,7 +22,7 @@ tmux attach -t uets # To Attach
 # ====================================
 tmux new-window -t uets -n telemetry \
   -c "$HOME/uets-linux-x86_64" \
-  './telemetry.sh'
+  "export UETS_LIVE_DB=\"$HOME/uets-data/live_db\"; ./telemetry.sh"
 
 CTRL+B, D, P, N # To detach, to previous, to next
 ```
@@ -40,21 +38,21 @@ sudo apt update
 sudo apt install -y curl unzip
 ```
 
-Download and extract the release:
+Download the `uets-linux-x86_64-amazonlinux2023` artifact from the successful
+GitHub Actions run for the commit containing these changes. The previously
+released v4.0.0 binary does not implement the checkpoint commands required by
+`cloud.sh`. Extract the downloaded tarball:
 
 ```bash
 cd "$HOME"
-curl -fL -O https://github.com/hmzk1422/OSADP-Infrastructure/releases/download/v4.0.0/uets-linux-x86_64-amazonlinux2023.zip
-unzip -o uets-linux-x86_64-amazonlinux2023.zip
-tar -xzf uets-linux-x86_64.tar.gz
+tar -xzf "$HOME/Downloads/uets-linux-x86_64.tar.gz"
 cd uets-linux-x86_64
 ldd ./bin/uets
 ./bin/uets help
 ```
 
 Check `ldd` output for `not found` libraries. The package is built on Amazon
-Linux 2023 for Linux x86_64; Ubuntu 26.04 and Debian 13 have been smoke-tested
-by the maintainer, but check the dependencies on the target host.
+Linux 2023 for Linux x86_64; verify dependencies on the target host.
 
 Configure `uets/config/execution.yaml` and `uets/config/ofmr.yaml` before
 starting a worker. `live-test` uses live public market data with simulated
@@ -62,15 +60,16 @@ orders. `testnet` submits to the exchange test environment; `live-trade` can
 submit real orders and requires credentials and the explicit live-trading
 guard. Never put API secrets in these YAML files or in this guide.
 
-Start a worker:
+Start the live monitor under the restart watchdog:
 
 ```bash
-./bin/uets run ofmr@btcusdt
+export UETS_LIVE_DB="$HOME/uets-data/live_db"
+./restart_uets.sh ofmr@btcusdt
 ```
 
-Stop it with `q` in the dashboard or Ctrl+C. Run it in a managed terminal
-session or service for long-running use. Provide AWS access through an EC2 IAM
-instance profile rather than hard-coding AWS keys.
+The watchdog stops when `q` exits UETS normally, and restarts nonzero exits
+using the prior session. Stop the watchdog intentionally with Ctrl+C. Provide
+AWS access through an EC2 IAM instance profile rather than hard-coding AWS keys.
 
 ## Where UETS stores data
 
@@ -101,9 +100,10 @@ Set a different database root before launching UETS if needed:
 export UETS_LIVE_DB="$HOME/uets-data/live_db"
 ```
 
-The monitor's session ID is printed in the UETS startup output as
-`telemetry session=<session-id>`. Copy that ID into `UETS_SESSION_ID` in the
-shell running `telemetry.sh` if you later enable the archival hook.
+The active session ID is stored in
+`$UETS_LIVE_DB/current_session`; the monitor and archive script read it
+automatically. The UETS startup output also prints
+`telemetry session=<session-id>`.
 
 ## `telemetry.sh`: live host monitoring without a log file
 
@@ -230,15 +230,19 @@ try:
 
         if disk_percent >= disk_threshold and not cloud_triggered:
             cloud_triggered = True
-            if session_id and os.environ.get("UETS_PARQUET_EXPORTER") and os.environ.get("AWS_ARCHIVE_URI"):
+            if not session_id:
+                marker = db_root / "current_session"
+                if marker.is_file():
+                    session_id = marker.read_text(encoding="utf-8").strip()
+            if session_id and os.environ.get("AWS_ARCHIVE_URI"):
                 print(
-                    f"Disk is {disk_percent:.1f}% full; starting configured cloud archive.",
+                    f"Disk is {disk_percent:.1f}% full; starting S3 checkpoint archive.",
                     flush=True,
                 )
                 subprocess.Popen([str(cloud_script), session_id])
             else:
                 print(
-                    "Disk threshold reached, but cloud archival is not configured; "
+                    "Disk threshold reached, but S3 archival is not configured; "
                     "no data was moved.",
                     flush=True,
                 )
@@ -286,80 +290,71 @@ release**. Keep the existing one-second RocksDB snapshots if historical
 quantiles are required; the no-storage monitor above cannot answer historical
 queries after it exits.
 
-## `cloud.sh`: guarded archival placeholder
+## `cloud.sh`: S3 checkpoint archive
 
-The AWS destination has not been selected, and the current UETS binary does
-not export RocksDB telemetry to Parquet. This script therefore refuses to run
-until an exporter and destination are explicitly configured. It is called by
-`telemetry.sh` only after the selected filesystem reaches the configured
-threshold (90% by default).
+The package includes `cloud.sh`; it does not use a third-party RocksDB backup
+program. When the disk threshold is met, it asks the live UETS process to
+checkpoint telemetry RocksDB using its already-open handle. If UETS is stopped,
+it opens the database and checkpoints it directly. It then verifies the
+checkpoint, uploads a `.tar.zst` to S3 using `GLACIER_IR`, downloads and
+checksums the uploaded object, extracts it separately, and opens the restored
+database. The source database is never deleted or moved.
+This is a backup, not disk reclamation: the source RocksDB and temporary
+archives are not pruned by the script. Configure a separate, verified retention
+and cleanup policy if local disk space must be recovered.
 
-Parquet is a columnar file format, not a database and not a direct compression
-of RocksDB `.sst` files. A future exporter must read records through UETS's
-RocksDB API and write a Parquet file using an internal codec such as Zstandard.
-Do not zip live RocksDB files or delete/move an active database directory.
-Choose an AWS destination and retention policy before enabling archival. An
-S3 URI is an object-storage staging destination, not itself an AWS database.
-
-Save this guarded script as `cloud.sh`:
+Install the prerequisites and configure AWS through the EC2 instance profile:
 
 ```bash
-#!/usr/bin/env bash
-set -euo pipefail
-
-SESSION_ID="${1:?usage: cloud.sh <session-id>}"
-DB_ROOT="${UETS_LIVE_DB:-$PWD/market_data/live_db}"
-DB_PATH="$DB_ROOT/telemetry/$SESSION_ID"
-THRESHOLD_PERCENT="${DISK_THRESHOLD_PERCENT:-90}"
-
-if [[ ! -d "$DB_PATH" ]]; then
-  echo "Telemetry RocksDB not found: $DB_PATH" >&2
-  exit 1
-fi
-
-read -r _ blocks used _ < <(df -P "$DB_PATH" | tail -n 1)
-used_percent=$((used * 100 / blocks))
-if (( used_percent < THRESHOLD_PERCENT )); then
-  echo "Disk is ${used_percent}% full; below ${THRESHOLD_PERCENT}% threshold. Nothing archived."
-  exit 0
-fi
-
-: "${UETS_PARQUET_EXPORTER:?Set this only after a RocksDB-to-Parquet exporter is implemented and tested}"
-: "${AWS_ARCHIVE_URI:?Set this only after choosing an AWS archive destination, e.g. an S3 prefix}"
-
-if [[ ! -x "$UETS_PARQUET_EXPORTER" ]]; then
-  echo "Parquet exporter is not executable: $UETS_PARQUET_EXPORTER" >&2
-  exit 1
-fi
-command -v aws >/dev/null || {
-  echo "AWS CLI is required for the configured S3 archive destination." >&2
-  exit 1
-}
-
-tmp_dir="$(mktemp -d)"
-trap 'rm -rf "$tmp_dir"' EXIT
-parquet_file="$tmp_dir/telemetry-${SESSION_ID}.parquet"
-
-# Required future exporter contract: read the selected telemetry session and
-# produce a complete Parquet export at the supplied output path.
-"$UETS_PARQUET_EXPORTER" \
-  --input "$DB_PATH" \
-  --session "$SESSION_ID" \
-  --output "$parquet_file" \
-  --compression zstd
-test -s "$parquet_file"
-sha256sum "$parquet_file"
-
-# Upload a copy first. Keep the source RocksDB intact until an AWS-side import,
-# checksum verification, and retention/deletion policy have been implemented.
-aws s3 cp "$parquet_file" \
-  "${AWS_ARCHIVE_URI%/}/telemetry/${SESSION_ID}/telemetry-${SESSION_ID}.parquet"
-echo "Archive uploaded; local RocksDB was intentionally left unchanged."
+sudo apt update
+sudo apt install -y zstd util-linux
 ```
 
-This is not ready to move data into an AWS database: `UETS_PARQUET_EXPORTER`
-does not exist yet, and no AWS database/import target has been configured.
-Until those pieces are implemented and verified, the script fails safely and
-the local RocksDB remains the source of truth. Keep enough free disk space to
-create a Parquet export; if the filesystem is already critically full, stop
-UETS and expand/clean the volume rather than attempting an unverified export.
+Install AWS CLI v2 separately, then set the destination explicitly:
+
+```bash
+export AWS_ARCHIVE_URI="s3://YOUR_BUCKET/cold-sst"
+export AWS_REGION="ap-southeast-2"
+export DISK_THRESHOLD_PERCENT=90
+export UETS_LIVE_DB="$HOME/uets-data/live_db"
+export UETS_BIN="$HOME/uets-linux-x86_64/bin/uets"
+./cloud.sh
+```
+
+The IAM role needs `s3:PutObject` and `s3:GetObject` on the chosen prefix
+(`HeadObject` is authorized by `s3:GetObject`). `cloud.sh` reads
+`current_session` if no session ID is passed.
+It exits without archiving when usage is below threshold, and fails explicitly
+if checkpointing, upload, download, checksum, or restore verification fails.
+It needs free temporary space for the compressed archive; configure
+`ARCHIVE_TMP_DIR` accordingly.
+
+The included [systemd service](./deploy/systemd/uets-cloud-archive.service)
+and [timer](./deploy/systemd/uets-cloud-archive.timer) run that threshold
+check daily at 00:00 UTC. Edit the service's deployment paths and create
+`/etc/uets/archive.env` with the environment above before enabling it:
+
+```bash
+sudo install -D -m 0644 deploy/systemd/uets-cloud-archive.service /etc/systemd/system/uets-cloud-archive.service
+sudo install -D -m 0644 deploy/systemd/uets-cloud-archive.timer /etc/systemd/system/uets-cloud-archive.timer
+sudo systemctl daemon-reload
+sudo systemctl enable --now uets-cloud-archive.timer
+```
+
+Glacier Instant Retrieval has storage and retrieval charges. Choose a retention
+policy before scheduling recurring archives.
+
+### OOM restart harness
+
+Run the Docker harness on a Linux host to confirm the watchdog detects an OOM
+exit, passes `--reuse-rocksdb`, and recovers the prior session marker:
+
+```bash
+bash unit-tests/production_check/crash_recovery_test.sh
+```
+
+This is a deterministic supervisor/flag recovery test using a fixture; it is
+not a multi-day AWS run and does not claim to validate exchange connectivity.
+The live feed reseed path is separately covered by Rust tests. Run a real
+binary crash/reseed smoke only in `live-test` mode, never with real trading
+enabled.

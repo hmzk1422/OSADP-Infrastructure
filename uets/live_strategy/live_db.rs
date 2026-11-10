@@ -381,11 +381,11 @@ pub fn default_live_db_root() -> PathBuf {
 }
 
 pub fn new_session_id() -> String {
-    let secs = std::time::SystemTime::now()
+    let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
+        .map(|d| d.as_nanos())
         .unwrap_or_default();
-    format!("live_{secs}_{}", std::process::id())
+    format!("live_{nanos}_{}", std::process::id())
 }
 
 #[cfg(test)]

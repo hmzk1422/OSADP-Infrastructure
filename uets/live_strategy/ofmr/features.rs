@@ -14,6 +14,7 @@ use crate::live_strategy::ComputeFeatures;
 use crate::live_strategy::ofmr::settings::{FeatureSettings, Settings};
 
 pub const N_FEATURES: usize = 15;
+const MAX_FEATURE_HISTORY_BARS: usize = 2_048;
 
 pub fn output_column_names() -> Vec<String> {
     (0..N_FEATURES).map(|i| format!("Column_{i}")).collect()
@@ -193,16 +194,51 @@ impl ResearchFeatureState {
         let Some(bar) = self.current_bar.take() else {
             return;
         };
+        if next_index.saturating_sub(current_index) > MAX_FEATURE_HISTORY_BARS as i64 {
+            let previous_close = bar
+                .close
+                .or_else(|| self.raw_bars.last().and_then(|bar| bar.close));
+            let first_retained = next_index.saturating_sub(1);
+            self.raw_bars.clear();
+            self.computed_bars.clear();
+            self.first_bar_index = Some(first_retained);
+            self.raw_bars.push(RawBar::empty(
+                self.timeframe_secs,
+                previous_close,
+            ));
+            self.computed_bars =
+                calculate_research_features(&self.raw_bars, &self.feature_settings);
+            return;
+        }
         self.raw_bars.push(bar);
         let mut previous_close = self.raw_bars.last().and_then(|bar| bar.close);
-        self.computed_bars = calculate_research_features(&self.raw_bars, &self.feature_settings);
-
         for _ in current_index.saturating_add(1)..next_index {
             let empty = RawBar::empty(self.timeframe_secs, previous_close);
             self.raw_bars.push(empty);
-            self.computed_bars =
-                calculate_research_features(&self.raw_bars, &self.feature_settings);
             previous_close = self.raw_bars.last().and_then(|bar| bar.close);
+        }
+        self.computed_bars = calculate_research_features(&self.raw_bars, &self.feature_settings);
+        self.trim_history();
+    }
+
+    fn trim_history(&mut self) {
+        let excess = self.raw_bars.len().saturating_sub(MAX_FEATURE_HISTORY_BARS);
+        if excess == 0 {
+            return;
+        }
+        let carried_close = self.raw_bars[..excess]
+            .iter()
+            .rev()
+            .find_map(|bar| bar.close);
+        self.raw_bars.drain(..excess);
+        self.computed_bars.drain(..excess);
+        if let (Some(close), Some(first)) = (carried_close, self.raw_bars.first_mut()) {
+            if first.close.is_none() {
+                first.close = Some(close);
+            }
+        }
+        if let Some(first_bar_index) = &mut self.first_bar_index {
+            *first_bar_index = first_bar_index.saturating_add(excess as i64);
         }
     }
 
@@ -646,5 +682,49 @@ mod tests {
         let row = features.compute(&book_tick(102.0, 2_000.0)).unwrap();
         assert_eq!(row.get("Column_7"), Some(0.0));
         assert_eq!(row.get("Column_1"), Some(0.0));
+    }
+
+    #[test]
+    fn feature_history_is_bounded_and_carries_forward_the_previous_close() {
+        let mut state = ResearchFeatureState::new(&Settings::default());
+        state.first_bar_index = Some(0);
+        state.raw_bars.push(RawBar {
+            close: Some(100.0),
+            ..RawBar::new(state.timeframe_secs)
+        });
+        state.raw_bars.extend(
+            (1..=MAX_FEATURE_HISTORY_BARS)
+                .map(|_| RawBar::new(state.timeframe_secs)),
+        );
+        state
+            .computed_bars
+            .resize(state.raw_bars.len(), BarFeatures::default());
+
+        state.trim_history();
+
+        assert_eq!(state.raw_bars.len(), MAX_FEATURE_HISTORY_BARS);
+        assert_eq!(state.computed_bars.len(), MAX_FEATURE_HISTORY_BARS);
+        assert_eq!(state.first_bar_index, Some(1));
+        assert_eq!(state.raw_bars.first().and_then(|bar| bar.close), Some(100.0));
+    }
+
+    #[test]
+    fn very_large_time_jump_resets_history_instead_of_allocating_gap_bars() {
+        let mut state = ResearchFeatureState::new(&Settings::default());
+        state.current_bar_index = Some(0);
+        state.first_bar_index = Some(0);
+        state.current_bar = Some(RawBar {
+            close: Some(100.0),
+            ..RawBar::new(state.timeframe_secs)
+        });
+
+        state.close_current_bar(MAX_FEATURE_HISTORY_BARS as i64 + 2);
+
+        assert_eq!(state.raw_bars.len(), 1);
+        assert_eq!(
+            state.first_bar_index,
+            Some(MAX_FEATURE_HISTORY_BARS as i64 + 1)
+        );
+        assert_eq!(state.raw_bars[0].close, Some(100.0));
     }
 }

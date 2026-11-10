@@ -44,3 +44,7 @@ tempfile = "3"
 [[bin]]
 name = "dev_test"
 path = "executor/executor.rs"
+
+[[bin]]
+name = "example_strategy_parity"
+path = "executor/example_strategy_parity.rs"

@@ -203,7 +203,7 @@ impl DashboardCommand {
     }
 
     /// Parse one command line: `{"action":"pause"}` or
-    /// `{"action":"set_strategy","value":"strategy2"}`.
+    /// `{"action":"set_strategy","value":"example_strategy"}`.
     ///
     /// Hand-parsed for the same reason the writer is hand-rolled: the dashboard
     /// side of this contract is a text editor, and one `find` is a smaller
@@ -568,8 +568,9 @@ mod tests {
             DashboardCommand::Flatten
         );
         assert_eq!(
-            DashboardCommand::parse(r#"{"action":"set_strategy","value":"strategy2"}"#).unwrap(),
-            DashboardCommand::SetStrategy("strategy2".to_string())
+            DashboardCommand::parse(r#"{"action":"set_strategy","value":"example_strategy"}"#)
+                .unwrap(),
+            DashboardCommand::SetStrategy("example_strategy".to_string())
         );
         // Unknown fields are ignored, so a newer dashboard still works here.
         assert_eq!(
