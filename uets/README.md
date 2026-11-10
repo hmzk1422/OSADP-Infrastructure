@@ -43,6 +43,42 @@ The GUI displays stale telemetry and process failures with a pointer to the
 relevant log. On Windows, use the Linux Docker profile documented in
 `docs/system_design/uets.md`.
 
+The live capture uses Binance as the primary market-data source and Bybit V5
+linear as its single fallback. Bybit order-book and trade messages are
+normalized into the same event-merger schema. If the active order book stops
+updating for 10 seconds, UETS switches sources, clears buffered events from the
+old feed, and reseeds from the selected exchange's REST order book before
+strategy rows can resume. If both feeds stop producing updates, capture exits
+with an error rather than continuing on stale data. This is fixed
+Binance-to-Bybit failover; it does not rank multiple alternatives by measured
+latency.
+
+For a Linux VPS, use `bash restart_uets.sh ofmr@btcusdt` from the extracted
+bundle root to restart after unexpected top-level exits. It records stderr and
+restart decisions in `logs/uets/watchdog.log`; the UETS UI remains attached to
+the terminal. The watchdog passes `--reuse-rocksdb` on each launch, which
+reuses the persisted session ID and its per-strategy trade/portfolio RocksDB
+directories. If the `q` command exits normally, the watchdog stops. Five
+consecutive unexpected exits stop the watchdog with an error instead of
+repeating a crash loop indefinitely. A new ordinary `uets run` (without that
+flag) creates a fresh session.
+
+The watchdog prevents duplicate supervisors with a lock, records the child PID,
+and reports nonzero exits including likely OOM kills (and cgroup OOM counters
+when available). It stops after five consecutive failures by default so an
+unrecoverable startup fault does not loop forever; configure
+`UETS_MAX_RESTARTS`, `UETS_RESTART_DELAY_SECONDS`, and `UETS_STABLE_SECONDS`
+to tune that policy.
+
+For telemetry backup, set `AWS_ARCHIVE_URI`, `AWS_REGION`, and
+`UETS_LIVE_DB`, then run `./cloud.sh [SESSION_ID]`. The binary creates a
+consistent checkpoint through the RocksDB handle already open in UETS, verifies
+that it reopens, uploads a compressed copy to S3 Glacier Instant Retrieval,
+downloads and checksums it, then verifies a separate restore. The live database
+is never removed. See [VPS_SERVER_SETUP.md](../VPS_SERVER_SETUP.md) for the
+daily systemd timer and IAM requirements. The Linux Docker OOM supervisor
+fixture is `unit-tests/production_check/crash_recovery_test.sh`.
+
 ## Runtime cost and scaling
 
 The aggregate monitor reports summed RSS and CPU across workers with current
@@ -107,6 +143,11 @@ the latest samples with:
 cargo run --manifest-path uets/Cargo.toml --bin dev_test -- db <run-id>
 ```
 
+OFMR keeps rolling feature history per strategy/asset. History is capped at
+2,048 bars; an extreme time jump resets that history instead of allocating
+every missing bar. This prevents per-ticker feature state from growing without
+bound, while preserving the configured rolling features after warm-up.
+
 Trade and portfolio records remain in their existing
 stores; workers use run-prefixed per-instance session IDs so their RocksDB
 writers do not contend for the same database lock.
@@ -132,7 +173,8 @@ development records, not a reconciled account ledger.
 Offline research is independent of the execution mode and never connects to
 an exchange. Run `run ofmr@pwf`, `run ofmr@cpcv`, or `run ofmr@mc` to select
 purged walk-forward, CPCV, or Monte Carlo. Available strategies are compiled
-into the executable from modules under `uets/live_strategy/`. Results,
+into the executable from modules under `uets/live_strategy/`, including the
+minimal `example_strategy` reference bundle. Results,
 including the equity-path CSV and terminal path chart, are written under
 `market_data/live_db/playback/`. The Python runner can also be invoked directly
 with `python -m uets.playback`. Configure inputs and method-specific settings

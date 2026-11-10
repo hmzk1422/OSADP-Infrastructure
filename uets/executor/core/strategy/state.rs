@@ -24,7 +24,8 @@ impl Position {
         match decision {
             Decision::EnterLong => Self::Long,
             Decision::EnterShort => Self::Short,
-            Decision::Exit | Decision::Hold => Self::Flat,
+            Decision::Exit => Self::Flat,
+            Decision::Hold => self,
         }
     }
 }
@@ -50,8 +51,7 @@ impl MarketState {
 
     /// Apply a decision, returning the position that resulted.
     ///
-    /// `Hold` and `Exit` both end flat, so a rule cannot accidentally leave the
-    /// strategy short after an exit signal.
+    /// `Hold` leaves the position unchanged; only `Exit` flattens it.
     pub fn apply(&mut self, decision: Decision) -> Position {
         self.position = self.position.transitioned(decision);
         self.position
@@ -72,12 +72,9 @@ mod tests {
 
     #[test]
     fn hold_keeps_the_current_position() {
-        // `transitioned` maps Hold to Flat, so a caller must not use it for
-        // Hold. This test documents the contract: the engine filters Hold out
-        // before it reaches here, and applying Hold explicitly is flat by
-        // definition, not "unchanged".
         let mut state = MarketState::new(FeatureRow::new(), 1);
         state.apply(Decision::EnterLong);
+        assert_eq!(state.apply(Decision::Hold), Position::Long);
         assert_eq!(state.apply(Decision::Exit), Position::Flat);
     }
 }

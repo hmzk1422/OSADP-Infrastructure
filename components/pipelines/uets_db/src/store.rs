@@ -6,7 +6,7 @@ use crate::schema::{
     TradeRecord,
 };
 use chrono::Utc;
-use rocksdb::{DB, Direction, IteratorMode, WriteBatch};
+use rocksdb::{DB, Direction, IteratorMode, WriteBatch, checkpoint::Checkpoint};
 use std::path::Path;
 use std::sync::Arc;
 use thiserror::Error;
@@ -231,6 +231,17 @@ impl UetsDb {
     /// Flush all writes to disk.
     pub fn flush(&self) -> Result<(), DbError> {
         self.db.flush()?;
+        Ok(())
+    }
+
+    /// Create a consistent RocksDB checkpoint using this open database handle.
+    ///
+    /// This must be called by the process that owns the database lock. A
+    /// second process cannot safely open the same live RocksDB to make a copy.
+    pub fn create_checkpoint(&self, destination: impl AsRef<Path>) -> Result<(), DbError> {
+        self.db.flush()?;
+        let checkpoint = Checkpoint::new(self.db.as_ref())?;
+        checkpoint.create_checkpoint(destination)?;
         Ok(())
     }
 
@@ -1028,6 +1039,38 @@ mod tests {
 
         let _ = db.shutdown();
         let _ = fs::remove_dir_all(&path);
+    }
+
+    #[test]
+    fn checkpoint_reopens_and_preserves_telemetry() {
+        let path = temp_db_path();
+        let checkpoint_path = temp_db_path();
+        let db = UetsDb::open(&path).unwrap();
+        let record = TelemetryRecord {
+            schema: SchemaVersion::default(),
+            session_id: "checkpoint_session".to_string(),
+            timestamp_ms: 123,
+            connection_count: 0,
+            total_ram_mb: 1.0,
+            total_cpu_percent: 2.0,
+            latency_mean_ms: None,
+            latency_sum_ms: 0.0,
+            latency_observations: 0,
+            connections: Vec::new(),
+        };
+        db.write_telemetry(&record).unwrap();
+        db.create_checkpoint(&checkpoint_path).unwrap();
+
+        let restored = UetsDb::open(&checkpoint_path).unwrap();
+        let records = restored.query_telemetry("checkpoint_session").unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].timestamp_ms, record.timestamp_ms);
+        assert_eq!(records[0].total_ram_mb, record.total_ram_mb);
+
+        let _ = restored.shutdown();
+        let _ = db.shutdown();
+        let _ = fs::remove_dir_all(&path);
+        let _ = fs::remove_dir_all(&checkpoint_path);
     }
 
     #[test]

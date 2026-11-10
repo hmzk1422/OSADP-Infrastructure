@@ -4,7 +4,7 @@
 //! Binance's wire format, and of Arrow/Parquet, so the same code path serves a
 //! live capture today and a recorded-feed backtest later.
 
-use super::book::{price_to_tick, tick_to_price, PriceTick};
+use super::book::{PriceTick, price_to_tick, tick_to_price};
 use super::event::{BookSnapshot, MarketEvent, Source, Trade};
 use super::row::FieldWriter;
 use super::state::{BookHealth, Counters, State};
@@ -71,6 +71,11 @@ impl Merger {
     /// True while the book is unusable and a REST re-seed is required.
     pub fn needs_reseed(&self) -> bool {
         self.state.health == BookHealth::Stale
+    }
+
+    /// Mark the current book stale after a market-data stream interruption.
+    pub fn mark_stale(&mut self) {
+        self.state.mark_gap();
     }
 
     /// Apply a REST snapshot, clearing any stale marking.

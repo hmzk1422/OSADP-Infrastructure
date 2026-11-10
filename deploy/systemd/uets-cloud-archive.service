@@ -1,0 +1,16 @@
+[Unit]
+Description=Archive UETS telemetry RocksDB to S3 when disk usage exceeds the threshold
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=uets
+Group=uets
+EnvironmentFile=/etc/uets/archive.env
+ExecStart=/opt/uets/uets-linux-x86_64/cloud.sh
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/uets /var/tmp
+

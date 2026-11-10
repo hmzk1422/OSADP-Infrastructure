@@ -28,12 +28,13 @@
 //! not used: its `lastUpdateId` identifies a different object.
 
 use std::collections::BTreeMap;
+use std::net::TcpStream;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
-use tungstenite::{Message, connect};
+use tungstenite::{Message, WebSocket, connect, stream::MaybeTlsStream};
 
 use stream_handler::{
     BookSnapshot, CsvRecorder, DEFAULT_LATENESS_MS, DEFAULT_LEVELS, DiffFrame, MarketEvent, Merger,
@@ -45,6 +46,31 @@ use stream_handler::{
 /// A live feed that is working produces rows continuously, so a long silence
 /// means the socket never connected rather than a quiet market.
 const STALL_TIMEOUT: Duration = Duration::from_secs(30);
+const READ_IDLE_TIMEOUT: Duration = Duration::from_secs(10);
+const RESEED_RETRY: Duration = Duration::from_secs(3);
+const SOURCE_FAILOVER_TIMEOUT: Duration = Duration::from_secs(10);
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum MarketSource {
+    Binance,
+    Bybit,
+}
+
+impl MarketSource {
+    fn index(self) -> usize {
+        match self {
+            Self::Binance => 0,
+            Self::Bybit => 1,
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Binance => "binance",
+            Self::Bybit => "bybit",
+        }
+    }
+}
 
 /// How the capture is configured.
 #[derive(Clone, Debug)]
@@ -102,6 +128,10 @@ struct Capture {
     received_times: BTreeMap<(i64, u8, u64), u64>,
     last_persistence_write_ms: f64,
     persistence_errors: u64,
+    active_source: MarketSource,
+    last_source_event: [Option<Instant>; 2],
+    source_reseed_failed: [bool; 2],
+    last_source_evaluation: Instant,
 }
 
 impl Capture {
@@ -113,6 +143,46 @@ impl Capture {
     }
 
     fn offer_received(&mut self, event: MarketEvent, received_ms: u64) -> Result<u64, String> {
+        self.offer_from_source(event, received_ms, MarketSource::Binance)
+    }
+
+    fn offer_from_source(
+        &mut self,
+        event: MarketEvent,
+        received_ms: u64,
+        source: MarketSource,
+    ) -> Result<u64, String> {
+        if matches!(event, MarketEvent::Diff(_)) {
+            let now = Instant::now();
+            self.last_source_event[source.index()] = Some(now);
+            if source != self.active_source {
+                if self.last_source_evaluation.elapsed() < Duration::from_secs(1) {
+                    return Ok(0);
+                }
+                self.last_source_evaluation = now;
+                let active_is_stale = self.source_reseed_failed[self.active_source.index()]
+                    || self.last_source_event[self.active_source.index()]
+                        .is_none_or(|last| last.elapsed() >= SOURCE_FAILOVER_TIMEOUT);
+                if !active_is_stale {
+                    return Ok(0);
+                }
+                eprintln!(
+                    "[capture] market source failover: {} -> {} after {:?} without active book updates",
+                    self.active_source.name(),
+                    source.name(),
+                    SOURCE_FAILOVER_TIMEOUT
+                );
+                self.active_source = source;
+                self.source_reseed_failed[source.index()] = false;
+                self.reorder.clear();
+                self.received_times.clear();
+                self.merger.mark_stale();
+                self.reseeds_pending = true;
+            }
+        } else if source != self.active_source {
+            return Ok(0);
+        }
+
         let event_key = market_event_key(&event);
         self.received_times.insert(event_key, received_ms);
         if self.received_times.len() > 65_536 {
@@ -128,6 +198,12 @@ impl Capture {
                 MarketEvent::Trade(trade) => Some(*trade),
                 _ => None,
             };
+            if let MarketEvent::Diff(frame) = &ready
+                && let Some(last_update_id) = self.merger.state().last_update_id
+                && frame.final_update_id <= last_update_id as u64
+            {
+                continue;
+            }
             let (row, outcome) = self.merger.merge_event(ready);
             if outcome.needs_reseed {
                 // Visible, not silent: the book is now wrong, so the next
@@ -145,22 +221,21 @@ impl Capture {
                     self.fanout_skipped_invalid_book =
                         self.fanout_skipped_invalid_book.saturating_add(1);
                 } else {
-                    let frame =
-                        match strategy_frame(
-                            &self.merger,
-                            trade,
-                            row.timestamp_ns / 1_000_000,
-                            received_ms,
-                            self.last_persistence_write_ms,
-                            self.persistence_errors,
-                            self.fanout_queue_depth.load(Ordering::Relaxed),
-                        ) {
-                            Ok(frame) => frame,
-                            Err(error) => {
-                                self.fanout_failed.store(true, Ordering::Release);
-                                return Err(error);
-                            }
-                        };
+                    let frame = match strategy_frame(
+                        &self.merger,
+                        trade,
+                        row.timestamp_ns / 1_000_000,
+                        received_ms,
+                        self.last_persistence_write_ms,
+                        self.persistence_errors,
+                        self.fanout_queue_depth.load(Ordering::Relaxed),
+                    ) {
+                        Ok(frame) => frame,
+                        Err(error) => {
+                            self.fanout_failed.store(true, Ordering::Release);
+                            return Err(error);
+                        }
+                    };
                     self.fanout_queue_depth.fetch_add(1, Ordering::Relaxed);
                     if let Err(error) = fanout.try_send(frame) {
                         self.fanout_queue_depth.fetch_sub(1, Ordering::Relaxed);
@@ -376,31 +451,146 @@ pub fn seed_from_rest(symbol: &str) -> Result<BookSnapshot, String> {
     })
 }
 
-/// Fire-and-forget reconnecting stream thread.
-fn spawn_stream(url: String, on_msg: impl FnMut(&str) + Send + 'static) {
+/// Fetch a Bybit V5 linear order-book snapshot for a source switch or reseed.
+pub fn seed_bybit_from_rest(symbol: &str) -> Result<BookSnapshot, String> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .map_err(|error| format!("build Bybit REST client: {error}"))?;
+    let response: Value = client
+        .get("https://api.bybit.com/v5/market/orderbook")
+        .query(&[
+            ("category", "linear"),
+            ("symbol", &symbol.to_ascii_uppercase()),
+            ("limit", "200"),
+        ])
+        .send()
+        .and_then(reqwest::blocking::Response::error_for_status)
+        .map_err(|error| format!("Bybit REST orderbook request failed: {error}"))?
+        .json()
+        .map_err(|error| format!("decode Bybit REST orderbook response: {error}"))?;
+    if u64_of(response.get("retCode")) != Some(0) {
+        return Err(format!(
+            "Bybit REST orderbook rejected request: retCode={:?} retMsg={:?}",
+            response.get("retCode"),
+            response.get("retMsg")
+        ));
+    }
+    let result = response
+        .get("result")
+        .ok_or_else(|| "Bybit REST orderbook response has no result".to_string())?;
+    let parse_side = |key: &str| -> Result<Vec<(f64, f64)>, String> {
+        let levels = result
+            .get(key)
+            .and_then(Value::as_array)
+            .ok_or_else(|| format!("Bybit REST orderbook response has no {key} levels"))?;
+        levels
+            .iter()
+            .map(|level| {
+                let pair = level
+                    .as_array()
+                    .ok_or_else(|| format!("Bybit REST {key} level is not an array"))?;
+                let price = num(pair.first())
+                    .ok_or_else(|| format!("Bybit REST {key} level has invalid price"))?;
+                let quantity = num(pair.get(1))
+                    .ok_or_else(|| format!("Bybit REST {key} level has invalid quantity"))?;
+                Ok((price, quantity))
+            })
+            .collect()
+    };
+    Ok(BookSnapshot {
+        last_update_id: u64_of(result.get("u"))
+            .ok_or_else(|| "Bybit REST orderbook response has no update ID".to_string())?,
+        bids: parse_side("b")?,
+        asks: parse_side("a")?,
+    })
+}
+
+fn set_read_timeout(
+    socket: &mut WebSocket<MaybeTlsStream<TcpStream>>,
+    timeout: Duration,
+) -> std::io::Result<()> {
+    match socket.get_mut() {
+        MaybeTlsStream::Plain(stream) => stream.set_read_timeout(Some(timeout)),
+        MaybeTlsStream::NativeTls(stream) => stream.get_mut().set_read_timeout(Some(timeout)),
+        _ => Err(std::io::Error::other(
+            "unsupported TLS stream for websocket read timeout",
+        )),
+    }
+}
+
+fn mark_market_stream_disconnected(capture: &mut Capture, source: MarketSource) {
+    if capture.active_source == source {
+        capture.merger.mark_stale();
+        capture.reseeds_pending = true;
+    }
+}
+
+/// Reconnect a stream after close, error, or an idle read timeout.
+fn spawn_stream(
+    url: String,
+    subscribe: Option<String>,
+    mut on_msg: impl FnMut(&str) + Send + 'static,
+    on_disconnect: impl Fn() + Send + 'static,
+    keep_running: Arc<AtomicBool>,
+) {
     std::thread::spawn(move || {
-        let mut on_msg = on_msg;
-        loop {
+        while keep_running.load(Ordering::Acquire) {
             match connect(url.as_str()) {
-                Ok((mut ws, _)) => loop {
-                    match ws.read() {
-                        Ok(Message::Text(text)) => on_msg(&text),
-                        Ok(Message::Ping(_))
-                        | Ok(Message::Pong(_))
-                        | Ok(Message::Binary(_))
-                        | Ok(Message::Frame(_)) => (),
-                        Ok(Message::Close(frame)) => {
-                            eprintln!("[capture] closed by server: {:?}", frame.map(|f| f.code));
-                            break;
-                        }
-                        Err(e) => {
-                            eprintln!("[capture] socket error: {e}");
-                            break;
+                Ok((mut ws, _)) => {
+                    eprintln!("[capture] connected: {url}");
+                    if let Some(message) = subscribe.as_ref()
+                        && let Err(error) = ws.send(Message::Text(message.clone()))
+                    {
+                        eprintln!("[capture] subscription failed: {error} ({url})");
+                        on_disconnect();
+                        std::thread::sleep(Duration::from_secs(3));
+                        continue;
+                    }
+                    match set_read_timeout(&mut ws, READ_IDLE_TIMEOUT) {
+                        Ok(()) => loop {
+                            match ws.read() {
+                                Ok(Message::Text(text)) => on_msg(&text),
+                                Ok(Message::Ping(payload)) => {
+                                    if let Err(error) = ws.send(Message::Pong(payload)) {
+                                        eprintln!(
+                                            "[capture] websocket pong failed: {error} ({url})"
+                                        );
+                                        break;
+                                    }
+                                }
+                                Ok(Message::Pong(_))
+                                | Ok(Message::Binary(_))
+                                | Ok(Message::Frame(_)) => (),
+                                Ok(Message::Close(frame)) => {
+                                    eprintln!(
+                                        "[capture] closed by server: {:?} ({url})",
+                                        frame.map(|f| f.code)
+                                    );
+                                    break;
+                                }
+                                Err(error) => {
+                                    eprintln!("[capture] socket error: {error} ({url})");
+                                    break;
+                                }
+                            }
+                            if !keep_running.load(Ordering::Acquire) {
+                                break;
+                            }
+                        },
+                        Err(error) => {
+                            eprintln!(
+                                "[capture] set websocket read timeout failed: {error} ({url})"
+                            );
                         }
                     }
-                },
-                Err(e) => eprintln!("[capture] connect failed: {e}"),
+                }
+                Err(error) => eprintln!("[capture] connect failed: {error} ({url})"),
             }
+            if !keep_running.load(Ordering::Acquire) {
+                break;
+            }
+            on_disconnect();
             eprintln!("[capture] reconnecting in 3s...");
             std::thread::sleep(Duration::from_secs(3));
         }
@@ -490,6 +680,89 @@ pub fn parse_diff(text: &str) -> Option<MarketEvent> {
     }))
 }
 
+/// Parse a Bybit V5 linear order-book delta into the shared merger event.
+pub fn parse_bybit_diff(text: &str) -> Option<MarketEvent> {
+    let envelope: Value = serde_json::from_str(text).ok()?;
+    if envelope.get("type").and_then(Value::as_str) != Some("delta")
+        || !envelope
+            .get("topic")
+            .and_then(Value::as_str)
+            .is_some_and(|topic| topic.starts_with("orderbook."))
+    {
+        return None;
+    }
+    let data = envelope.get("data")?;
+    let update_id = u64_of(data.get("u"))?;
+    let mut updates = Vec::new();
+    for (key, is_bid) in [("b", true), ("a", false)] {
+        let Some(Value::Array(levels)) = data.get(key) else {
+            continue;
+        };
+        for level in levels {
+            let Value::Array(pair) = level else { continue };
+            if pair.len() < 2 {
+                continue;
+            }
+            let (Some(price), Some(quantity)) = (num(pair.first()), num(pair.get(1))) else {
+                continue;
+            };
+            updates.push(stream_handler::BookUpdate {
+                is_bid,
+                price,
+                quantity,
+            });
+        }
+    }
+    Some(MarketEvent::Diff(DiffFrame {
+        event_time_ms: i64::try_from(u64_of(envelope.get("ts"))?).ok()?,
+        first_update_id: update_id,
+        final_update_id: update_id,
+        updates,
+    }))
+}
+
+/// Parse the possibly batched Bybit V5 public-trade message.
+pub fn parse_bybit_trades(text: &str) -> Vec<MarketEvent> {
+    let Ok(envelope) = serde_json::from_str::<Value>(text) else {
+        return Vec::new();
+    };
+    if !envelope
+        .get("topic")
+        .and_then(Value::as_str)
+        .is_some_and(|topic| topic.starts_with("publicTrade."))
+    {
+        return Vec::new();
+    }
+    let Some(Value::Array(items)) = envelope.get("data") else {
+        return Vec::new();
+    };
+    let envelope_time = u64_of(envelope.get("ts")).unwrap_or_default();
+    items
+        .iter()
+        .filter_map(|item| {
+            let trade_id = item.get("i").and_then(Value::as_str)?;
+            let transact_time_ms = u64_of(item.get("T")).unwrap_or(envelope_time);
+            let event_time_ms = i64::try_from(transact_time_ms).ok()?;
+            Some(MarketEvent::Trade(Trade {
+                event_time_ms,
+                transact_time_ms: event_time_ms,
+                agg_trade_id: stable_trade_id(trade_id),
+                first_trade_id: 0,
+                last_trade_id: 0,
+                price: num(item.get("p"))?,
+                quantity: num(item.get("v"))?,
+                is_buyer_maker: item.get("S").and_then(Value::as_str) == Some("Sell"),
+            }))
+        })
+        .collect()
+}
+
+fn stable_trade_id(value: &str) -> u64 {
+    value.bytes().fold(0xcbf29ce484222325, |hash, byte| {
+        (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3)
+    })
+}
+
 /// Run a live capture until interrupted, or until `max_rows` is reached.
 pub fn run_capture(config: CaptureConfig) -> Result<(), String> {
     let symbol = config.symbol.to_lowercase();
@@ -533,6 +806,10 @@ pub fn run_capture(config: CaptureConfig) -> Result<(), String> {
         received_times: BTreeMap::new(),
         last_persistence_write_ms: 0.0,
         persistence_errors: 0,
+        active_source: MarketSource::Binance,
+        last_source_event: [None, None],
+        source_reseed_failed: [false, false],
+        last_source_evaluation: Instant::now(),
     }));
 
     // Write the header immediately, before any data. Deferring it to the first
@@ -554,12 +831,20 @@ pub fn run_capture(config: CaptureConfig) -> Result<(), String> {
             guard.merger.apply_seed(&snapshot);
             eprintln!("[capture] book seeded from REST");
         }
-        Err(e) => eprintln!("[capture] WARNING: REST seed failed: {e}"),
+        Err(e) => {
+            eprintln!("[capture] WARNING: REST seed failed: {e}");
+            let mut guard = capture.lock().map_err(|error| {
+                format!("capture mutex poisoned after initial REST seed failure: {error}")
+            })?;
+            mark_market_stream_disconnected(&mut guard, MarketSource::Binance);
+            guard.source_reseed_failed[MarketSource::Binance.index()] = true;
+        }
     }
 
     let max_rows = config.max_rows;
     spawn_stream(
         format!("wss://fstream.binance.com/stream?streams={symbol}@aggTrade"),
+        None,
         {
             let shared = Arc::clone(&capture);
             let seen = Arc::clone(&rows_seen);
@@ -567,13 +852,26 @@ pub fn run_capture(config: CaptureConfig) -> Result<(), String> {
             move |text| {
                 let received_ms = wall_time_ms();
                 if let Some(event) = parse_trade(text) {
-                    push(&shared, &seen, &keep, max_rows, event, received_ms);
+                    push(
+                        &shared,
+                        &seen,
+                        &keep,
+                        max_rows,
+                        event,
+                        received_ms,
+                        MarketSource::Binance,
+                    );
                 }
             }
         },
+        || {},
+        Arc::clone(&keep_running),
     );
+    let disconnected_capture = Arc::clone(&capture);
+    let disconnected_keep_running = Arc::clone(&keep_running);
     spawn_stream(
         format!("wss://fstream.binance.com/stream?streams={symbol}@depth@100ms"),
+        None,
         {
             let shared = Arc::clone(&capture);
             let seen = Arc::clone(&rows_seen);
@@ -581,10 +879,97 @@ pub fn run_capture(config: CaptureConfig) -> Result<(), String> {
             move |text| {
                 let received_ms = wall_time_ms();
                 if let Some(event) = parse_diff(text) {
-                    push(&shared, &seen, &keep, max_rows, event, received_ms);
+                    push(
+                        &shared,
+                        &seen,
+                        &keep,
+                        max_rows,
+                        event,
+                        received_ms,
+                        MarketSource::Binance,
+                    );
                 }
             }
         },
+        move || match disconnected_capture.lock() {
+            Ok(mut guard) => mark_market_stream_disconnected(&mut guard, MarketSource::Binance),
+            Err(error) => {
+                eprintln!("[capture] cannot mark order book stale after disconnect: {error}");
+                disconnected_keep_running.store(false, Ordering::Release);
+            }
+        },
+        Arc::clone(&keep_running),
+    );
+
+    let bybit_symbol = config.symbol.to_ascii_uppercase();
+    let bybit_trade_subscription = serde_json::json!({
+        "op": "subscribe",
+        "args": [format!("publicTrade.{bybit_symbol}")]
+    })
+    .to_string();
+    spawn_stream(
+        "wss://stream.bybit.com/v5/public/linear".to_string(),
+        Some(bybit_trade_subscription),
+        {
+            let shared = Arc::clone(&capture);
+            let seen = Arc::clone(&rows_seen);
+            let keep = Arc::clone(&keep_running);
+            move |text| {
+                let received_ms = wall_time_ms();
+                for event in parse_bybit_trades(text) {
+                    push(
+                        &shared,
+                        &seen,
+                        &keep,
+                        max_rows,
+                        event,
+                        received_ms,
+                        MarketSource::Bybit,
+                    );
+                }
+            }
+        },
+        || {},
+        Arc::clone(&keep_running),
+    );
+
+    let bybit_book_subscription = serde_json::json!({
+        "op": "subscribe",
+        "args": [format!("orderbook.50.{bybit_symbol}")]
+    })
+    .to_string();
+    let disconnected_capture = Arc::clone(&capture);
+    let disconnected_keep_running = Arc::clone(&keep_running);
+    spawn_stream(
+        "wss://stream.bybit.com/v5/public/linear".to_string(),
+        Some(bybit_book_subscription),
+        {
+            let shared = Arc::clone(&capture);
+            let seen = Arc::clone(&rows_seen);
+            let keep = Arc::clone(&keep_running);
+            move |text| {
+                let received_ms = wall_time_ms();
+                if let Some(event) = parse_bybit_diff(text) {
+                    push(
+                        &shared,
+                        &seen,
+                        &keep,
+                        max_rows,
+                        event,
+                        received_ms,
+                        MarketSource::Bybit,
+                    );
+                }
+            }
+        },
+        move || match disconnected_capture.lock() {
+            Ok(mut guard) => mark_market_stream_disconnected(&mut guard, MarketSource::Bybit),
+            Err(error) => {
+                eprintln!("[capture] cannot mark Bybit book stale after disconnect: {error}");
+                disconnected_keep_running.store(false, Ordering::Release);
+            }
+        },
+        Arc::clone(&keep_running),
     );
 
     // Recover the book from a detected sequence gap without a restart.
@@ -595,19 +980,68 @@ pub fn run_capture(config: CaptureConfig) -> Result<(), String> {
         std::thread::spawn(move || {
             while keep.load(Ordering::Relaxed) {
                 std::thread::sleep(Duration::from_millis(500));
-                let stale = shared.lock().map(|g| g.reseeds_pending).unwrap_or(false);
+                let stale = match shared.lock() {
+                    Ok(guard) => guard.reseeds_pending,
+                    Err(error) => {
+                        eprintln!("[capture] cannot inspect reseed state: {error}");
+                        keep.store(false, Ordering::Release);
+                        return;
+                    }
+                };
                 if !stale {
                     continue;
                 }
-                match seed_from_rest(&sym) {
-                    Ok(snapshot) => {
-                        if let Ok(mut guard) = shared.lock() {
+                let source = match shared.lock() {
+                    Ok(guard) => guard.active_source,
+                    Err(error) => {
+                        eprintln!("[capture] cannot inspect active feed source: {error}");
+                        keep.store(false, Ordering::Release);
+                        return;
+                    }
+                };
+                let reseed = match source {
+                    MarketSource::Binance => seed_from_rest(&sym),
+                    MarketSource::Bybit => seed_bybit_from_rest(&sym),
+                };
+                match reseed {
+                    Ok(snapshot) => match shared.lock() {
+                        Ok(mut guard) => {
+                            if guard.active_source != source {
+                                continue;
+                            }
                             guard.merger.apply_seed(&snapshot);
                             guard.reseeds_pending = false;
-                            eprintln!("[capture] book re-seeded after a sequence gap");
+                            guard.source_reseed_failed[source.index()] = false;
+                            eprintln!(
+                                "[capture] {} book re-seeded after a stream interruption or sequence gap",
+                                source.name()
+                            );
                         }
+                        Err(error) => {
+                            eprintln!("[capture] cannot apply REST reseed: {error}");
+                            keep.store(false, Ordering::Release);
+                            return;
+                        }
+                    },
+                    Err(error) => {
+                        match shared.lock() {
+                            Ok(mut guard) if guard.active_source == source => {
+                                guard.source_reseed_failed[source.index()] = true;
+                            }
+                            Ok(_) => {}
+                            Err(lock_error) => {
+                                eprintln!(
+                                    "[capture] cannot record failed REST reseed: {lock_error}"
+                                );
+                                keep.store(false, Ordering::Release);
+                                return;
+                            }
+                        }
+                        eprintln!(
+                            "[capture] re-seed failed: {error}; retrying in {RESEED_RETRY:?}"
+                        );
+                        std::thread::sleep(RESEED_RETRY);
                     }
-                    Err(e) => eprintln!("[capture] re-seed failed: {e}"),
                 }
             }
         });
@@ -623,15 +1057,57 @@ pub fn run_capture(config: CaptureConfig) -> Result<(), String> {
         std::thread::sleep(Duration::from_millis(200));
         let total = rows_seen.load(Ordering::Relaxed);
         if let Some(limit) = max_rows
-            && total >= limit {
-                break;
-            }
+            && total >= limit
+        {
+            break;
+        }
         if fanout_failed.load(Ordering::Acquire) {
             keep_running.store(false, Ordering::Release);
             return Err("strategy socket disconnected; feed process stopping".into());
         }
         if !keep_running.load(Ordering::Relaxed) {
             break;
+        }
+        let (both_reseeds_failed, active_reseed_failed, fallback_stale) = {
+            let guard = capture.lock().expect("capture mutex poisoned");
+            let active_index = guard.active_source.index();
+            let fallback_index = 1 - active_index;
+            (
+                guard.source_reseed_failed.iter().all(|failed| *failed),
+                guard.source_reseed_failed[active_index],
+                guard.last_source_event[fallback_index]
+                    .is_none_or(|last| last.elapsed() >= STALL_TIMEOUT),
+            )
+        };
+        if both_reseeds_failed {
+            keep_running.store(false, Ordering::Release);
+            return Err(
+                "Binance and Bybit REST order-book reseeds both failed; refusing to run the strategy"
+                    .into(),
+            );
+        }
+        if active_reseed_failed && fallback_stale && started.elapsed() >= STALL_TIMEOUT {
+            keep_running.store(false, Ordering::Release);
+            return Err(
+                "active market source could not reseed and the alternate feed is unavailable; refusing to run the strategy"
+                    .into(),
+            );
+        }
+        if total > 0 {
+            let no_healthy_source = {
+                let guard = capture.lock().expect("capture mutex poisoned");
+                guard
+                    .last_source_event
+                    .iter()
+                    .all(|last| last.is_none_or(|last| last.elapsed() >= STALL_TIMEOUT))
+            };
+            if no_healthy_source {
+                keep_running.store(false, Ordering::Release);
+                return Err(format!(
+                    "Binance and Bybit order books have both been stale for {:?}; refusing to run the strategy on jumped data",
+                    STALL_TIMEOUT
+                ));
+            }
         }
         if total == 0 && started.elapsed() > STALL_TIMEOUT {
             eprintln!(
@@ -700,9 +1176,10 @@ fn push(
     max_rows: Option<u64>,
     event: MarketEvent,
     received_ms: u64,
+    source: MarketSource,
 ) {
     let Ok(mut guard) = shared.lock() else { return };
-    match guard.offer_received(event, received_ms) {
+    match guard.offer_from_source(event, received_ms, source) {
         Ok(written) => {
             let total = rows_seen.fetch_add(written, Ordering::Relaxed) + written;
             if max_rows.is_some_and(|limit| total >= limit) {
@@ -792,6 +1269,45 @@ mod tests {
         let text = r#"{"e":"depthUpdate","E":1,"U":1,"b":[],"a":[]}"#;
         assert!(parse_diff(text).is_none());
     }
+
+    #[test]
+    fn parses_bybit_v5_orderbook_delta_into_the_shared_event_schema() {
+        let text = r#"{"topic":"orderbook.50.BTCUSDT","type":"delta","ts":1751245200406,"data":{"s":"BTCUSDT","u":10,"seq":20,"b":[["108665.5","9.141"]],"a":[["108665.6","0"]]}}"#;
+        match parse_bybit_diff(text).expect("parsed") {
+            MarketEvent::Diff(frame) => {
+                assert_eq!(frame.event_time_ms, 1_751_245_200_406);
+                assert_eq!(frame.first_update_id, 10);
+                assert_eq!(frame.final_update_id, 10);
+                assert_eq!(frame.updates.len(), 2);
+                assert!(frame.updates[0].is_bid);
+                assert_eq!(frame.updates[0].price, 108_665.5);
+                assert_eq!(frame.updates[1].quantity, 0.0);
+            }
+            other => panic!("expected a diff, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_batched_bybit_trades_and_maps_taker_side() {
+        let text = r#"{"topic":"publicTrade.BTCUSDT","ts":1751245200406,"data":[{"T":1751245200405,"s":"BTCUSDT","S":"Sell","v":"0.02","p":"100.5","i":"trade-a"},{"T":1751245200406,"s":"BTCUSDT","S":"Buy","v":"0.03","p":"100.6","i":"trade-b"}]}"#;
+        let events = parse_bybit_trades(text);
+        assert_eq!(events.len(), 2);
+        match &events[0] {
+            MarketEvent::Trade(trade) => {
+                assert_eq!(trade.price, 100.5);
+                assert_eq!(trade.quantity, 0.02);
+                assert!(trade.is_buyer_maker, "Sell is the taker side");
+            }
+            other => panic!("expected a trade, got {other:?}"),
+        }
+        match &events[1] {
+            MarketEvent::Trade(trade) => {
+                assert_eq!(trade.price, 100.6);
+                assert!(!trade.is_buyer_maker, "Buy is the taker side");
+            }
+            other => panic!("expected a trade, got {other:?}"),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -822,6 +1338,10 @@ mod end_to_end {
             received_times: BTreeMap::new(),
             last_persistence_write_ms: 0.0,
             persistence_errors: 0,
+            active_source: MarketSource::Binance,
+            last_source_event: [None, None],
+            source_reseed_failed: [false, false],
+            last_source_evaluation: Instant::now(),
         };
 
         // A REST seed, applied DIRECTLY to the merger. It must not go
@@ -992,6 +1512,48 @@ mod strategy_fanout_tests {
     use super::*;
 
     #[test]
+    fn depth_disconnect_marks_book_stale_until_rest_reseed() {
+        let path =
+            std::env::temp_dir().join(format!("uets_disconnect_reseed_{}.csv", std::process::id()));
+        let mut capture = Capture {
+            merger: Merger::new(DEFAULT_LEVELS),
+            reorder: ReorderBuffer::new(0, 8),
+            csv: CsvRecorder::create(&path).unwrap(),
+            rows_written: 0,
+            reseeds_pending: false,
+            fanout_skipped_invalid_book: 0,
+            fanout: None,
+            fanout_failed: Arc::new(AtomicBool::new(false)),
+            fanout_queue_depth: Arc::new(AtomicUsize::new(0)),
+            received_times: BTreeMap::new(),
+            last_persistence_write_ms: 0.0,
+            persistence_errors: 0,
+            active_source: MarketSource::Binance,
+            last_source_event: [None, None],
+            source_reseed_failed: [false, false],
+            last_source_evaluation: Instant::now(),
+        };
+        let snapshot = BookSnapshot {
+            last_update_id: 1,
+            bids: vec![(99.0, 2.0)],
+            asks: vec![(101.0, 3.0)],
+        };
+        capture.merger.apply_seed(&snapshot);
+        assert!(capture.merger.state().book_valid());
+
+        mark_market_stream_disconnected(&mut capture, MarketSource::Binance);
+        assert!(capture.reseeds_pending);
+        assert!(!capture.merger.state().book_valid());
+        assert!(strategy_frame(&capture.merger, None, 1, 1, 0.0, 0, 0).is_err());
+
+        capture.merger.apply_seed(&snapshot);
+        capture.reseeds_pending = false;
+        assert!(capture.merger.state().book_valid());
+        assert!(!capture.reseeds_pending);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
     fn strategy_payload_is_length_framed_and_contains_canonical_market_inputs() {
         let mut merger = Merger::new(20);
         merger.apply_seed(&BookSnapshot {
@@ -1011,7 +1573,16 @@ mod strategy_fanout_tests {
         };
         merger.merge_event(MarketEvent::Trade(trade));
 
-        let frame = strategy_frame(&merger, Some(trade), trade.event_time_ms, 1_700_000_000_000, 0.2, 0, 0).unwrap();
+        let frame = strategy_frame(
+            &merger,
+            Some(trade),
+            trade.event_time_ms,
+            1_700_000_000_000,
+            0.2,
+            0,
+            0,
+        )
+        .unwrap();
         let payload_length = u32::from_le_bytes(frame[..4].try_into().unwrap()) as usize;
         assert_eq!(payload_length, frame.len() - 4);
         let payload = std::str::from_utf8(&frame[4..]).unwrap();
@@ -1049,6 +1620,10 @@ mod strategy_fanout_tests {
             received_times: BTreeMap::new(),
             last_persistence_write_ms: 0.0,
             persistence_errors: 0,
+            active_source: MarketSource::Binance,
+            last_source_event: [None, None],
+            source_reseed_failed: [false, false],
+            last_source_evaluation: Instant::now(),
         };
         capture.csv.write_header().unwrap();
         let trade = Trade {
@@ -1087,6 +1662,117 @@ mod strategy_fanout_tests {
             .offer(MarketEvent::Trade(resumed_trade))
             .expect("strategy fanout should resume after a valid book is reseeded");
         assert!(receiver.try_recv().is_ok());
+        drop(capture);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn bybit_takes_over_only_after_the_active_book_feed_times_out() {
+        let path =
+            std::env::temp_dir().join(format!("uets_source_failover_{}.csv", std::process::id()));
+        let mut capture = Capture {
+            merger: Merger::new(DEFAULT_LEVELS),
+            reorder: ReorderBuffer::new(10_000, 8),
+            csv: CsvRecorder::create(&path).unwrap(),
+            rows_written: 0,
+            reseeds_pending: false,
+            fanout_skipped_invalid_book: 0,
+            fanout: None,
+            fanout_failed: Arc::new(AtomicBool::new(false)),
+            fanout_queue_depth: Arc::new(AtomicUsize::new(0)),
+            received_times: BTreeMap::new(),
+            last_persistence_write_ms: 0.0,
+            persistence_errors: 0,
+            active_source: MarketSource::Binance,
+            last_source_event: [Some(Instant::now()), None],
+            source_reseed_failed: [false, false],
+            last_source_evaluation: Instant::now() - Duration::from_secs(2),
+        };
+        capture.merger.apply_seed(&BookSnapshot {
+            last_update_id: 1,
+            bids: vec![(99.0, 1.0)],
+            asks: vec![(101.0, 1.0)],
+        });
+        capture.reorder.push(MarketEvent::Trade(Trade {
+            event_time_ms: 100,
+            transact_time_ms: 100,
+            agg_trade_id: 1,
+            first_trade_id: 1,
+            last_trade_id: 1,
+            price: 100.0,
+            quantity: 0.1,
+            is_buyer_maker: false,
+        }));
+        capture.last_source_event[MarketSource::Binance.index()] =
+            Some(Instant::now() - SOURCE_FAILOVER_TIMEOUT - Duration::from_secs(1));
+
+        capture
+            .offer_from_source(
+                MarketEvent::Diff(DiffFrame {
+                    event_time_ms: 200,
+                    first_update_id: 1,
+                    final_update_id: 2,
+                    updates: vec![],
+                }),
+                200,
+                MarketSource::Bybit,
+            )
+            .unwrap();
+
+        assert_eq!(capture.active_source, MarketSource::Bybit);
+        assert!(capture.reseeds_pending);
+        assert!(!capture.merger.state().book_valid());
+        assert_eq!(
+            capture.reorder.len(),
+            1,
+            "old pending events are cleared and only the triggering Bybit event remains"
+        );
+        drop(capture);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn bybit_takes_over_when_primary_rest_reseed_fails() {
+        let path = std::env::temp_dir().join(format!(
+            "uets_source_reseed_failover_{}.csv",
+            std::process::id()
+        ));
+        let mut capture = Capture {
+            merger: Merger::new(DEFAULT_LEVELS),
+            reorder: ReorderBuffer::new(0, 8),
+            csv: CsvRecorder::create(&path).unwrap(),
+            rows_written: 0,
+            reseeds_pending: true,
+            fanout_skipped_invalid_book: 0,
+            fanout: None,
+            fanout_failed: Arc::new(AtomicBool::new(false)),
+            fanout_queue_depth: Arc::new(AtomicUsize::new(0)),
+            received_times: BTreeMap::new(),
+            last_persistence_write_ms: 0.0,
+            persistence_errors: 0,
+            active_source: MarketSource::Binance,
+            last_source_event: [Some(Instant::now()), None],
+            source_reseed_failed: [true, false],
+            last_source_evaluation: Instant::now() - Duration::from_secs(2),
+        };
+
+        capture
+            .offer_from_source(
+                MarketEvent::Diff(DiffFrame {
+                    event_time_ms: 200,
+                    first_update_id: 1,
+                    final_update_id: 2,
+                    updates: vec![],
+                }),
+                200,
+                MarketSource::Bybit,
+            )
+            .unwrap();
+
+        assert_eq!(capture.active_source, MarketSource::Bybit);
+        assert!(!capture.source_reseed_failed[MarketSource::Bybit.index()]);
+        assert!(capture.reseeds_pending);
+        assert!(!capture.merger.state().book_valid());
         drop(capture);
         let _ = std::fs::remove_file(path);
     }

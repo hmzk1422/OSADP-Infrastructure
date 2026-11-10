@@ -311,13 +311,15 @@ def _generate_synthetic(
 
 def _strategy_positions(prices: np.ndarray, settings: dict[str, Any]) -> np.ndarray:
     strategy_type = str(settings.get("type", "momentum")).lower()
-    if strategy_type == "strategy2":
+    if strategy_type == "example_strategy":
         price = np.asarray(prices, dtype=np.float64)
         window = int(settings.get("window", 5))
         long_above = float(settings.get("long_above", 1.0))
         short_below = float(settings.get("short_below", -1.0))
         if window < 1 or short_below >= long_above:
-            raise ValueError("strategy2.window must be positive and short_below < long_above")
+            raise ValueError(
+                "example_strategy.window must be positive and short_below < long_above"
+            )
         positions = np.zeros_like(price, dtype=np.float64)
         active = np.zeros(price.shape[1], dtype=np.float64)
         for index in range(price.shape[0]):
@@ -1552,7 +1554,7 @@ def _run_playback(
     if not isinstance(strategy, dict):
         raise ValueError("playback.strategy must be a YAML mapping")
     strategy_type = str(strategy_override or strategy.get("type", "momentum")).lower()
-    if strategy_type not in {"momentum", "ofmr", "strategy2"}:
+    if strategy_type not in {"momentum", "ofmr", "example_strategy"}:
         raise ValueError("playback.strategy.type must name a supported strategy folder")
 
     synthetic_settings = dict(playback.get("synthetic", {}))

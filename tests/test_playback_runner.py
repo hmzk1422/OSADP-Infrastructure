@@ -266,11 +266,16 @@ class PlaybackRunnerTests(unittest.TestCase):
         self.assertAlmostEqual(metrics.expectancy_per_trade, 1.0)
         self.assertEqual(metrics.trades, 1)
 
-    def test_strategy2_playback_uses_its_live_feature_and_entry_rules(self) -> None:
+    def test_example_strategy_playback_uses_its_live_feature_and_entry_rules(self) -> None:
         prices = np.array([[100.0], [100.0], [104.0], [99.0]])
         positions = _strategy_positions(
             prices,
-            {"type": "strategy2", "window": 3, "long_above": 1.0, "short_below": -1.0},
+            {
+                "type": "example_strategy",
+                "window": 3,
+                "long_above": 1.0,
+                "short_below": -1.0,
+            },
         )
         np.testing.assert_array_equal(positions[:, 0], np.array([0.0, 0.0, 1.0, 1.0]))
 
