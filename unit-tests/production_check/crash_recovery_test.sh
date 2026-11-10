@@ -62,6 +62,7 @@ FIXTURE
 chmod +x "${state_dir}/crash-fixture.sh"
 
 docker run --detach --name "${container_name}" \
+    --user "$(id -u):$(id -g)" \
     --memory="${memory_limit}" --memory-swap="${memory_limit}" \
     --volume "${ROOT}:/workspace:ro" \
     --volume "${state_dir}:/state" \
