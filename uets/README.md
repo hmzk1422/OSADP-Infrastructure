@@ -58,7 +58,14 @@ bundle root to restart after unexpected top-level exits. It records stderr and
 restart decisions in `logs/uets/watchdog.log`; the UETS UI remains attached to
 the terminal. The watchdog passes `--reuse-rocksdb` on each launch, which
 reuses the persisted session ID and its per-strategy trade/portfolio RocksDB
-directories. If the `q` command exits normally, the watchdog stops. Five
+directories. OFMR workers restore their persisted account, open position,
+order quantity, barrier levels, and latest market mark from those databases;
+cash and unrealized PnL therefore survive an unexpected process restart. If
+recovery state is missing while old portfolio/trade records exist, the worker
+fails closed rather than silently resetting the account. Older sessions
+created before account recovery was added need an intentional fresh session;
+their records do not contain enough information to safely reconstruct an open
+position. If the `q` command exits normally, the watchdog stops. Five
 consecutive unexpected exits stop the watchdog with an error instead of
 repeating a crash loop indefinitely. A new ordinary `uets run` (without that
 flag) creates a fresh session.
@@ -147,6 +154,10 @@ OFMR keeps rolling feature history per strategy/asset. History is capped at
 2,048 bars; an extreme time jump resets that history instead of allocating
 every missing bar. This prevents per-ticker feature state from growing without
 bound, while preserving the configured rolling features after warm-up.
+
+The portfolio equity curve retains the latest 3,001 samples per worker. Lifetime
+Sortino and maximum drawdown are maintained as running statistics, so frequent
+market marks do not grow per-worker memory without bound.
 
 Trade and portfolio records remain in their existing
 stores; workers use run-prefixed per-instance session IDs so their RocksDB

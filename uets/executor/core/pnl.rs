@@ -5,9 +5,12 @@
 //! read the same number instead of three approximations of it.
 
 use super::order::Side;
+use serde::{Deserialize, Serialize};
+
+const MAX_EQUITY_SAMPLES: usize = 3_001;
 
 /// One completed round trip.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct Trade {
     pub symbol: String,
     /// Which position was opened: `Buy` = long, `Sell` = short.
@@ -74,13 +77,26 @@ impl Trade {
 }
 
 /// Append-only record of what the account earned and how deep it drew down.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct PnlLedger {
     starting_equity: f64,
     trades: Vec<Trade>,
     equity: Vec<f64>,
     peak: f64,
     max_drawdown: f64,
+    return_sum: f64,
+    downside_squared_sum: f64,
+    return_count: u64,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+pub struct PnlLedgerRecovery {
+    pub latest_equity: f64,
+    pub peak: f64,
+    pub max_drawdown: f64,
+    pub return_sum: f64,
+    pub downside_squared_sum: f64,
+    pub return_count: u64,
 }
 
 impl PnlLedger {
@@ -91,6 +107,9 @@ impl PnlLedger {
             equity: vec![starting_equity],
             peak: starting_equity,
             max_drawdown: 0.0,
+            return_sum: 0.0,
+            downside_squared_sum: 0.0,
+            return_count: 0,
         }
     }
 
@@ -100,7 +119,21 @@ impl PnlLedger {
 
     /// Append a mark-to-market equity sample and fold it into the drawdown.
     pub fn mark(&mut self, equity: f64) {
+        if let Some(previous) = self.equity.last().copied()
+            && previous > 0.0
+        {
+            let change = (equity - previous) / previous;
+            self.return_sum += change;
+            if change < 0.0 {
+                self.downside_squared_sum += change * change;
+            }
+            self.return_count = self.return_count.saturating_add(1);
+        }
         self.equity.push(equity);
+        if self.equity.len() > MAX_EQUITY_SAMPLES {
+            let excess = self.equity.len() - MAX_EQUITY_SAMPLES;
+            self.equity.drain(..excess);
+        }
         if equity > self.peak {
             self.peak = equity;
         }
@@ -143,6 +176,63 @@ impl PnlLedger {
     /// Largest peak-to-trough fall of the equity curve, as a fraction.
     pub fn max_drawdown(&self) -> f64 {
         self.max_drawdown
+    }
+
+    /// Lifetime Sortino ratio from compact running return moments.
+    pub fn sortino(&self, periods_per_year: f64) -> f64 {
+        if self.return_count == 0 {
+            return 0.0;
+        }
+        let count = self.return_count as f64;
+        let mean = self.return_sum / count;
+        let downside = (self.downside_squared_sum / count).sqrt();
+        if downside > 0.0 {
+            let annualise = if periods_per_year > 0.0 {
+                periods_per_year.sqrt()
+            } else {
+                1.0
+            };
+            (mean / downside) * annualise
+        } else if mean > 0.0 {
+            f64::INFINITY
+        } else {
+            0.0
+        }
+    }
+
+    pub fn recovery_state(&self) -> PnlLedgerRecovery {
+        PnlLedgerRecovery {
+            latest_equity: self.current_equity(),
+            peak: self.peak,
+            max_drawdown: self.max_drawdown,
+            return_sum: self.return_sum,
+            downside_squared_sum: self.downside_squared_sum,
+            return_count: self.return_count,
+        }
+    }
+
+    pub fn restore_recovery_state(&mut self, state: PnlLedgerRecovery) -> Result<(), String> {
+        if !state.latest_equity.is_finite()
+            || !state.peak.is_finite()
+            || !state.max_drawdown.is_finite()
+            || state.max_drawdown < 0.0
+            || !state.return_sum.is_finite()
+            || !state.downside_squared_sum.is_finite()
+            || state.downside_squared_sum < 0.0
+        {
+            return Err("invalid persisted PnL ledger state".into());
+        }
+        self.peak = state.peak;
+        self.max_drawdown = state.max_drawdown;
+        self.return_sum = state.return_sum;
+        self.downside_squared_sum = state.downside_squared_sum;
+        self.return_count = state.return_count;
+        if let Some(latest) = self.equity.last_mut() {
+            *latest = state.latest_equity;
+        } else {
+            self.equity.push(state.latest_equity);
+        }
+        Ok(())
     }
 
     pub fn wins(&self) -> usize {
@@ -203,6 +293,32 @@ mod tests {
         ledger.mark(110.0); // recovering does not erase the drawdown
         assert_eq!(ledger.max_drawdown(), 0.25);
         assert_eq!(ledger.current_equity(), 110.0);
+    }
+
+    #[test]
+    fn equity_curve_is_bounded_without_losing_lifetime_statistics() {
+        let mut ledger = PnlLedger::new(1_000.0);
+        let mut full_history = vec![1_000.0];
+        for sample in 1..10_000 {
+            let equity = 1_000.0 + f64::from(sample % 23) - 11.0;
+            ledger.mark(equity);
+            full_history.push(equity);
+        }
+
+        assert_eq!(ledger.equity_curve().len(), MAX_EQUITY_SAMPLES);
+        assert_eq!(ledger.equity_curve().last(), full_history.last());
+        assert_eq!(
+            ledger.sortino(1.0),
+            crate::core::stats::sortino(
+                &crate::core::stats::returns_from_equity(&full_history),
+                0.0,
+                1.0
+            )
+        );
+        assert_eq!(
+            ledger.max_drawdown(),
+            crate::core::stats::max_drawdown(&full_history)
+        );
     }
 
     #[test]

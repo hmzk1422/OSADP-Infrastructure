@@ -355,6 +355,11 @@ bash unit-tests/production_check/crash_recovery_test.sh
 
 This is a deterministic supervisor/flag recovery test using a fixture; it is
 not a multi-day AWS run and does not claim to validate exchange connectivity.
-The live feed reseed path is separately covered by Rust tests. Run a real
-binary crash/reseed smoke only in `live-test` mode, never with real trading
-enabled.
+OFMR now persists its account state after fills and its latest market mark so
+the restarted worker restores cash, open quantity, realized/unrealized PnL,
+and active barriers. Missing recovery state alongside old portfolio/trade
+records causes a fail-closed startup. Pre-recovery sessions lack open-position
+details and cannot be safely migrated; do not reuse one if preserving its
+account is required. The live feed reseed path is separately covered by Rust
+tests. Run a real binary crash/reseed smoke only in `live-test` mode, never
+with real trading enabled.

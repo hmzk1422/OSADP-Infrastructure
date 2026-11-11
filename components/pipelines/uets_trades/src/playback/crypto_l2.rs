@@ -738,9 +738,11 @@ mod tests {
 
     #[test]
     fn sort_orders_by_timestamp_then_source_then_payload() {
-        let mut rows = [make_row(1000, EventType::Trade),
+        let mut rows = [
+            make_row(1000, EventType::Trade),
             make_row(1000, EventType::Lob),
-            make_row(999, EventType::Depth)];
+            make_row(999, EventType::Depth),
+        ];
         rows.sort_unstable_by(MergedRow::cmp_for_playback);
         assert_eq!(rows[0].timestamp_ms, 999);
         assert_eq!(rows[0].event_type, Some(EventType::Depth));

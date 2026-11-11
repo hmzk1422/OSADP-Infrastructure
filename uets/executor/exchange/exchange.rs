@@ -158,9 +158,10 @@ impl AccountSnapshot {
         const QUOTES: [&str; 5] = ["USDT", "BUSD", "USDC", "BTC", "ETH"];
         for quote in QUOTES {
             if let Some(base) = symbol.strip_suffix(quote)
-                && !base.is_empty() {
-                    return quote;
-                }
+                && !base.is_empty()
+            {
+                return quote;
+            }
         }
         ""
     }

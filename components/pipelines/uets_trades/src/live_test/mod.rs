@@ -181,7 +181,10 @@ mod tests {
 
     #[test]
     fn partial_fill_ratio_completes_on_next_update() {
-        let config = SimConfig { partial_fill_ratio: Some(0.5), ..Default::default() };
+        let config = SimConfig {
+            partial_fill_ratio: Some(0.5),
+            ..Default::default()
+        };
         let mut backend = LiveTestBackend::with_config(config);
         backend.on_market_update(&marks(100.0), Utc::now());
         let ctx = ActionContext::new("ofmr@btcusdt", "btcusdt", "BTCUSDT", 1.0);

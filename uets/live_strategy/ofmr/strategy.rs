@@ -9,8 +9,8 @@ use std::fs;
 
 use crate::core::feature::FeatureRow;
 use crate::core::strategy::{Decision, MarketState};
-use crate::live_strategy::ofmr::settings::Settings;
 use crate::live_strategy::StateBuilder;
+use crate::live_strategy::ofmr::settings::Settings;
 
 const N_FEATURES: usize = 15;
 const BARRIER_MULTIPLIER: f64 = 0.3;
@@ -97,9 +97,7 @@ impl LightGBMModel {
             }
         }
         if !sigmoid_scale.is_finite() || sigmoid_scale <= 0.0 {
-            return Err(format!(
-                "invalid LightGBM sigmoid scale: {sigmoid_scale}"
-            ));
+            return Err(format!("invalid LightGBM sigmoid scale: {sigmoid_scale}"));
         }
 
         if let Some(value) = header_value(&lines, "num_class=") {
@@ -243,8 +241,7 @@ impl LightGBMModel {
             *i += 1;
         }
 
-        let num_leaves = num_leaves
-            .ok_or_else(|| "tree is missing num_leaves".to_string())?;
+        let num_leaves = num_leaves.ok_or_else(|| "tree is missing num_leaves".to_string())?;
         if num_leaves == 0 {
             return Err("tree has zero leaves".to_string());
         }
@@ -277,7 +274,8 @@ impl LightGBMModel {
         if threshold.len() != n_internal {
             return Err(format!(
                 "tree threshold count {} != split count {}",
-                threshold.len(), n_internal
+                threshold.len(),
+                n_internal
             ));
         }
         if left_child.len() != n_internal || right_child.len() != n_internal {
@@ -290,7 +288,8 @@ impl LightGBMModel {
         if decision_type.len() != n_internal {
             return Err(format!(
                 "tree decision_type count {} != split count {}",
-                decision_type.len(), n_internal
+                decision_type.len(),
+                n_internal
             ));
         }
 
@@ -307,9 +306,7 @@ impl LightGBMModel {
                 ));
             }
             if !threshold_value.is_finite() {
-                return Err(format!(
-                    "tree node {index} has a non-finite threshold"
-                ));
+                return Err(format!("tree node {index} has a non-finite threshold"));
             }
             if !(0..=15).contains(&decision) {
                 return Err(format!(
@@ -355,9 +352,7 @@ impl LightGBMModel {
             } else {
                 let leaf_index = -(i64::from(*child)) - 1;
                 if leaf_index < 0 || leaf_index as usize >= num_leaves {
-                    return Err(format!(
-                        "tree contains invalid leaf child index {child}"
-                    ));
+                    return Err(format!("tree contains invalid leaf child index {child}"));
                 }
             }
         }
@@ -391,8 +386,8 @@ impl LightGBMModel {
                     // This strategy rejects non-finite model inputs before
                     // prediction. Still implement the zero-as-missing behavior
                     // used by LightGBM for splits trained with MissingType::Zero.
-                    let zero_is_missing = node.missing_type == 2
-                        && feature_value.abs() <= LIGHTGBM_ZERO_THRESHOLD;
+                    let zero_is_missing =
+                        node.missing_type == 2 && feature_value.abs() <= LIGHTGBM_ZERO_THRESHOLD;
 
                     let child = if zero_is_missing {
                         if node.default_left {

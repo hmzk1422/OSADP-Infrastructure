@@ -42,11 +42,11 @@ pub mod event_merger;
 pub mod matched;
 
 pub use event_merger::{
-    BookSnapshot, BookUpdate, CanonicalRow, CsvError, CsvRecorder, DiffFrame, FieldWriter, LobBook,
-    MarketEvent, Merger, Outcome, PriceTick, ReorderBuffer, Source, State, Trade, header_line,
-    price_to_tick, schema, tick_to_price,
+    header_line, price_to_tick, schema, tick_to_price, BookSnapshot, BookUpdate, CanonicalRow,
+    CsvError, CsvRecorder, DiffFrame, FieldWriter, LobBook, MarketEvent, Merger, Outcome,
+    PriceTick, ReorderBuffer, Source, State, Trade,
 };
-pub use matched::{Bar, Reconstructor, Sample, Timeframe, reconstruct};
+pub use matched::{reconstruct, Bar, Reconstructor, Sample, Timeframe};
 
 /// Default book depth emitted per side, matching the historical default.
 pub const DEFAULT_LEVELS: usize = 20;
@@ -54,7 +54,6 @@ pub const DEFAULT_LEVELS: usize = 20;
 /// Default reorder window in milliseconds. Bounds how far the two sockets may
 /// interleave before events are dropped rather than emitted mis-ordered.
 pub const DEFAULT_LATENESS_MS: i64 = 200;
-
 
 #[cfg(test)]
 mod tests {
@@ -145,7 +144,6 @@ mod tests {
         let (_, outcome2) = merger.merge_event(diff(3000, 206, 210, vec![]));
         assert!(!outcome2.applied);
     }
-
 
     #[test]
     fn reseed_restores_validity() {

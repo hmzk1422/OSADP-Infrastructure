@@ -12,9 +12,9 @@
 //! Flow per row: `compute_feature` first, `state_builder` second, back to
 //! `executor.rs`. Unknown name is a hard error, never a silent hold.
 
+pub mod example_strategy;
 pub mod live_db;
 pub mod ofmr;
-pub mod example_strategy;
 pub mod traits;
 
 pub mod runner;

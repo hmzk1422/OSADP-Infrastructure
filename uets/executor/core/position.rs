@@ -5,6 +5,7 @@
 //! entry, and the realized pnl that got it there. Keeping the two apart is what
 //! lets a decision stay a pure function while the money stays stateful.
 
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 use super::order::{Fill, Side};
@@ -17,7 +18,7 @@ const FLAT_EPS: f64 = 1e-12;
 /// Named `Holding` rather than `Position` on purpose: with
 /// `core::strategy::Position` in scope too, one word for two different things
 /// is how a sign error gets written.
-#[derive(Clone, Copy, Debug, PartialEq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Default, Deserialize, Serialize)]
 pub struct Holding {
     /// Signed size: positive long, negative short, zero flat.
     pub size: f64,
@@ -105,7 +106,7 @@ pub fn apply_fill(holding: &mut Holding, fill: &Fill) -> f64 {
 }
 
 /// Every symbol's holding, keyed by the venue's symbol spelling.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct PositionBook {
     holdings: BTreeMap<String, Holding>,
 }

@@ -351,7 +351,11 @@ impl Reconstructor {
             close_ms,
             empty,
             open: self.open,
-            high: if self.high.is_finite() { self.high } else { 0.0 },
+            high: if self.high.is_finite() {
+                self.high
+            } else {
+                0.0
+            },
             low: if self.low.is_finite() { self.low } else { 0.0 },
             close: self.close,
             volume: self.volume,
@@ -523,8 +527,3 @@ mod tests {
         assert_eq!(bars[0].volume, 3.0);
     }
 }
-
-
-
-
-

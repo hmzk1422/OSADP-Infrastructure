@@ -29,13 +29,12 @@ impl PerformanceStats {
     /// un-annualised figure, which is what a short intraday session wants.
     pub fn from_ledger(ledger: &PnlLedger, periods_per_year: f64) -> Self {
         let equity = ledger.equity_curve();
-        let returns = returns_from_equity(equity);
         let ending = equity
             .last()
             .copied()
             .unwrap_or_else(|| ledger.starting_equity());
         Self {
-            sortino: sortino(&returns, 0.0, periods_per_year),
+            sortino: ledger.sortino(periods_per_year),
             win_rate: win_rate(ledger.trades()),
             cumulative_return: cumulative_return(ledger.starting_equity(), ending),
             max_drawdown: ledger.max_drawdown(),

@@ -8,4 +8,4 @@
 
 pub mod reconstruct;
 
-pub use reconstruct::{Bar, Reconstructor, Sample, Timeframe, reconstruct};
+pub use reconstruct::{reconstruct, Bar, Reconstructor, Sample, Timeframe};

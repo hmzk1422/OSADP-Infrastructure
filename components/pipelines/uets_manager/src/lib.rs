@@ -491,9 +491,7 @@ mod tests {
     fn unknown_key_is_rejected() {
         let yaml = "mode: live_test\nbogus_key: 42";
         let err = ExecutionSettings::from_yaml_str(yaml).unwrap_err();
-        assert!(err
-            .to_string()
-            .contains("bogus_key") || err.to_string().contains("unknown field"));
+        assert!(err.to_string().contains("bogus_key") || err.to_string().contains("unknown field"));
     }
 
     #[test]

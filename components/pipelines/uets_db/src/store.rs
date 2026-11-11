@@ -245,6 +245,51 @@ impl UetsDb {
         Ok(())
     }
 
+    /// Persist opaque application recovery state in the database metadata tree.
+    pub fn write_runtime_state(&self, key: &str, value: &[u8]) -> Result<(), DbError> {
+        self.ensure_writable()?;
+        if key.is_empty() || key.contains(['\n', '\r']) {
+            return Err(DbError::Corrupt {
+                key: "runtime state key must be non-empty and single-line".into(),
+            });
+        }
+        self.metadata
+            .insert(format!("runtime_state|{key}"), value)?;
+        Ok(())
+    }
+
+    /// Load opaque application recovery state from the database metadata tree.
+    pub fn read_runtime_state(&self, key: &str) -> Result<Option<Vec<u8>>, DbError> {
+        if key.is_empty() || key.contains(['\n', '\r']) {
+            return Err(DbError::Corrupt {
+                key: "runtime state key must be non-empty and single-line".into(),
+            });
+        }
+        Ok(self.metadata.get(format!("runtime_state|{key}"))?)
+    }
+
+    /// Return whether indexed trade or portfolio records exist for a filter.
+    /// This avoids loading an entire session just to detect legacy state.
+    pub fn has_session_records(&self, filter: &QueryFilter) -> Result<bool, DbError> {
+        Ok(
+            self.has_indexed_record(&self.trades, Self::trade_index_prefix(filter))?
+                || self
+                    .has_indexed_record(&self.portfolio, Self::portfolio_index_prefix(filter))?,
+        )
+    }
+
+    fn has_indexed_record(&self, tree: &DbTree, prefix: Option<String>) -> Result<bool, DbError> {
+        let Some(prefix) = prefix else {
+            return Ok(tree.iter().next().transpose()?.is_some());
+        };
+        let prefix = prefix.into_bytes();
+        match tree.range(prefix.clone()..).next() {
+            Some(Ok((key, _))) => Ok(key.starts_with(&prefix)),
+            Some(Err(error)) => Err(error.into()),
+            None => Ok(false),
+        }
+    }
+
     /// Shut down the database cleanly.
     pub fn shutdown(self) -> Result<(), DbError> {
         // Flush before dropping the database handle.
