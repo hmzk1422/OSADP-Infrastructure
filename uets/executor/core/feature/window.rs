@@ -214,4 +214,3 @@ mod tests {
         assert!(RollingWindow::new(0, Aggregation::Mean).is_err());
     }
 }
-

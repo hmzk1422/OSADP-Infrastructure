@@ -5,10 +5,11 @@
 //! belongs in `connectors/<venue>`; everything above it speaks the types below,
 //! so the executor never matches on a venue string.
 
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// Which side of the book an order takes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Deserialize, Serialize)]
 pub enum Side {
     Buy,
     Sell,
@@ -244,12 +245,16 @@ impl OrderRequest {
         self.validate()?;
         if self.order_type == OrderType::Limit
             && let (Some(tick), Some(price)) = (price_tick, self.limit_price)
-                && tick.is_finite() && tick > 0.0 && price.is_finite() && price > 0.0 {
-                    let snapped = (price / tick).round() * tick;
-                    if (price - snapped).abs() > 1e-9 {
-                        return Err(OrderError::OffTickPrice { price, tick });
-                    }
-                }
+            && tick.is_finite()
+            && tick > 0.0
+            && price.is_finite()
+            && price > 0.0
+        {
+            let snapped = (price / tick).round() * tick;
+            if (price - snapped).abs() > 1e-9 {
+                return Err(OrderError::OffTickPrice { price, tick });
+            }
+        }
         Ok(())
     }
 }

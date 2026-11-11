@@ -71,9 +71,9 @@ impl<C: ExecutionConnector + Send + Sync> VenueConnector for UetsExecutionConnec
                 request.qty,
             ),
             OrderType::Limit => {
-                let price = request.price.ok_or_else(|| {
-                    VenueError::Rejected("limit order requires a price".into())
-                })?;
+                let price = request
+                    .price
+                    .ok_or_else(|| VenueError::Rejected("limit order requires a price".into()))?;
                 ConnectorOrderRequest::limit(
                     request.symbol.clone(),
                     match request.side {
@@ -114,7 +114,8 @@ impl<C: ExecutionConnector + Send + Sync> VenueConnector for UetsExecutionConnec
         // Market orders must fill immediately; limit orders may rest on the book (zero fills).
         if fills.is_empty() && request.order_type == OrderType::Market {
             return Err(VenueError::Transport(
-                "venue returned no fill for market order; reconcile order state before retry".into(),
+                "venue returned no fill for market order; reconcile order state before retry"
+                    .into(),
             ));
         }
 

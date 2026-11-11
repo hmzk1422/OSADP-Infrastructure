@@ -230,8 +230,8 @@ pub fn header_line() -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::event::{BookSnapshot, BookUpdate, DiffFrame, MarketEvent, Trade};
+    use super::*;
     use crate::DEFAULT_LEVELS;
 
     fn temp_path(name: &str) -> PathBuf {

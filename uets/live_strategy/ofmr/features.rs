@@ -202,10 +202,8 @@ impl ResearchFeatureState {
             self.raw_bars.clear();
             self.computed_bars.clear();
             self.first_bar_index = Some(first_retained);
-            self.raw_bars.push(RawBar::empty(
-                self.timeframe_secs,
-                previous_close,
-            ));
+            self.raw_bars
+                .push(RawBar::empty(self.timeframe_secs, previous_close));
             self.computed_bars =
                 calculate_research_features(&self.raw_bars, &self.feature_settings);
             return;
@@ -692,10 +690,9 @@ mod tests {
             close: Some(100.0),
             ..RawBar::new(state.timeframe_secs)
         });
-        state.raw_bars.extend(
-            (1..=MAX_FEATURE_HISTORY_BARS)
-                .map(|_| RawBar::new(state.timeframe_secs)),
-        );
+        state
+            .raw_bars
+            .extend((1..=MAX_FEATURE_HISTORY_BARS).map(|_| RawBar::new(state.timeframe_secs)));
         state
             .computed_bars
             .resize(state.raw_bars.len(), BarFeatures::default());
@@ -705,7 +702,10 @@ mod tests {
         assert_eq!(state.raw_bars.len(), MAX_FEATURE_HISTORY_BARS);
         assert_eq!(state.computed_bars.len(), MAX_FEATURE_HISTORY_BARS);
         assert_eq!(state.first_bar_index, Some(1));
-        assert_eq!(state.raw_bars.first().and_then(|bar| bar.close), Some(100.0));
+        assert_eq!(
+            state.raw_bars.first().and_then(|bar| bar.close),
+            Some(100.0)
+        );
     }
 
     #[test]

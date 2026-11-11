@@ -7,8 +7,8 @@
 //! Fail-open.
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -110,7 +110,9 @@ impl LiveDb {
         let portfolio_db = match uets_db::UetsDb::open(&portfolio_path) {
             Ok(db) => Some(Arc::new(db)),
             Err(error) => {
-                eprintln!("[live_db] portfolio open failed: {error}; portfolio persistence disabled");
+                eprintln!(
+                    "[live_db] portfolio open failed: {error}; portfolio persistence disabled"
+                );
                 errors.fetch_add(1, Ordering::Relaxed);
                 None
             }
@@ -161,15 +163,17 @@ impl LiveDb {
 
     pub fn flush(&self) {
         if let Some(db) = self.trades_db.as_ref()
-            && let Err(error) = db.flush() {
-                self.errors.fetch_add(1, Ordering::Relaxed);
-                eprintln!("[live_db] trades flush failed (counted): {error}");
-            }
+            && let Err(error) = db.flush()
+        {
+            self.errors.fetch_add(1, Ordering::Relaxed);
+            eprintln!("[live_db] trades flush failed (counted): {error}");
+        }
         if let Some(db) = self.portfolio_db.as_ref()
-            && let Err(error) = db.flush() {
-                self.errors.fetch_add(1, Ordering::Relaxed);
-                eprintln!("[live_db] portfolio flush failed (counted): {error}");
-            }
+            && let Err(error) = db.flush()
+        {
+            self.errors.fetch_add(1, Ordering::Relaxed);
+            eprintln!("[live_db] portfolio flush failed (counted): {error}");
+        }
     }
 
     pub fn read_all(&self) -> Result<(Vec<LiveTradeTick>, Vec<LivePortfolioSnapshot>), String> {
@@ -197,6 +201,58 @@ impl LiveDb {
         Ok((trades, portfolios))
     }
 
+    pub fn read_recovery_state(&self) -> Result<Option<Vec<u8>>, String> {
+        self.portfolio_db
+            .as_ref()
+            .ok_or_else(|| "portfolio database is unavailable for crash recovery".to_string())?
+            .read_runtime_state("ofmr_account_v1")
+            .map_err(|error| format!("read persisted OFMR account state: {error}"))
+    }
+
+    pub fn write_recovery_state(&self, state: &[u8]) -> Result<(), String> {
+        self.portfolio_db
+            .as_ref()
+            .ok_or_else(|| "portfolio database is unavailable for crash recovery".to_string())?
+            .write_runtime_state("ofmr_account_v1", state)
+            .map_err(|error| format!("persist OFMR account state: {error}"))
+    }
+
+    pub fn read_market_state(&self) -> Result<Option<Vec<u8>>, String> {
+        self.portfolio_db
+            .as_ref()
+            .ok_or_else(|| "portfolio database is unavailable for crash recovery".to_string())?
+            .read_runtime_state("ofmr_market_state_v1")
+            .map_err(|error| format!("read persisted OFMR market state: {error}"))
+    }
+
+    pub fn write_market_state(&self, state: &[u8]) -> Result<(), String> {
+        self.portfolio_db
+            .as_ref()
+            .ok_or_else(|| "portfolio database is unavailable for crash recovery".to_string())?
+            .write_runtime_state("ofmr_market_state_v1", state)
+            .map_err(|error| format!("persist OFMR market state: {error}"))
+    }
+
+    pub fn has_persisted_history(&self) -> Result<bool, String> {
+        let filter = QueryFilter::new()
+            .session(&self.session_id)
+            .strategy(&self.strategy_id)
+            .asset(&self.asset_id);
+        let trades_exist = self
+            .trades_db
+            .as_ref()
+            .ok_or_else(|| "trades database is unavailable for crash recovery".to_string())?
+            .has_session_records(&filter)
+            .map_err(|error| format!("inspect persisted OFMR trades: {error}"))?;
+        let portfolio_exists = self
+            .portfolio_db
+            .as_ref()
+            .ok_or_else(|| "portfolio database is unavailable for crash recovery".to_string())?
+            .has_session_records(&filter)
+            .map_err(|error| format!("inspect persisted OFMR portfolio: {error}"))?;
+        Ok(trades_exist || portfolio_exists)
+    }
+
     pub fn record_tick(
         &self,
         raw: &crate::core::feature::FeatureRow,
@@ -209,7 +265,9 @@ impl LiveDb {
         _equity: f64,
         _cash: f64,
     ) {
-        let Some(db) = self.trades_db.as_ref() else { return };
+        let Some(db) = self.trades_db.as_ref() else {
+            return;
+        };
         let _seq = self.seq.fetch_add(1, Ordering::Relaxed);
         let started = std::time::Instant::now();
         let out = {
@@ -228,7 +286,8 @@ impl LiveDb {
                 event_time,
                 feature_inputs: raw_inputs_json(raw),
                 decision: intent.clone(),
-                decision_metadata: serde_json::json!({"decision": decision, "position": position}).to_string(),
+                decision_metadata: serde_json::json!({"decision": decision, "position": position})
+                    .to_string(),
                 intent,
                 order_events: Vec::new(),
                 entry_price: None,
@@ -253,7 +312,9 @@ impl LiveDb {
     }
 
     pub fn record_portfolio(&self, snapshot: LivePortfolioSnapshot) {
-        let Some(db) = self.portfolio_db.as_ref() else { return };
+        let Some(db) = self.portfolio_db.as_ref() else {
+            return;
+        };
         let started = std::time::Instant::now();
         let out = {
             let event_time = snapshot
@@ -333,7 +394,11 @@ fn portfolio_record_to_snapshot(record: &uets_db::PortfolioRecord) -> LivePortfo
         strategy_id: record.instance.strategy_id.clone(),
         asset_id: record.instance.asset_id.clone(),
         symbol: record.instance.strategy_id.clone(),
-        seq: record.timestamp.timestamp_nanos_opt().map(|n| (n / 1_000_000) as u64).unwrap_or(0),
+        seq: record
+            .timestamp
+            .timestamp_nanos_opt()
+            .map(|n| (n / 1_000_000) as u64)
+            .unwrap_or(0),
         event_time_ms: Some(record.timestamp.timestamp_millis() as u64),
         cash: record.cash,
         equity: record.equity,

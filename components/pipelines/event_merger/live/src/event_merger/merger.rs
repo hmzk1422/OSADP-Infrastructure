@@ -4,7 +4,7 @@
 //! Binance's wire format, and of Arrow/Parquet, so the same code path serves a
 //! live capture today and a recorded-feed backtest later.
 
-use super::book::{PriceTick, price_to_tick, tick_to_price};
+use super::book::{price_to_tick, tick_to_price, PriceTick};
 use super::event::{BookSnapshot, MarketEvent, Source, Trade};
 use super::row::FieldWriter;
 use super::state::{BookHealth, Counters, State};

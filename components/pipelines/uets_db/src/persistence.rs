@@ -47,10 +47,7 @@ pub enum PersistItem {
 
 impl PersistItem {
     pub fn is_critical(&self) -> bool {
-        matches!(
-            self,
-            PersistItem::Trade(_) | PersistItem::SessionSummary(_)
-        )
+        matches!(self, PersistItem::Trade(_) | PersistItem::SessionSummary(_))
     }
 
     fn describe(&self) -> String {
@@ -128,7 +125,6 @@ impl Default for PersistenceConfig {
     }
 }
 
-
 #[derive(Default)]
 struct StatsAtomics {
     enqueued: AtomicU64,
@@ -163,12 +159,18 @@ impl Shared {
 
     fn record_write(&self, items: usize, elapsed: Duration) {
         let micros = elapsed.as_micros() as u64;
-        self.stats.written.fetch_add(items as u64, Ordering::Relaxed);
-        self.stats.last_write_micros.store(micros, Ordering::Relaxed);
+        self.stats
+            .written
+            .fetch_add(items as u64, Ordering::Relaxed);
+        self.stats
+            .last_write_micros
+            .store(micros, Ordering::Relaxed);
         self.stats
             .total_write_micros
             .fetch_add(micros, Ordering::Relaxed);
-        self.stats.max_write_micros.fetch_max(micros, Ordering::Relaxed);
+        self.stats
+            .max_write_micros
+            .fetch_max(micros, Ordering::Relaxed);
     }
 }
 
@@ -500,12 +502,12 @@ fn writer_loop(db: Arc<UetsDb>, shared: Arc<Shared>, batch_max: usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::schema::TradeIntent;
     use crate::schema::{
         PortfolioRecord, QueryFilter, SchemaVersion, StrategyInstance, TradeRecord,
     };
     use chrono::{TimeZone, Utc};
     use std::sync::atomic::AtomicBool;
-    use crate::schema::TradeIntent;
 
     fn sample_trade(n: i64) -> TradeRecord {
         TradeRecord {
@@ -579,9 +581,7 @@ mod tests {
         );
 
         for i in 0..100i64 {
-            let outcome = handle
-                .submit(PersistItem::Trade(sample_trade(i)))
-                .unwrap();
+            let outcome = handle.submit(PersistItem::Trade(sample_trade(i))).unwrap();
             assert!(
                 matches!(
                     outcome,
@@ -784,11 +784,3 @@ mod tests {
         let _ = std::fs::remove_dir_all(&path);
     }
 }
-
-
-
-
-
-
-
-

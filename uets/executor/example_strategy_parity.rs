@@ -36,7 +36,10 @@ fn run() -> Result<(), String> {
         ));
     }
 
-    if let Some(parent) = output_path.parent().filter(|path| !path.as_os_str().is_empty()) {
+    if let Some(parent) = output_path
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+    {
         std::fs::create_dir_all(parent)
             .map_err(|error| format!("create output directory {}: {error}", parent.display()))?;
     }

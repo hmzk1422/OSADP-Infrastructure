@@ -7,11 +7,12 @@
 //! position sequence.
 
 use crate::core::feature::FeatureRow;
+use serde::{Deserialize, Serialize};
 
 use super::decision::Decision;
 
 /// Which way the strategy is currently exposed.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub enum Position {
     Flat,
     Long,

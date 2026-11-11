@@ -95,12 +95,13 @@ impl Reconstructor {
     /// rather than silently producing misaligned bars.
     pub fn push(&mut self, timestamp_ms: i64, value: f64) -> Result<Option<Bar>, ReconstructError> {
         if let Some(previous) = self.last_timestamp
-            && timestamp_ms < previous {
-                return Err(ReconstructError::NonMonotonicTimestamp {
-                    previous,
-                    current: timestamp_ms,
-                });
-            }
+            && timestamp_ms < previous
+        {
+            return Err(ReconstructError::NonMonotonicTimestamp {
+                previous,
+                current: timestamp_ms,
+            });
+        }
         self.last_timestamp = Some(timestamp_ms);
 
         self.buffer.push(value);

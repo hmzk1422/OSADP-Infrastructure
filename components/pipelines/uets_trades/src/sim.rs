@@ -495,9 +495,10 @@ impl SimEngine {
             OrderType::Market => {
                 let mut q = remaining;
                 if filled_so_far == 0.0
-                    && let Some(ratio) = self.config.partial_fill_ratio {
-                        q = (remaining * ratio).clamp(EPS, remaining);
-                    }
+                    && let Some(ratio) = self.config.partial_fill_ratio
+                {
+                    q = (remaining * ratio).clamp(EPS, remaining);
+                }
                 let edge = (self.config.spread_bps / 2.0 + self.config.slippage_bps) / 10_000.0;
                 let px = match request.side {
                     OrderSide::Buy => mark * (1.0 + edge),

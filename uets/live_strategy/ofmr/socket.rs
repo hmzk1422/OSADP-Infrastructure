@@ -36,7 +36,9 @@ use crate::core::portfolio::Portfolio;
 #[cfg(any(unix, test))]
 use crate::core::stats::PerformanceStats;
 #[cfg(unix)]
-use crate::core::strategy::{Decision, Position};
+use crate::core::strategy::Decision;
+#[cfg(any(unix, test))]
+use crate::core::strategy::Position;
 #[cfg(unix)]
 use crate::exchange::ExecutionConnector;
 #[cfg(unix)]
@@ -47,6 +49,8 @@ use crate::live_strategy::ofmr::settings::Settings;
 use crate::live_strategy::ofmr::strategy::OfmrStrategy;
 #[cfg(unix)]
 use crate::live_strategy::ofmr::{ComputeFeatures, StateBuilder};
+#[cfg(any(unix, test))]
+use serde::{Deserialize, Serialize};
 #[cfg(unix)]
 use std::path::Path;
 #[cfg(unix)]
@@ -92,6 +96,33 @@ struct OrderExecutor {
     last_decision_to_order_ms: Option<f64>,
     last_order_to_fill_ms: Option<f64>,
     last_order_ack_rtt_ms: Option<f64>,
+}
+
+#[cfg(any(unix, test))]
+#[derive(Deserialize, Serialize)]
+struct PersistedAccountState {
+    version: u32,
+    portfolio: Portfolio,
+    entry_fees: f64,
+    account_sequence: u64,
+    entry_risk_per_unit: Option<f64>,
+    stop_price: Option<f64>,
+    target_price: Option<f64>,
+    r_multiple_sum: f64,
+    r_trades: usize,
+    position: Position,
+    active_barriers: Option<ActiveBarriers>,
+    order_quantity: f64,
+    order_sequence: u64,
+}
+
+#[cfg(any(unix, test))]
+#[derive(Deserialize, Serialize)]
+struct PersistedMarketState {
+    version: u32,
+    account_sequence: u64,
+    last_mark: f64,
+    ledger: crate::core::pnl::PnlLedgerRecovery,
 }
 
 #[cfg(any(unix, test))]
@@ -309,6 +340,11 @@ impl OrderExecutor {
                 } else {
                     OrderRequest::market(symbol, side, qty).with_client_order_id(client_id)
                 }
+
+                fn restore_position(&mut self, quantity: f64, sequence: u64) {
+                    self.quantity = quantity;
+                    self.sequence = sequence;
+                }
             }
             Decision::Exit => {
                 if *position == Position::Flat || self.quantity <= 0.0 {
@@ -510,10 +546,123 @@ impl StrategyAccount {
     fn equity_history(&self) -> &[f64] {
         self.portfolio.ledger().equity_curve()
     }
+
+    #[cfg(unix)]
+    fn persist_state(
+        &self,
+        position: Position,
+        active_barriers: Option<ActiveBarriers>,
+        executor: &OrderExecutor,
+    ) -> Result<Vec<u8>, String> {
+        bincode::serialize(&PersistedAccountState {
+            version: 1,
+            portfolio: self.portfolio.clone(),
+            entry_fees: self.entry_fees,
+            account_sequence: self.sequence,
+            entry_risk_per_unit: self.entry_risk_per_unit,
+            stop_price: self.stop_price,
+            target_price: self.target_price,
+            r_multiple_sum: self.r_multiple_sum,
+            r_trades: self.r_trades,
+            position,
+            active_barriers,
+            order_quantity: executor.quantity,
+            order_sequence: executor.sequence,
+        })
+        .map_err(|error| format!("serialize OFMR recovery state: {error}"))
+    }
+
+    #[cfg(unix)]
+    fn restore_state(
+        bytes: &[u8],
+        symbol: &str,
+        executor: &mut OrderExecutor,
+    ) -> Result<(Self, Position, Option<ActiveBarriers>), String> {
+        let (account, position, barriers, quantity, sequence) =
+            Self::decode_persisted_state(bytes, symbol)?;
+        executor.restore_position(quantity, sequence);
+        Ok((account, position, barriers))
+    }
+
+    #[cfg(any(unix, test))]
+    fn decode_persisted_state(
+        bytes: &[u8],
+        symbol: &str,
+    ) -> Result<(Self, Position, Option<ActiveBarriers>, f64, u64), String> {
+        let state: PersistedAccountState = bincode::deserialize(bytes)
+            .map_err(|error| format!("decode OFMR recovery state: {error}"))?;
+        if state.version != 1 {
+            return Err(format!(
+                "unsupported OFMR recovery state version {}",
+                state.version
+            ));
+        }
+        let holding = state.portfolio.holdings().holding(symbol);
+        let holding_position = match holding.side() {
+            None => Position::Flat,
+            Some(Side::Buy) => Position::Long,
+            Some(Side::Sell) => Position::Short,
+        };
+        if state.position != holding_position {
+            return Err(format!(
+                "persisted OFMR strategy position {:?} disagrees with portfolio holding {:?}",
+                state.position, holding
+            ));
+        }
+        if !state.order_quantity.is_finite()
+            || state.order_quantity < 0.0
+            || (state.order_quantity - holding.size.abs()).abs() > 1e-9
+        {
+            return Err(format!(
+                "persisted OFMR order quantity {} disagrees with holding size {}",
+                state.order_quantity,
+                holding.size.abs()
+            ));
+        }
+        let account = Self {
+            portfolio: state.portfolio,
+            entry_fees: state.entry_fees,
+            sequence: state.account_sequence,
+            entry_risk_per_unit: state.entry_risk_per_unit,
+            stop_price: state.stop_price,
+            target_price: state.target_price,
+            r_multiple_sum: state.r_multiple_sum,
+            r_trades: state.r_trades,
+            last_mark: holding.avg_entry,
+            last_mark_at: None,
+        };
+        Ok((
+            account,
+            state.position,
+            state.active_barriers,
+            state.order_quantity,
+            state.order_sequence,
+        ))
+    }
+
+    #[cfg(any(unix, test))]
+    fn restore_market_state(&mut self, bytes: &[u8], symbol: &str) -> Result<bool, String> {
+        let state: PersistedMarketState = bincode::deserialize(bytes)
+            .map_err(|error| format!("decode OFMR market recovery state: {error}"))?;
+        if state.version != 1 || !state.last_mark.is_finite() || state.last_mark <= 0.0 {
+            return Err("invalid persisted OFMR market recovery state".into());
+        }
+        if state.account_sequence != self.sequence {
+            return Ok(false);
+        }
+        let marks = std::collections::BTreeMap::from([(symbol.to_string(), state.last_mark)]);
+        let current_equity = self.portfolio.equity(&marks);
+        self.portfolio.restore_ledger_state(state.ledger)?;
+        self.last_mark = state.last_mark;
+        if current_equity != state.ledger.latest_equity {
+            self.portfolio.mark(&marks);
+        }
+        Ok(true)
+    }
 }
 
-#[cfg(unix)]
-#[derive(Clone, Copy, Debug)]
+#[cfg(any(unix, test))]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 struct ActiveBarriers {
     stop_price: f64,
     target_price: f64,
@@ -599,13 +748,11 @@ pub fn run(socket_path: &str, symbol: &str) -> Result<(), String> {
         .transpose()
         .map_err(|error| format!("UETS_STARTING_EQUITY must be a positive number: {error}"))?
         .unwrap_or(10_000.0);
-    let mut account = StrategyAccount::new(starting_equity)?;
     let ping_url = if executor.mode == "testnet" {
         "https://testnet.binancefuture.com/fapi/v1/ping"
     } else {
         "https://fapi.binance.com/fapi/v1/ping"
     };
-    let mut telemetry = StrategyTelemetry::new(symbol, &account, ping_url)?;
     // Live RocksDB link: live_db/<session>/ofmr@<asset>/ with trades/ +
     // portfolio/ keys. Session comes from the monitor env so every worker
     // of one `run` shares it; standalone workers mint their own.
@@ -627,8 +774,37 @@ pub fn run(socket_path: &str, symbol: &str) -> Result<(), String> {
         }
     );
 
-    let mut position = Position::Flat;
-    let mut active_barriers: Option<ActiveBarriers> = None;
+    let (mut account, mut position, mut active_barriers) = match live_db.read_recovery_state()? {
+        Some(bytes) => {
+            let mut restored = StrategyAccount::restore_state(&bytes, symbol, &mut executor)?;
+            if let Some(market_state) = live_db.read_market_state()? {
+                if !restored.0.restore_market_state(&market_state, symbol)? {
+                    eprintln!(
+                        "[strategy] ignoring stale market recovery snapshot for session={session_id}; account sequence changed"
+                    );
+                }
+            }
+            eprintln!(
+                "[strategy] restored portfolio session={session_id} cash={:.8} position={:?} mark={:.8}",
+                restored.0.portfolio.cash(),
+                restored.1,
+                restored.0.last_mark
+            );
+            restored
+        }
+        None => {
+            if live_db.has_persisted_history()? {
+                return Err(format!(
+                    "session {session_id} has prior portfolio/trade records but no crash-recovery state; refusing to reset account. Start a new session only if you intend to reset it."
+                ));
+            }
+            let account = StrategyAccount::new(starting_equity)?;
+            let initial_state = account.persist_state(Position::Flat, None, &executor)?;
+            live_db.write_recovery_state(&initial_state)?;
+            (account, Position::Flat, None)
+        }
+    };
+    let mut telemetry = StrategyTelemetry::new(symbol, &account, ping_url)?;
 
     for stream in listener.incoming() {
         let mut stream = stream.map_err(|e| format!("accept: {e}"))?;
@@ -746,6 +922,42 @@ pub fn run(socket_path: &str, symbol: &str) -> Result<(), String> {
                 }
             };
             account.apply_fills_and_mark(&fills, symbol, price);
+            if previous_position == Position::Flat && position != Position::Flat {
+                let filled_qty = fills.iter().map(|fill| fill.qty).sum::<f64>();
+                let entry_price = if filled_qty > 0.0 {
+                    fills.iter().map(|fill| fill.price * fill.qty).sum::<f64>() / filled_qty
+                } else {
+                    price
+                };
+                active_barriers = Some(ActiveBarriers::new(
+                    entry_price,
+                    position,
+                    stop_fraction,
+                    target_fraction,
+                ));
+                account.entry_risk_per_unit = Some(entry_price * stop_fraction);
+                let barriers = active_barriers.as_ref().unwrap();
+                account.stop_price = Some(barriers.stop_price);
+                account.target_price = Some(barriers.target_price);
+            } else if position == Position::Flat {
+                active_barriers = None;
+                account.stop_price = None;
+                account.target_price = None;
+            }
+            if !fills.is_empty() {
+                let recovery_state = account.persist_state(position, active_barriers, &executor)?;
+                live_db.write_recovery_state(&recovery_state)?;
+            }
+            if account.last_mark.is_finite() && account.last_mark > 0.0 {
+                let market_state = bincode::serialize(&PersistedMarketState {
+                    version: 1,
+                    account_sequence: account.sequence,
+                    last_mark: account.last_mark,
+                    ledger: account.portfolio.ledger().recovery_state(),
+                })
+                .map_err(|error| format!("serialize OFMR market recovery state: {error}"))?;
+                live_db.write_market_state(&market_state)?;
+            }
             // live_db/trades: what the strategy saw (tick + features +
             // decision + fills), keyed by ticker/strategy/session. Fail-open.
             let event_ms = row.get("event_time_ms").map(|v| v as u64);
@@ -774,28 +986,6 @@ pub fn run(socket_path: &str, symbol: &str) -> Result<(), String> {
             ));
             telemetry.persistence_write_ms = Some(live_db.last_write_ms());
             telemetry.persistence_errors = Some(live_db.error_count());
-            if previous_position == Position::Flat && position != Position::Flat {
-                let filled_qty = fills.iter().map(|fill| fill.qty).sum::<f64>();
-                let entry_price = if filled_qty > 0.0 {
-                    fills.iter().map(|fill| fill.price * fill.qty).sum::<f64>() / filled_qty
-                } else {
-                    price
-                };
-                active_barriers = Some(ActiveBarriers::new(
-                    entry_price,
-                    position,
-                    stop_fraction,
-                    target_fraction,
-                ));
-                account.entry_risk_per_unit = Some(entry_price * stop_fraction);
-                let barriers = active_barriers.as_ref().unwrap();
-                account.stop_price = Some(barriers.stop_price);
-                account.target_price = Some(barriers.target_price);
-            } else if position == Position::Flat {
-                active_barriers = None;
-                account.stop_price = None;
-                account.target_price = None;
-            }
             let processing_ns = started.elapsed().as_nanos().min(u64::MAX as u128) as u64;
             telemetry.publish(
                 Some(format!("{decision:?}")),
@@ -1273,9 +1463,10 @@ impl StrategyTelemetry {
             ),
             (
                 "exchange_latency_ms".into(),
-                serde_json::json!(self.exchange_latency_ms.or_else(|| self
-                    .last_event_time_ms
-                    .map(|event_time| (now_ms as i64 - event_time as i64) as f64))),
+                serde_json::json!(self.exchange_latency_ms.or_else(|| {
+                    self.last_event_time_ms
+                        .map(|event_time| (now_ms as i64 - event_time as i64) as f64)
+                })),
             ),
             (
                 "public_ping_rtt_ms".into(),
@@ -1311,24 +1502,27 @@ impl StrategyTelemetry {
             ),
             (
                 "latency_p05_ms".into(),
-                serde_json::json!(self
-                    .latency
-                    .percentile(0.05)
-                    .map(|value| value as f64 / 1_000_000.0)),
+                serde_json::json!(
+                    self.latency
+                        .percentile(0.05)
+                        .map(|value| value as f64 / 1_000_000.0)
+                ),
             ),
             (
                 "latency_p95_ms".into(),
-                serde_json::json!(self
-                    .latency
-                    .percentile(0.95)
-                    .map(|value| value as f64 / 1_000_000.0)),
+                serde_json::json!(
+                    self.latency
+                        .percentile(0.95)
+                        .map(|value| value as f64 / 1_000_000.0)
+                ),
             ),
             (
                 "latency_p99_ms".into(),
-                serde_json::json!(self
-                    .latency
-                    .percentile(0.99)
-                    .map(|value| value as f64 / 1_000_000.0)),
+                serde_json::json!(
+                    self.latency
+                        .percentile(0.99)
+                        .map(|value| value as f64 / 1_000_000.0)
+                ),
             ),
             (
                 "clock_skew_mean_ms".into(),
@@ -1422,11 +1616,7 @@ fn process_cpu_ticks() -> Option<u64> {
 #[cfg(all(unix, target_os = "linux"))]
 fn process_clock_ticks() -> f64 {
     let ticks = unsafe { libc::sysconf(libc::_SC_CLK_TCK) };
-    if ticks > 0 {
-        ticks as f64
-    } else {
-        100.0
-    }
+    if ticks > 0 { ticks as f64 } else { 100.0 }
 }
 
 /// No procfs on this Unix flavor: CPU% stays n/a.
@@ -1465,6 +1655,102 @@ pub fn run(_socket_path: &str, _symbol: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn account_state_and_mark_survive_a_database_reopen() {
+        let directory = tempfile::tempdir().unwrap();
+        let live_db = crate::live_strategy::live_db::LiveDb::open(
+            directory.path(),
+            "recovery_session_ofmr_btcusdt",
+            "ofmr",
+            "btcusdt",
+        );
+        let mut account = StrategyAccount::new(1_000.0).unwrap();
+        account.apply_fills_and_mark(
+            &[Fill::new("entry", "BTCUSDT", Side::Buy, 0.5, 100.0, 0.25)],
+            "BTCUSDT",
+            100.0,
+        );
+        account.last_mark = 102.0;
+        account.portfolio.mark(&std::collections::BTreeMap::from([(
+            "BTCUSDT".to_string(),
+            102.0,
+        )]));
+        let ledger_state = account.portfolio.ledger().recovery_state();
+        account.entry_fees = 0.25;
+        account.entry_risk_per_unit = Some(1.0);
+        account.stop_price = Some(98.0);
+        account.target_price = Some(104.0);
+        let barriers = Some(ActiveBarriers {
+            stop_price: 98.0,
+            target_price: 104.0,
+            is_long: true,
+        });
+        let state = bincode::serialize(&PersistedAccountState {
+            version: 1,
+            portfolio: account.portfolio.clone(),
+            entry_fees: account.entry_fees,
+            account_sequence: account.sequence,
+            entry_risk_per_unit: account.entry_risk_per_unit,
+            stop_price: account.stop_price,
+            target_price: account.target_price,
+            r_multiple_sum: account.r_multiple_sum,
+            r_trades: account.r_trades,
+            position: Position::Long,
+            active_barriers: barriers,
+            order_quantity: 0.5,
+            order_sequence: 7,
+        })
+        .unwrap();
+        live_db.write_recovery_state(&state).unwrap();
+        let market_state = bincode::serialize(&PersistedMarketState {
+            version: 1,
+            account_sequence: account.sequence,
+            last_mark: account.last_mark,
+            ledger: ledger_state,
+        })
+        .unwrap();
+        live_db.write_market_state(&market_state).unwrap();
+        drop(live_db);
+
+        let reopened = crate::live_strategy::live_db::LiveDb::open(
+            directory.path(),
+            "recovery_session_ofmr_btcusdt",
+            "ofmr",
+            "btcusdt",
+        );
+        let bytes = reopened.read_recovery_state().unwrap().unwrap();
+        let market_state = reopened.read_market_state().unwrap().unwrap();
+        let (restored, position, restored_barriers, quantity, order_sequence) =
+            StrategyAccount::decode_persisted_state(&bytes, "BTCUSDT").unwrap();
+        let mut restored = restored;
+        assert!(
+            restored
+                .restore_market_state(&market_state, "BTCUSDT")
+                .unwrap()
+        );
+        let holding = restored.portfolio.holdings().holding("BTCUSDT");
+        let marks = std::collections::BTreeMap::from([("BTCUSDT".to_string(), 102.0)]);
+
+        assert_eq!(restored.portfolio.starting_cash(), 1_000.0);
+        assert_eq!(restored.portfolio.cash(), 999.75);
+        assert_eq!(restored.portfolio.unrealized_pnl(&marks), 1.0);
+        assert_eq!(holding.size, 0.5);
+        assert_eq!(position, Position::Long);
+        assert_eq!(restored.last_mark, 102.0);
+        assert_eq!(restored.portfolio.ledger().recovery_state(), ledger_state);
+        assert_eq!(
+            restored.portfolio.ledger().sortino(252.0),
+            account.portfolio.ledger().sortino(252.0)
+        );
+        assert_eq!(
+            restored.portfolio.ledger().max_drawdown(),
+            account.portfolio.ledger().max_drawdown()
+        );
+        assert_eq!(quantity, 0.5);
+        assert_eq!(order_sequence, 7);
+        assert_eq!(restored_barriers, barriers);
+    }
 
     #[test]
     fn rtt_window_reports_latest_mean_and_p95() {

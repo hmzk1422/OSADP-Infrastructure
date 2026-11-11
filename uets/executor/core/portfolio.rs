@@ -14,13 +14,14 @@
 //! — which needs no cross/isolated distinction and therefore behaves the same
 //! on every venue.
 
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 use super::order::Fill;
-use super::pnl::{PnlLedger, Trade};
+use super::pnl::{PnlLedger, PnlLedgerRecovery, Trade};
 use super::position::PositionBook;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Portfolio {
     starting_cash: f64,
     leverage: f64,
@@ -128,6 +129,10 @@ impl Portfolio {
         let equity = self.equity(marks);
         self.ledger.mark(equity);
         equity
+    }
+
+    pub fn restore_ledger_state(&mut self, state: PnlLedgerRecovery) -> Result<(), String> {
+        self.ledger.restore_recovery_state(state)
     }
 }
 
