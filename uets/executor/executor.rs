@@ -3040,21 +3040,25 @@ mod strategy_instance_tests {
     }
 
     #[test]
-    fn clean_quit_retires_session_marker_but_preserves_database() {
-        let directory = tempfile::tempdir().unwrap();
-        let session_id = super::choose_session_id(directory.path(), false).unwrap();
+    fn clean_quit_retires_session_marker_but_preserves_database()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let session_id =
+            super::choose_session_id(directory.path(), false).map_err(std::io::Error::other)?;
         let session_db = directory.path().join("portfolio").join(&session_id);
-        std::fs::create_dir_all(&session_db).unwrap();
+        std::fs::create_dir_all(&session_db)?;
         let record = session_db.join("preserved-record");
-        std::fs::write(&record, b"still here").unwrap();
+        std::fs::write(&record, b"still here")?;
 
-        super::retire_session_marker(directory.path(), &session_id).unwrap();
+        super::retire_session_marker(directory.path(), &session_id)
+            .map_err(std::io::Error::other)?;
 
         assert!(!directory.path().join("current_session").exists());
-        assert_eq!(std::fs::read(record).unwrap(), b"still here");
+        assert_eq!(std::fs::read(record)?, b"still here");
         assert_ne!(
-            super::choose_session_id(directory.path(), true).unwrap(),
+            super::choose_session_id(directory.path(), true).map_err(std::io::Error::other)?,
             session_id
         );
+        Ok(())
     }
 }
