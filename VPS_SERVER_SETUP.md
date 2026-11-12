@@ -360,6 +360,8 @@ the restarted worker restores cash, open quantity, realized/unrealized PnL,
 and active barriers. Missing recovery state alongside old portfolio/trade
 records causes a fail-closed startup. Pre-recovery sessions lack open-position
 details and cannot be safely migrated; do not reuse one if preserving its
-account is required. The live feed reseed path is separately covered by Rust
-tests. Run a real binary crash/reseed smoke only in `live-test` mode, never
-with real trading enabled.
+account is required. Pressing `q` exits cleanly and retires the current-session
+marker, so a later watchdog launch starts a fresh session; the old RocksDB
+directories remain on disk. The live feed reseed path is separately covered by
+Rust tests. Run a real binary crash/reseed smoke only in `live-test` mode,
+never with real trading enabled.
