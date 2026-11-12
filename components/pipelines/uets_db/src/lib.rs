@@ -14,6 +14,7 @@
 //! Other components must use this API and must not open or manipulate the
 //! store directly.
 
+pub mod partition;
 pub mod persistence;
 pub mod schema;
 pub mod store;
