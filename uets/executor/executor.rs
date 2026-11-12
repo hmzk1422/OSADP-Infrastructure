@@ -15,6 +15,7 @@ use std::process::ExitCode;
 
 use uets::connectors::binance::websocket::{diagnostic, live, monitor, reader};
 use uets::live_strategy::{self, ComputeFeatures, LiveStrategy, StateBuilder};
+use uets_db::partition::{self, DbKind};
 use uets_db::{QueryFilter, UetsDb};
 
 /// Default capture directory, `market_data/live_db` at the repo root.
@@ -137,8 +138,9 @@ fn print_help() {
          \x20                         live flag: --reuse-rocksdb resumes the last run session\n\
          \x20 playback [--config PATH] run offline evaluation from the UETS YAML settings\n\
          \x20 db [SESSION [STRAT@ASSET]]  inspect live_db contents (trades + portfolio + telemetry)\n\
-         \x20 db checkpoint SESSION DIR  create a consistent telemetry RocksDB checkpoint\n\
-         \x20 db verify-checkpoint SESSION DIR  open and verify a telemetry checkpoint\n\
+         \x20 db seal-days [TODAY]     mark completed UTC days whose databases are closed as sealed\n\
+         \x20 db checkpoint DAY DIR    checkpoint every database of a sealed UTC day (YYYY-MM-DD)\n\
+         \x20 db verify-checkpoint DAY DIR  open and verify a daily checkpoint\n\
          \x20 user-stream             REST listen-key lifecycle (needs API key)\n\
          \x20 user-stream-ws          account/order update stream (needs API key)\n\
          \x20 help                    show this message\n\
@@ -615,21 +617,19 @@ fn run_live_system(requested: &[String], reuse_rocksdb: bool) -> Result<(), Stri
         .map(PathBuf::from)
         .unwrap_or_else(|_| live_strategy::live_db::default_live_db_root());
     let session_id = choose_session_id(&live_db_root, reuse_rocksdb)?;
-    let telemetry_path = live_db_root.join("telemetry").join(&session_id);
-    std::fs::create_dir_all(&telemetry_path).map_err(|error| {
-        format!(
-            "create telemetry store {}: {error}",
-            telemetry_path.display()
-        )
-    })?;
-    let telemetry_db =
-        Some(uets_db::UetsDb::open(&telemetry_path).map_err(|error| {
-            format!("open telemetry store {}: {error}", telemetry_path.display())
-        })?);
+    // Telemetry is stored in daily UTC partitions and written by its own thread,
+    // so neither the TUI snapshot path nor a midnight database swap blocks.
+    let telemetry = TelemetryWriter::start(&live_db_root, &session_id)?;
     eprintln!(
         "[live_db] telemetry session={} store={}",
         session_id,
-        telemetry_path.display()
+        partition::db_path(
+            &live_db_root,
+            &partition::utc_today(),
+            DbKind::Telemetry,
+            &session_id
+        )
+        .display()
     );
 
     // Read default tickers from execution.yaml
@@ -670,7 +670,7 @@ fn run_live_system(requested: &[String], reuse_rocksdb: bool) -> Result<(), Stri
         log_dir,
         live_db_root: live_db_root.clone(),
         session_id: session_id.clone(),
-        telemetry_db,
+        telemetry: Some(telemetry),
         control_dir,
         active_file,
         last_telemetry_sample: std::time::Instant::now() - std::time::Duration::from_secs(1),
@@ -721,6 +721,108 @@ struct ManagedInstance {
     healthy_since: Option<std::time::Instant>,
 }
 
+/// Telemetry hand-off queue depth. Telemetry is one record per second, so this
+/// is minutes of slack; when it is ever full the newest sample is dropped and
+/// counted rather than blocking the TUI.
+#[cfg(unix)]
+const TELEMETRY_QUEUE: usize = 256;
+
+/// Owns the telemetry database on a dedicated thread.
+///
+/// The TUI snapshot path only does a non-blocking `try_send`. Writing, the UTC
+/// day rollover (pre-open, carry-forward, flush/close of the previous day) and the
+/// final flush all happen on the writer thread.
+#[cfg(unix)]
+struct TelemetryWriter {
+    tx: Option<std::sync::mpsc::SyncSender<uets_db::TelemetryRecord>>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+#[cfg(unix)]
+impl TelemetryWriter {
+    fn start(live_db_root: &std::path::Path, session_id: &str) -> Result<Self, String> {
+        let rolling = uets_db::partition::RollingDb::<UetsDb>::open(
+            live_db_root,
+            DbKind::Telemetry,
+            session_id,
+            partition::unix_now(),
+        )
+        .map_err(|error| format!("open telemetry store: {error}"))?;
+        let (tx, rx) = std::sync::mpsc::sync_channel(TELEMETRY_QUEUE);
+        let thread = std::thread::Builder::new()
+            .name("uets-telemetry".into())
+            .spawn(move || telemetry_writer_loop(rolling, rx))
+            .map_err(|error| format!("spawn telemetry writer: {error}"))?;
+        Ok(Self {
+            tx: Some(tx),
+            thread: Some(thread),
+        })
+    }
+
+    /// Queue a sample without ever waiting on disk.
+    fn submit(&self, record: uets_db::TelemetryRecord) {
+        use std::sync::mpsc::TrySendError;
+        let Some(tx) = self.tx.as_ref() else {
+            return;
+        };
+        match tx.try_send(record) {
+            Ok(()) => {}
+            Err(TrySendError::Full(_)) => {
+                eprintln!("[live_db] telemetry queue full; sample dropped");
+            }
+            Err(TrySendError::Disconnected(_)) => {
+                eprintln!("[live_db] telemetry writer stopped; sample dropped");
+            }
+        }
+    }
+
+    /// Close the queue, let the writer drain and flush, and join it.
+    fn shutdown(mut self) {
+        self.tx.take();
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+#[cfg(unix)]
+fn telemetry_roll(rolling: &mut uets_db::partition::RollingDb<UetsDb>) {
+    match rolling.tick(partition::unix_now()) {
+        Ok(Some(rollover)) => eprintln!(
+            "[live_db] telemetry rolled {} -> {} (previous handle closed: {})",
+            rollover.from, rollover.to, rollover.previous_handle_closed
+        ),
+        Ok(None) => {}
+        Err(error) => eprintln!(
+            "[live_db] telemetry daily rollover failed ({error}); continuing on the previous day, will retry"
+        ),
+    }
+}
+
+#[cfg(unix)]
+fn telemetry_writer_loop(
+    mut rolling: uets_db::partition::RollingDb<UetsDb>,
+    rx: std::sync::mpsc::Receiver<uets_db::TelemetryRecord>,
+) {
+    use std::sync::mpsc::RecvTimeoutError;
+    loop {
+        match rx.recv_timeout(std::time::Duration::from_secs(1)) {
+            Ok(record) => {
+                telemetry_roll(&mut rolling);
+                if let Err(error) = rolling.current().write_telemetry(&record) {
+                    eprintln!("[live_db] telemetry write failed: {error}");
+                }
+            }
+            // Keep ticking while idle so the next day is pre-opened and swapped on time.
+            Err(RecvTimeoutError::Timeout) => telemetry_roll(&mut rolling),
+            Err(RecvTimeoutError::Disconnected) => break,
+        }
+    }
+    if let Err(error) = rolling.current().flush() {
+        eprintln!("[live_db] telemetry flush failed: {error}");
+    }
+}
+
 #[cfg(unix)]
 struct LiveDashboard {
     snapshots: uets_gui::SocketSnapshotSource,
@@ -730,7 +832,7 @@ struct LiveDashboard {
     log_dir: PathBuf,
     live_db_root: PathBuf,
     session_id: String,
-    telemetry_db: Option<uets_db::UetsDb>,
+    telemetry: Option<TelemetryWriter>,
     control_dir: PathBuf,
     active_file: PathBuf,
     last_telemetry_sample: std::time::Instant,
@@ -1095,56 +1197,6 @@ impl LiveDashboard {
             }
         }
     }
-
-    fn service_checkpoint_request(&self) {
-        let request = self
-            .control_dir
-            .join(format!("{}.checkpoint.request", self.session_id));
-        if !request.is_file() {
-            return;
-        }
-        let response = self
-            .control_dir
-            .join(format!("{}.checkpoint.response", self.session_id));
-        let result = (|| -> Result<(), String> {
-            let destination = std::fs::read_to_string(&request)
-                .map_err(|error| format!("read checkpoint request: {error}"))?;
-            let destination = PathBuf::from(destination.trim());
-            if destination.as_os_str().is_empty() {
-                return Err("checkpoint destination is empty".into());
-            }
-            if destination.exists() {
-                return Err(format!(
-                    "checkpoint destination already exists: {}",
-                    destination.display()
-                ));
-            }
-            let db = self
-                .telemetry_db
-                .as_ref()
-                .ok_or_else(|| "telemetry database is unavailable".to_string())?;
-            db.create_checkpoint(&destination)
-                .map_err(|error| format!("create RocksDB checkpoint: {error}"))?;
-            Ok(())
-        })();
-        let response_tmp = response.with_extension(format!("response.{}.tmp", std::process::id()));
-        let response_text = match result {
-            Ok(()) => "ok".to_string(),
-            Err(error) => format!("error: {error}"),
-        };
-        if let Err(error) = std::fs::write(&response_tmp, response_text) {
-            eprintln!("[live_db] write checkpoint response failed: {error}");
-            return;
-        }
-        if let Err(error) = std::fs::rename(&response_tmp, &response) {
-            eprintln!("[live_db] publish checkpoint response failed: {error}");
-            let _ = std::fs::remove_file(response_tmp);
-            return;
-        }
-        if let Err(error) = std::fs::remove_file(request) {
-            eprintln!("[live_db] remove checkpoint request failed: {error}");
-        }
-    }
 }
 
 #[cfg(unix)]
@@ -1176,7 +1228,6 @@ fn stop_child(child: &mut Option<std::process::Child>, label: &str) -> Result<()
 #[cfg(unix)]
 impl uets_gui::SnapshotSource for LiveDashboard {
     fn snapshot(&mut self) -> uets_gui::DashboardSnapshot {
-        self.service_checkpoint_request();
         let supervisor_errors = self.supervise_children();
         let mut snapshot = self.snapshots.snapshot();
         for instance in &mut snapshot.instances {
@@ -1251,10 +1302,9 @@ impl uets_gui::SnapshotSource for LiveDashboard {
                 latency_observations,
                 connections,
             };
-            if let Some(db) = self.telemetry_db.as_ref() {
-                if let Err(error) = db.write_telemetry(&record) {
-                    eprintln!("[live_db] telemetry write failed: {error}");
-                }
+            // Non-blocking hand-off to the telemetry writer thread (never waits on disk).
+            if let Some(writer) = self.telemetry.as_ref() {
+                writer.submit(record);
             }
             self.last_telemetry_sample = std::time::Instant::now();
         }
@@ -1293,10 +1343,8 @@ impl Drop for LiveDashboard {
                 }
             }
         }
-        if let Some(db) = self.telemetry_db.as_ref() {
-            if let Err(error) = db.flush() {
-                eprintln!("[live_db] telemetry flush failed: {error}");
-            }
+        if let Some(writer) = self.telemetry.take() {
+            writer.shutdown();
         }
         for instance in self.instances.values_mut() {
             if let Some(mut child) = instance.feed.take() {
@@ -2390,6 +2438,12 @@ fn cmd_db(args: &[String]) -> Result<(), String> {
     {
         return cmd_db_verify_checkpoint(&args[1..]);
     }
+    if args
+        .first()
+        .is_some_and(|argument| argument == "seal-days")
+    {
+        return cmd_db_seal_days(&args[1..]);
+    }
 
     let root: PathBuf = std::env::var_os("UETS_LIVE_DB")
         .map(PathBuf::from)
@@ -2407,18 +2461,14 @@ fn cmd_db(args: &[String]) -> Result<(), String> {
             .session(sid)
             .strategy(strategy)
             .asset(asset);
-        let trades_db =
-            UetsDb::open(root.join("trades").join(sid)).map_err(|e| format!("open trades: {e}"))?;
-        let portfolio_db = UetsDb::open(root.join("portfolio").join(sid))
-            .map_err(|e| format!("open portfolio: {e}"))?;
+        let trades_db = open_latest_db(&root, DbKind::Trades, sid)?;
+        let portfolio_db = open_latest_db(&root, DbKind::Portfolio, sid)?;
         print_instance(&trades_db, &portfolio_db, sid, &filter)?;
     } else if let Some(sid) = session {
         // Whole session: both strategy instances.
         let filter = QueryFilter::new().session(sid);
-        let trades_db =
-            UetsDb::open(root.join("trades").join(sid)).map_err(|e| format!("open trades: {e}"))?;
-        let portfolio_db = UetsDb::open(root.join("portfolio").join(sid))
-            .map_err(|e| format!("open portfolio: {e}"))?;
+        let trades_db = open_latest_db(&root, DbKind::Trades, sid)?;
+        let portfolio_db = open_latest_db(&root, DbKind::Portfolio, sid)?;
         print_session(&trades_db, &portfolio_db, sid, &filter)?;
         print_telemetry(&root, sid)?;
     } else {
@@ -2429,46 +2479,191 @@ fn cmd_db(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-fn cmd_db_verify_checkpoint(args: &[String]) -> Result<(), String> {
-    let [session_id, checkpoint_path] = args else {
-        return Err("usage: dev_test db verify-checkpoint <SESSION> <CHECKPOINT_DIR>".into());
+fn live_db_root_from_env() -> PathBuf {
+    std::env::var_os("UETS_LIVE_DB")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(default_live_db_dir()))
+}
+
+/// Every database directory for `kind`/`sid`, oldest first: the legacy
+/// `<root>/<kind>/<sid>` layout (if present) followed by one per UTC day.
+fn db_dirs(root: &std::path::Path, kind: DbKind, sid: &str) -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    let legacy = root.join(kind.dir_name()).join(sid);
+    if legacy.is_dir() {
+        dirs.push(legacy);
+    }
+    if let Ok(days) = partition::list_days(root) {
+        for day in days {
+            let path = partition::db_path(root, &day, kind, sid);
+            if path.is_dir() {
+                dirs.push(path);
+            }
+        }
+    }
+    dirs
+}
+
+/// Session ids that have a `kind` database in the legacy layout or any daily partition.
+fn session_ids(root: &std::path::Path, kind: DbKind) -> Vec<String> {
+    let mut sessions = list_session_dirs(root, kind.dir_name());
+    if let Ok(days) = partition::list_days(root) {
+        for day in days {
+            sessions.extend(list_session_dirs(&root.join(&day), kind.dir_name()));
+        }
+    }
+    sessions
+}
+
+/// Open the newest database for `kind`/`sid` (latest daily partition).
+fn open_latest_db(root: &std::path::Path, kind: DbKind, sid: &str) -> Result<UetsDb, String> {
+    let path = db_dirs(root, kind, sid)
+        .pop()
+        .ok_or_else(|| format!("no {} database for session {sid}", kind.dir_name()))?;
+    UetsDb::open(&path).map_err(|e| format!("open {}: {e}", path.display()))
+}
+
+/// True when another process holds the RocksDB `LOCK` of `db_dir` (POSIX
+/// `fcntl` probe, the same lock RocksDB takes). Anything uncertain counts as
+/// locked so a day is never sealed, checkpointed or deleted while in use. The
+/// probe only sees locks held by *other* processes, which is exactly what the
+/// archiver (a separate process) needs.
+#[cfg(unix)]
+fn rocksdb_dir_locked(db_dir: &std::path::Path) -> bool {
+    use std::os::unix::io::AsRawFd;
+    let lock = db_dir.join("LOCK");
+    let file = match std::fs::OpenOptions::new().read(true).write(true).open(&lock) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return false,
+        Err(_) => return true,
     };
-    let db = UetsDb::open(checkpoint_path)
-        .map_err(|error| format!("open telemetry checkpoint: {error}"))?;
-    let records = db
-        .query_telemetry(session_id)
-        .map_err(|error| format!("read telemetry checkpoint: {error}"))?;
-    println!(
-        "checkpoint valid: session={session_id} telemetry_records={}",
-        records.len()
-    );
-    db.shutdown()
-        .map_err(|error| format!("close telemetry checkpoint: {error}"))?;
+    // SAFETY: `flock` is plain data; F_GETLK only inspects, it never takes the lock.
+    let mut probe: libc::flock = unsafe { std::mem::zeroed() };
+    probe.l_type = libc::F_WRLCK as _;
+    probe.l_whence = libc::SEEK_SET as _;
+    probe.l_start = 0;
+    probe.l_len = 0;
+    let status = unsafe { libc::fcntl(file.as_raw_fd(), libc::F_GETLK, &mut probe) };
+    status != 0 || probe.l_type != libc::F_UNLCK as _
+}
+
+#[cfg(not(unix))]
+fn rocksdb_dir_locked(_db_dir: &std::path::Path) -> bool {
+    // Cannot probe locks here: never seal.
+    true
+}
+
+/// `db seal-days [TODAY]`: mark completed UTC days (`day < TODAY`) whose
+/// databases are all closed as sealed. Idempotent; also migrates days written
+/// before sealing existed. `TODAY` defaults to the current UTC date.
+fn cmd_db_seal_days(args: &[String]) -> Result<(), String> {
+    let today = match args {
+        [] => partition::utc_today(),
+        [today] => today.clone(),
+        _ => return Err("usage: dev_test db seal-days [YYYY-MM-DD]".into()),
+    };
+    let root = live_db_root_from_env();
+    let sealed = partition::seal_days(&root, &today, rocksdb_dir_locked)
+        .map_err(|error| format!("seal days: {error}"))?;
+    for day in &sealed {
+        println!("sealed {day}");
+    }
+    if sealed.is_empty() {
+        println!("no days to seal (today={today})");
+    }
     Ok(())
 }
 
-fn cmd_db_checkpoint(args: &[String]) -> Result<(), String> {
-    let [session_id, destination] = args else {
-        return Err("usage: dev_test db checkpoint <SESSION> <OUTPUT_DIR>".into());
+/// `db verify-checkpoint DAY DIR`: open every database listed in the daily
+/// checkpoint's MANIFEST and check that its records decode.
+fn cmd_db_verify_checkpoint(args: &[String]) -> Result<(), String> {
+    let [day, checkpoint_dir] = args else {
+        return Err("usage: dev_test db verify-checkpoint <YYYY-MM-DD> <CHECKPOINT_DIR>".into());
     };
-    if session_id.is_empty()
-        || !session_id.chars().all(|character| {
-            character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | '-')
-        })
-        || session_id == "."
-        || session_id == ".."
-    {
-        return Err("invalid session ID".into());
+    if !partition::is_day_name(day) {
+        return Err("invalid day; use YYYY-MM-DD".into());
     }
+    let checkpoint_dir = PathBuf::from(checkpoint_dir);
+    let manifest = std::fs::read_to_string(checkpoint_dir.join("MANIFEST"))
+        .map_err(|error| format!("read checkpoint MANIFEST: {error}"))?;
+    let entries: Vec<&str> = manifest
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect();
+    if entries.is_empty() {
+        return Err("checkpoint MANIFEST lists no databases".into());
+    }
+    for entry in entries {
+        let (kind_name, session) = entry
+            .split_once('/')
+            .ok_or_else(|| format!("bad MANIFEST entry: {entry}"))?;
+        let kind = DbKind::from_dir_name(kind_name)
+            .ok_or_else(|| format!("bad MANIFEST kind: {kind_name}"))?;
+        if session.is_empty()
+            || session == "."
+            || session == ".."
+            || !session
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+        {
+            return Err(format!("bad MANIFEST session: {session}"));
+        }
+        let path = checkpoint_dir.join(kind.dir_name()).join(session);
+        if !path.is_dir() {
+            return Err(format!("checkpoint is missing {entry}"));
+        }
+        let db = UetsDb::open(&path).map_err(|error| format!("open checkpoint {entry}: {error}"))?;
+        let detail = match kind {
+            DbKind::Telemetry => {
+                let records = db
+                    .query_telemetry(session)
+                    .map_err(|error| format!("read checkpoint {entry}: {error}"))?;
+                format!("telemetry_records={}", records.len())
+            }
+            DbKind::Portfolio | DbKind::Trades => {
+                let report = db
+                    .integrity_check()
+                    .map_err(|error| format!("scan checkpoint {entry}: {error}"))?;
+                if !report.corrupt_keys.is_empty() {
+                    return Err(format!(
+                        "checkpoint {entry} has {} corrupt record(s)",
+                        report.corrupt_keys.len()
+                    ));
+                }
+                format!(
+                    "trade_records={} portfolio_records={}",
+                    report.trade_records, report.portfolio_records
+                )
+            }
+        };
+        db.shutdown()
+            .map_err(|error| format!("close checkpoint {entry}: {error}"))?;
+        println!("checkpoint valid: day={day} {entry} {detail}");
+    }
+    Ok(())
+}
 
-    let live_db_root = std::env::var_os("UETS_LIVE_DB")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(default_live_db_dir()));
-    let database = live_db_root.join("telemetry").join(session_id);
-    if !database.is_dir() {
+/// `db checkpoint DAY DIR`: checkpoint every database of a sealed, completed UTC
+/// day into `DIR/<kind>/<session>` and write `DIR/MANIFEST`. Never touches the
+/// live day and never talks to the running UETS process.
+fn cmd_db_checkpoint(args: &[String]) -> Result<(), String> {
+    let [day, destination] = args else {
+        return Err("usage: dev_test db checkpoint <YYYY-MM-DD> <OUTPUT_DIR>".into());
+    };
+    if !partition::is_day_name(day) {
+        return Err("invalid day; use YYYY-MM-DD".into());
+    }
+    let root = live_db_root_from_env();
+    let today = partition::utc_today();
+    if day.as_str() >= today.as_str() {
         return Err(format!(
-            "telemetry RocksDB not found: {}",
-            database.display()
+            "refusing to checkpoint {day}: only completed days before {today} (UTC) can be archived"
+        ));
+    }
+    if !partition::is_sealed(&root, day) {
+        return Err(format!(
+            "day {day} is not sealed; run `db seal-days` (a writer may still hold its databases)"
         ));
     }
     let destination = PathBuf::from(destination);
@@ -2485,115 +2680,41 @@ fn cmd_db_checkpoint(args: &[String]) -> Result<(), String> {
     {
         return Err("checkpoint destination cannot contain line breaks".into());
     }
-    if let Some(parent) = destination
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-    {
-        std::fs::create_dir_all(parent)
-            .map_err(|error| format!("create checkpoint parent {}: {error}", parent.display()))?;
+    let dirs = partition::db_dirs_in_day(&root, day)
+        .map_err(|error| format!("list databases of {day}: {error}"))?;
+    if dirs.is_empty() {
+        return Err(format!("day {day} has no databases"));
     }
+    std::fs::create_dir_all(&destination)
+        .map_err(|error| format!("create {}: {error}", destination.display()))?;
 
-    let control_dir = live_db_root.join("control");
-    let active_file = control_dir.join(format!("{session_id}.active"));
-    let pid = std::fs::read_to_string(&active_file)
-        .ok()
-        .and_then(|contents| contents.trim().parse::<u32>().ok());
-
-    if pid.is_some_and(process_is_running) {
-        request_live_checkpoint(&control_dir, session_id, &destination)?;
-    } else {
-        if active_file.exists() {
-            std::fs::remove_file(&active_file).map_err(|error| {
-                format!(
-                    "remove stale live database marker {}: {error}",
-                    active_file.display()
-                )
-            })?;
+    let mut manifest = String::new();
+    for (kind, session, path) in &dirs {
+        if rocksdb_dir_locked(path) {
+            return Err(format!(
+                "{} is held by another process; day {day} is not closed",
+                path.display()
+            ));
         }
-        let db = UetsDb::open(&database)
-            .map_err(|error| format!("open telemetry RocksDB for checkpoint: {error}"))?;
-        db.create_checkpoint(&destination)
-            .map_err(|error| format!("create telemetry RocksDB checkpoint: {error}"))?;
+        let target_parent = destination.join(kind.dir_name());
+        std::fs::create_dir_all(&target_parent)
+            .map_err(|error| format!("create {}: {error}", target_parent.display()))?;
+        let db = UetsDb::open(path)
+            .map_err(|error| format!("open {} for checkpoint: {error}", path.display()))?;
+        db.create_checkpoint(target_parent.join(session))
+            .map_err(|error| format!("checkpoint {}: {error}", path.display()))?;
+        db.shutdown()
+            .map_err(|error| format!("close {}: {error}", path.display()))?;
+        manifest.push_str(&format!("{}/{session}\n", kind.dir_name()));
     }
-    println!("checkpoint created: {}", destination.display());
+    std::fs::write(destination.join("MANIFEST"), manifest)
+        .map_err(|error| format!("write checkpoint MANIFEST: {error}"))?;
+    println!(
+        "checkpoint created: {} ({} databases)",
+        destination.display(),
+        dirs.len()
+    );
     Ok(())
-}
-
-fn process_is_running(pid: u32) -> bool {
-    #[cfg(unix)]
-    {
-        // A permission error means the process exists but belongs to another user.
-        // SAFETY: signal 0 performs no delivery and only checks process existence.
-        unsafe {
-            libc::kill(pid as libc::pid_t, 0) == 0
-                || std::io::Error::last_os_error().kind() == std::io::ErrorKind::PermissionDenied
-        }
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = pid;
-        false
-    }
-}
-
-fn request_live_checkpoint(
-    control_dir: &std::path::Path,
-    session_id: &str,
-    destination: &std::path::Path,
-) -> Result<(), String> {
-    use std::io::Write;
-    use std::time::{Duration, Instant};
-
-    std::fs::create_dir_all(control_dir)
-        .map_err(|error| format!("create checkpoint control directory: {error}"))?;
-    let request = control_dir.join(format!("{session_id}.checkpoint.request"));
-    let response = control_dir.join(format!("{session_id}.checkpoint.response"));
-    if response.exists() {
-        std::fs::remove_file(&response)
-            .map_err(|error| format!("remove previous checkpoint response: {error}"))?;
-    }
-    let request_tmp = request.with_extension(format!("request.{}.tmp", std::process::id()));
-    let mut request_file = std::fs::OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .open(&request_tmp)
-        .map_err(|error| {
-            format!(
-                "create checkpoint request {}: {error}",
-                request_tmp.display()
-            )
-        })?;
-    writeln!(request_file, "{}", destination.display())
-        .and_then(|()| request_file.sync_all())
-        .map_err(|error| format!("write checkpoint request: {error}"))?;
-    std::fs::rename(&request_tmp, &request)
-        .map_err(|error| format!("publish checkpoint request: {error}"))?;
-
-    let deadline = Instant::now() + Duration::from_secs(60);
-    loop {
-        if response.is_file() {
-            let result = std::fs::read_to_string(&response)
-                .map_err(|error| format!("read checkpoint response: {error}"))?;
-            std::fs::remove_file(&response)
-                .map_err(|error| format!("remove checkpoint response: {error}"))?;
-            return if result.trim() == "ok" {
-                Ok(())
-            } else {
-                Err(result
-                    .trim()
-                    .strip_prefix("error: ")
-                    .unwrap_or(result.trim())
-                    .to_string())
-            };
-        }
-        if Instant::now() >= deadline {
-            if request.exists() {
-                let _ = std::fs::remove_file(&request);
-            }
-            return Err("timed out waiting for the live UETS process to checkpoint RocksDB".into());
-        }
-        std::thread::sleep(Duration::from_millis(100));
-    }
 }
 
 fn list_session_dirs(root: &std::path::Path, stage: &str) -> Vec<String> {
@@ -2612,12 +2733,12 @@ fn list_session_dirs(root: &std::path::Path, stage: &str) -> Vec<String> {
 }
 
 fn print_all_sessions(root: &std::path::Path) -> Result<(), String> {
-    let trades_sessions = list_session_dirs(root, "trades");
-    let portfolio_sessions = list_session_dirs(root, "portfolio");
+    let trades_sessions = session_ids(root, DbKind::Trades);
+    let portfolio_sessions = session_ids(root, DbKind::Portfolio);
 
     let mut all: std::collections::BTreeSet<String> = trades_sessions.into_iter().collect();
     all.extend(portfolio_sessions);
-    all.extend(list_session_dirs(root, "telemetry"));
+    all.extend(session_ids(root, DbKind::Telemetry));
 
     if all.is_empty() {
         println!("no sessions found");
@@ -2625,33 +2746,27 @@ fn print_all_sessions(root: &std::path::Path) -> Result<(), String> {
     }
     println!("sessions:");
     for sid in &all {
-        let trades_path = root.join("trades").join(sid);
-        let trades = if trades_path.is_dir() {
-            UetsDb::open(trades_path)
+        let mut trades = 0usize;
+        for path in db_dirs(root, DbKind::Trades, sid) {
+            trades += UetsDb::open(path)
                 .and_then(|db| db.query_trades(&QueryFilter::new().session(sid)))
                 .map_err(|e| e.to_string())?
-                .len()
-        } else {
-            0
-        };
-        let portfolio_path = root.join("portfolio").join(sid);
-        let portfolios = if portfolio_path.is_dir() {
-            UetsDb::open(portfolio_path)
+                .len();
+        }
+        let mut portfolios = 0usize;
+        for path in db_dirs(root, DbKind::Portfolio, sid) {
+            portfolios += UetsDb::open(path)
                 .and_then(|db| db.query_portfolio(&QueryFilter::new().session(sid)))
                 .map_err(|e| e.to_string())?
-                .len()
-        } else {
-            0
-        };
-        let telemetry_path = root.join("telemetry").join(sid);
-        let telemetry = if telemetry_path.is_dir() {
-            UetsDb::open(telemetry_path)
+                .len();
+        }
+        let mut telemetry = 0usize;
+        for path in db_dirs(root, DbKind::Telemetry, sid) {
+            telemetry += UetsDb::open(path)
                 .and_then(|db| db.query_telemetry(sid))
                 .map_err(|e| e.to_string())?
-                .len()
-        } else {
-            0
-        };
+                .len();
+        }
         println!(
             "  {}  trades={} portfolio={} telemetry={}",
             sid, trades, portfolios, telemetry
@@ -2661,14 +2776,18 @@ fn print_all_sessions(root: &std::path::Path) -> Result<(), String> {
 }
 
 fn print_telemetry(root: &std::path::Path, sid: &str) -> Result<(), String> {
-    let path = root.join("telemetry").join(sid);
-    if !path.is_dir() {
+    let dirs = db_dirs(root, DbKind::Telemetry, sid);
+    if dirs.is_empty() {
         return Ok(());
     }
-    let db = UetsDb::open(&path).map_err(|e| format!("open telemetry: {e}"))?;
-    let samples = db
-        .query_telemetry(sid)
-        .map_err(|e| format!("read telemetry: {e}"))?;
+    let mut samples = Vec::new();
+    for path in dirs {
+        let db = UetsDb::open(&path).map_err(|e| format!("open telemetry: {e}"))?;
+        samples.extend(
+            db.query_telemetry(sid)
+                .map_err(|e| format!("read telemetry: {e}"))?,
+        );
+    }
     println!("telemetry: {} samples", samples.len());
     for sample in samples.iter().rev().take(5).rev() {
         println!(

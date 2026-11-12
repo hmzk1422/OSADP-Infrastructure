@@ -11,6 +11,7 @@ use std::path::Path;
 use std::sync::Arc;
 use thiserror::Error;
 
+use crate::partition::PartitionStore;
 use crate::schema::SchemaVersion;
 
 #[derive(serde::Deserialize, serde::Serialize)]
@@ -288,6 +289,86 @@ impl UetsDb {
             Some(Err(error)) => Err(error.into()),
             None => Ok(false),
         }
+    }
+
+    // ------- Daily partition carry-forward -------
+
+    /// Metadata entries whose key starts with `prefix` (namespace stripped).
+    fn metadata_entries(&self, prefix: &[u8]) -> Result<Vec<(Vec<u8>, Vec<u8>)>, DbError> {
+        let mut entries = Vec::new();
+        for result in self.metadata.range(prefix.to_vec()..) {
+            let (key, value) = result?;
+            if !key.starts_with(prefix) {
+                break;
+            }
+            entries.push((key, value));
+        }
+        Ok(entries)
+    }
+
+    /// Newest primary record (by key order) of a tree whose primary keys start
+    /// with `primary_prefix` (`trades|` / `portfolio|`). Index keys (`ix|`) are
+    /// skipped because they sort before primary keys in the same tree.
+    fn newest_primary_record(
+        &self,
+        tree: &DbTree,
+        primary_prefix: &str,
+    ) -> Result<Option<(Vec<u8>, Vec<u8>)>, DbError> {
+        let lower = format!("{}/{}", tree.namespace, primary_prefix).into_bytes();
+        let mut upper = lower.clone();
+        if let Some(last) = upper.last_mut() {
+            *last += 1;
+        }
+        let mut iter = self
+            .db
+            .iterator(IteratorMode::From(&upper, Direction::Reverse));
+        match iter.next() {
+            Some(Ok((key, value))) if key.starts_with(&lower) => Ok(Some((
+                key[tree.namespace.len() + 1..].to_vec(),
+                value.to_vec(),
+            ))),
+            Some(Err(error)) => Err(error.into()),
+            _ => Ok(None),
+        }
+    }
+
+    /// Copy the state a restarted worker needs from the previous day's database
+    /// into this (new) day's database: runtime recovery state, session metadata,
+    /// and the newest trade and portfolio record (with their index entries).
+    ///
+    /// Called by the single writer thread at the daily swap, after the last write
+    /// to `previous`, so the new day is self-contained and the previous day can be
+    /// archived and deleted without breaking account recovery.
+    pub fn carry_state_forward_from(&self, previous: &UetsDb) -> Result<(), DbError> {
+        let mut metadata = DbBatch::default();
+        for prefix in [&b"runtime_state|"[..], &b"session|"[..]] {
+            for (key, value) in previous.metadata_entries(prefix)? {
+                metadata.insert(key, value);
+            }
+        }
+        if !metadata.0.is_empty() {
+            self.metadata.apply_batch(metadata)?;
+        }
+
+        if let Some((key, value)) = previous.newest_primary_record(&previous.trades, "trades|")? {
+            let record: TradeRecord = bincode::deserialize(value.as_slice())
+                .map_err(|e| DbError::Serialization(e.to_string()))?;
+            let mut batch = DbBatch::default();
+            batch.insert(Self::trade_index_key(&record), key.clone());
+            batch.insert(key, value);
+            self.trades.apply_batch(batch)?;
+        }
+        if let Some((key, value)) =
+            previous.newest_primary_record(&previous.portfolio, "portfolio|")?
+        {
+            let record: PortfolioRecord = bincode::deserialize(value.as_slice())
+                .map_err(|e| DbError::Serialization(e.to_string()))?;
+            let mut batch = DbBatch::default();
+            batch.insert(Self::portfolio_index_key(&record), key.clone());
+            batch.insert(key, value);
+            self.portfolio.apply_batch(batch)?;
+        }
+        Ok(())
     }
 
     /// Shut down the database cleanly.
@@ -772,6 +853,22 @@ impl UetsDb {
     }
 }
 
+impl PartitionStore for UetsDb {
+    type Error = DbError;
+
+    fn open_at(path: &Path) -> Result<Self, DbError> {
+        UetsDb::open(path)
+    }
+
+    fn carry_forward_from(&self, previous: &Self) -> Result<(), DbError> {
+        self.carry_state_forward_from(previous)
+    }
+
+    fn flush_all(&self) -> Result<(), DbError> {
+        self.flush()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -813,6 +910,83 @@ mod tests {
             model_version: "v1.0".to_string(),
             config_id: "config_1".to_string(),
         }
+    }
+
+    fn sample_portfolio_at(ts: chrono::DateTime<Utc>) -> PortfolioRecord {
+        PortfolioRecord {
+            schema: SchemaVersion::default(),
+            session_id: "session_1".to_string(),
+            instance: StrategyInstance::new("ofmr", "btcusdt"),
+            asset_id: "btcusdt".to_string(),
+            timestamp: ts,
+            allocated_capital: 10_000.0,
+            cash: 9_000.0,
+            equity: 10_500.0,
+            realized_pnl: 0.0,
+            unrealized_pnl: 500.0,
+            cumulative_return: 0.05,
+            sortino: 1.5,
+            drawdown: 0.02,
+            max_drawdown: 0.02,
+            gross_exposure: 1_500.0,
+            net_exposure: 1_500.0,
+            margin_used: 0.0,
+            available_margin: 9_000.0,
+            effective_leverage: 0.15,
+            fees_paid: 0.0,
+            trade_count: 1,
+            win_count: 0,
+            loss_count: 0,
+            win_rate: 0.0,
+        }
+    }
+
+    #[test]
+    fn carry_forward_copies_recovery_state_session_and_newest_records() {
+        let (old_path, new_path) = (temp_db_path(), temp_db_path());
+        let old = UetsDb::open(&old_path).unwrap();
+        let new = UetsDb::open(&new_path).unwrap();
+
+        old.create_session("session_1").unwrap();
+        old.write_runtime_state("ofmr", b"open long 1.5").unwrap();
+        let newest_trade = sample_trade();
+        let mut older_trade = sample_trade();
+        older_trade.event_time = newest_trade.event_time - chrono::Duration::seconds(10);
+        old.write_trade(&older_trade).unwrap();
+        old.write_trade(&newest_trade).unwrap();
+        let newest_ts = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
+        old.write_portfolio(&sample_portfolio_at(newest_ts - chrono::Duration::seconds(5)))
+            .unwrap();
+        old.write_portfolio(&sample_portfolio_at(newest_ts)).unwrap();
+
+        new.carry_state_forward_from(&old).unwrap();
+
+        assert_eq!(
+            new.read_runtime_state("ofmr").unwrap().as_deref(),
+            Some(&b"open long 1.5"[..])
+        );
+        assert!(new.get_session("session_1").unwrap().is_some());
+        let filter = QueryFilter::new().session("session_1");
+        let trades = new.query_trades(&filter).unwrap();
+        assert_eq!(trades.len(), 1, "only the newest trade is carried");
+        assert_eq!(trades[0].event_time, newest_trade.event_time);
+        let portfolios = new.query_portfolio(&filter).unwrap();
+        assert_eq!(portfolios.len(), 1, "only the newest portfolio record is carried");
+        assert_eq!(portfolios[0].timestamp, newest_ts);
+        // The previous day is left untouched.
+        assert_eq!(old.query_trades(&filter).unwrap().len(), 2);
+
+        // An empty previous day carries nothing and does not fail.
+        let empty_path = temp_db_path();
+        let empty = UetsDb::open(&empty_path).unwrap();
+        new.carry_state_forward_from(&empty).unwrap();
+
+        let _ = old.shutdown();
+        let _ = new.shutdown();
+        let _ = empty.shutdown();
+        let _ = fs::remove_dir_all(&old_path);
+        let _ = fs::remove_dir_all(&new_path);
+        let _ = fs::remove_dir_all(&empty_path);
     }
 
     #[test]
