@@ -560,6 +560,30 @@ fn choose_session_id(
     Ok(session_id)
 }
 
+#[cfg(any(unix, test))]
+fn retire_session_marker(live_db_root: &std::path::Path, session_id: &str) -> Result<(), String> {
+    let marker = live_db_root.join("current_session");
+    let current = match std::fs::read_to_string(&marker) {
+        Ok(value) => value,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(format!(
+                "read live database session {} before retiring it: {error}",
+                marker.display()
+            ));
+        }
+    };
+    if current.trim() == session_id {
+        std::fs::remove_file(&marker).map_err(|error| {
+            format!(
+                "retire live database session marker {}: {error}",
+                marker.display()
+            )
+        })?;
+    }
+    Ok(())
+}
+
 #[cfg(unix)]
 struct LiveProcesses(Vec<std::process::Child>);
 
@@ -644,8 +668,8 @@ fn run_live_system(requested: &[String], reuse_rocksdb: bool) -> Result<(), Stri
         root,
         executable,
         log_dir,
-        live_db_root,
-        session_id,
+        live_db_root: live_db_root.clone(),
+        session_id: session_id.clone(),
         telemetry_db,
         control_dir,
         active_file,
@@ -678,9 +702,11 @@ fn run_live_system(requested: &[String], reuse_rocksdb: bool) -> Result<(), Stri
         eprintln!("UETS monitor ready: j/k select, a add, e enable/disable, x delete, q quit");
     }
 
-    Monitor::new(dashboard)
-        .run()
-        .map_err(|error| format!("UETS monitor failed: {error}"))
+    let result = Monitor::new(dashboard).run();
+    if result.is_ok() {
+        retire_session_marker(&live_db_root, &session_id)?;
+    }
+    result.map_err(|error| format!("UETS monitor failed: {error}"))
 }
 
 #[cfg(unix)]
@@ -3011,5 +3037,24 @@ mod strategy_instance_tests {
         let directory = tempfile::tempdir().unwrap();
         std::fs::write(directory.path().join("current_session"), "../outside").unwrap();
         assert!(super::choose_session_id(directory.path(), true).is_err());
+    }
+
+    #[test]
+    fn clean_quit_retires_session_marker_but_preserves_database() {
+        let directory = tempfile::tempdir().unwrap();
+        let session_id = super::choose_session_id(directory.path(), false).unwrap();
+        let session_db = directory.path().join("portfolio").join(&session_id);
+        std::fs::create_dir_all(&session_db).unwrap();
+        let record = session_db.join("preserved-record");
+        std::fs::write(&record, b"still here").unwrap();
+
+        super::retire_session_marker(directory.path(), &session_id).unwrap();
+
+        assert!(!directory.path().join("current_session").exists());
+        assert_eq!(std::fs::read(record).unwrap(), b"still here");
+        assert_ne!(
+            super::choose_session_id(directory.path(), true).unwrap(),
+            session_id
+        );
     }
 }

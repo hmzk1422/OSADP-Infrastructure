@@ -65,10 +65,11 @@ recovery state is missing while old portfolio/trade records exist, the worker
 fails closed rather than silently resetting the account. Older sessions
 created before account recovery was added need an intentional fresh session;
 their records do not contain enough information to safely reconstruct an open
-position. If the `q` command exits normally, the watchdog stops. Five
-consecutive unexpected exits stop the watchdog with an error instead of
-repeating a crash loop indefinitely. A new ordinary `uets run` (without that
-flag) creates a fresh session.
+position. Pressing `q` exits normally, stops the watchdog, and retires the
+current-session marker so a later watchdog launch starts a fresh session; the
+old database files are retained. Five consecutive unexpected exits stop the
+watchdog with an error instead of repeating a crash loop indefinitely. A new
+ordinary `uets run` (without the reuse flag) also creates a fresh session.
 
 The watchdog prevents duplicate supervisors with a lock, records the child PID,
 and reports nonzero exits including likely OOM kills (and cgroup OOM counters

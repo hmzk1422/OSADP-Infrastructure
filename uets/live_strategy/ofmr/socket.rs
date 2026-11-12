@@ -340,11 +340,6 @@ impl OrderExecutor {
                 } else {
                     OrderRequest::market(symbol, side, qty).with_client_order_id(client_id)
                 }
-
-                fn restore_position(&mut self, quantity: f64, sequence: u64) {
-                    self.quantity = quantity;
-                    self.sequence = sequence;
-                }
             }
             Decision::Exit => {
                 if *position == Position::Flat || self.quantity <= 0.0 {
@@ -430,6 +425,11 @@ impl OrderExecutor {
             }
             Ok(vec![fill])
         }
+    }
+
+    fn restore_position(&mut self, quantity: f64, sequence: u64) {
+        self.quantity = quantity;
+        self.sequence = sequence;
     }
 }
 
