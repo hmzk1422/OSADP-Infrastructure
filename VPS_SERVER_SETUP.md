@@ -1,31 +1,8 @@
 # UETS VPS Server Setup and Storage Operations
 
-This guide covers running the compiled UETS binary under a restart watchdog,
-monitoring host resources, and archiving telemetry RocksDB checkpoints to S3.
-- Example setup:
-```bash
-
-# ==================================== 
-# Setup OSADP
-# ====================================
-sudo apt update && sudo apt install -y tmux
-mkdir -p "$HOME/uets-data/live_db"
-
-tmux new-session -d -s uets \
-  -c "$HOME/uets-linux-x86_64" \
-  "export UETS_LIVE_DB=\"$HOME/uets-data/live_db\"; exec ./restart_uets.sh ofmr@btcusdt"
-
-tmux attach -t uets # To Attach
-
-# ==================================== 
-# Setup sh files
-# ====================================
-tmux new-window -t uets -n telemetry \
-  -c "$HOME/uets-linux-x86_64" \
-  "export UETS_LIVE_DB=\"$HOME/uets-data/live_db\"; ./telemetry.sh"
-
-CTRL+B, D, P, N # To detach, to previous, to next
-```
+This guide covers running the compiled UETS binary with an interactive tmux
+TUI, a crash-recovery watchdog, and verified telemetry archives to S3 Glacier
+Instant Retrieval.
 
 
 ## Install the compiled UETS package
@@ -35,7 +12,9 @@ the VPS, install `curl`, `unzip`, and `tar` if they are not already available:
 
 ```bash
 sudo apt update
-sudo apt install -y curl unzip
+sudo apt install -y curl unzip tmux zstd util-linux
+sudo useradd --system --create-home --shell /bin/bash uets
+sudo install -d -o uets -g uets /opt/uets /var/lib/uets/live_db /var/tmp/uets-archive
 ```
 
 Download the `uets-linux-x86_64-amazonlinux2023` artifact from the successful
@@ -45,8 +24,9 @@ released v4.0.0 binary does not implement the checkpoint commands required by
 
 ```bash
 cd "$HOME"
-tar -xzf "$HOME/Downloads/uets-linux-x86_64.tar.gz"
-cd uets-linux-x86_64
+sudo tar -xzf "$HOME/Downloads/uets-linux-x86_64.tar.gz" -C /opt/uets
+sudo chown -R uets:uets /opt/uets/uets-linux-x86_64
+cd /opt/uets/uets-linux-x86_64
 ldd ./bin/uets
 ./bin/uets help
 ```
@@ -60,16 +40,20 @@ orders. `testnet` submits to the exchange test environment; `live-trade` can
 submit real orders and requires credentials and the explicit live-trading
 guard. Never put API secrets in these YAML files or in this guide.
 
-Start the live monitor under the restart watchdog:
+Set `uets/config/execution.yaml` to `live-test` initially. Start the interactive
+TUI in tmux at boot using the included systemd unit:
 
 ```bash
-export UETS_LIVE_DB="$HOME/uets-data/live_db"
-./restart_uets.sh ofmr@btcusdt
+sudo install -D -m 0644 deploy/systemd/uets-tmux.service /etc/systemd/system/uets-tmux.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now uets-tmux
+sudo -u uets tmux attach -t uets
 ```
 
-The watchdog stops when `q` exits UETS normally, and restarts nonzero exits
-using the prior session. Stop the watchdog intentionally with Ctrl+C. Provide
-AWS access through an EC2 IAM instance profile rather than hard-coding AWS keys.
+The TUI is displayed inside tmux; detach with `Ctrl+B`, then `D`, and reattach
+with `sudo -u uets tmux attach -t uets`. The watchdog restarts unexpected
+failures. Pressing `q` intentionally exits UETS. Provide AWS access through an
+EC2 IAM instance profile rather than hard-coding AWS keys.
 
 ## Where UETS stores data
 
@@ -293,46 +277,50 @@ queries after it exits.
 ## `cloud.sh`: S3 checkpoint archive
 
 The package includes `cloud.sh`; it does not use a third-party RocksDB backup
-program. When the disk threshold is met, it asks the live UETS process to
-checkpoint telemetry RocksDB using its already-open handle. If UETS is stopped,
-it opens the database and checkpoints it directly. It then verifies the
-checkpoint, uploads a `.tar.zst` to S3 using `GLACIER_IR`, downloads and
-checksums the uploaded object, extracts it separately, and opens the restored
-database. The source database is never deleted or moved.
-This is a backup, not disk reclamation: the source RocksDB and temporary
-archives are not pruned by the script. Configure a separate, verified retention
-and cleanup policy if local disk space must be recovered.
+program. When the disk threshold is met, it sends `q` to the tmux TUI and waits for UETS
+to stop cleanly. It checkpoints telemetry RocksDB while closed, uploads a
+`.tar.zst` to S3 using `GLACIER_IR`, downloads and checksums the object, and
+opens the restored database. **Only after all checks pass**, it removes the
+local telemetry RocksDB and restarts UETS in tmux with the same session ID.
+Trade and portfolio databases are not removed, so OFMR account recovery remains
+available. The TUI has a brief interruption during this archive/cleanup cycle.
+If upload or verification fails, the local database is kept and UETS is
+restarted.
 
-Install the prerequisites and configure AWS through the EC2 instance profile:
-
-```bash
-sudo apt update
-sudo apt install -y zstd util-linux
-```
-
-Install AWS CLI v2 separately, then set the destination explicitly:
+Install AWS CLI v2 and configure AWS through the EC2 instance profile. Then
+create the archive service environment:
 
 ```bash
-export AWS_ARCHIVE_URI="s3://YOUR_BUCKET/cold-sst"
-export AWS_REGION="ap-southeast-2"
-export DISK_THRESHOLD_PERCENT=90
-export UETS_LIVE_DB="$HOME/uets-data/live_db"
-export UETS_BIN="$HOME/uets-linux-x86_64/bin/uets"
-./cloud.sh
+sudo install -d -o root -g root -m 0755 /etc/uets
+sudo tee /etc/uets/archive.env >/dev/null <<'EOF'
+AWS_ARCHIVE_URI=s3://YOUR_BUCKET/cold-sst
+AWS_REGION=ap-southeast-2
+DISK_THRESHOLD_PERCENT=90
+ARCHIVE_TMP_DIR=/var/tmp/uets-archive
+UETS_HOME=/var/lib/uets
+UETS_LIVE_DB=/var/lib/uets/live_db
+UETS_BIN=/opt/uets/uets-linux-x86_64/bin/uets
+UETS_TMUX_SESSION=uets
+EOF
+sudo chmod 0600 /etc/uets/archive.env
 ```
 
 The IAM role needs `s3:PutObject` and `s3:GetObject` on the chosen prefix
 (`HeadObject` is authorized by `s3:GetObject`). `cloud.sh` reads
 `current_session` if no session ID is passed.
 It exits without archiving when usage is below threshold, and fails explicitly
-if checkpointing, upload, download, checksum, or restore verification fails.
+if stopping UETS, checkpointing, upload, download, checksum, or restore
+verification fails.
 It needs free temporary space for the compressed archive; configure
 `ARCHIVE_TMP_DIR` accordingly.
 
-The included [systemd service](./deploy/systemd/uets-cloud-archive.service)
+The archive service must run as the same Linux user as the tmux session (`uets`
+in the example); set its `User` and `Group` accordingly. Do not enable
+`PrivateTmp`, since tmux uses a socket under `/tmp`. The included
+[systemd service](./deploy/systemd/uets-cloud-archive.service)
 and [timer](./deploy/systemd/uets-cloud-archive.timer) run that threshold
-check daily at 00:00 UTC. Edit the service's deployment paths and create
-`/etc/uets/archive.env` with the environment above before enabling it:
+check daily at 00:00 UTC. Create `/etc/uets/archive.env` with the environment
+above before enabling it:
 
 ```bash
 sudo install -D -m 0644 deploy/systemd/uets-cloud-archive.service /etc/systemd/system/uets-cloud-archive.service
@@ -341,8 +329,10 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now uets-cloud-archive.timer
 ```
 
-Glacier Instant Retrieval has storage and retrieval charges. Choose a retention
-policy before scheduling recurring archives.
+Confirm `/etc/uets/archive.env` is populated before enabling the timer. Glacier
+Instant Retrieval has storage and retrieval charges. Local **telemetry** is
+deleted only after the S3 object is downloaded and restore-verified; portfolio
+and trade databases remain local and are not covered by this archive.
 
 ### OOM restart harness
 

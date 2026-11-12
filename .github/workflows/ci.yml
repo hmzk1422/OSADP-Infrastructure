@@ -63,6 +63,9 @@ jobs:
       - name: Verify watchdog recovery after a container OOM
         run: bash unit-tests/production_check/crash_recovery_test.sh
 
+      - name: Verify archive cleanup retains data on failure
+        run: bash unit-tests/production_check/archive_cleanup_test.sh
+
       - name: Run Clippy on UETS and all workspace components
         run: cargo clippy --workspace --all-targets -- -D clippy::correctness -D clippy::suspicious
 
@@ -81,9 +84,11 @@ jobs:
               mkdir -p dist/uets-linux-x86_64/bin dist/uets-linux-x86_64/uets/config dist/uets-linux-x86_64/uets/models/ofmr dist/uets-linux-x86_64/deploy/systemd
               install "$CARGO_TARGET_DIR/release/dev_test" dist/uets-linux-x86_64/bin/uets
               install restart_uets.sh dist/uets-linux-x86_64/restart_uets.sh
+              install run_uets_tmux.sh dist/uets-linux-x86_64/run_uets_tmux.sh
               install cloud.sh dist/uets-linux-x86_64/cloud.sh
               install deploy/systemd/uets-cloud-archive.service dist/uets-linux-x86_64/deploy/systemd/uets-cloud-archive.service
               install deploy/systemd/uets-cloud-archive.timer dist/uets-linux-x86_64/deploy/systemd/uets-cloud-archive.timer
+              install deploy/systemd/uets-tmux.service dist/uets-linux-x86_64/deploy/systemd/uets-tmux.service
               sed "s/^mode: playback/mode: live-test/" uets/config/execution.yaml > dist/uets-linux-x86_64/uets/config/execution.yaml
               grep -q "^mode: live-test" dist/uets-linux-x86_64/uets/config/execution.yaml
               install uets/config/ofmr.yaml dist/uets-linux-x86_64/uets/config/ofmr.yaml
