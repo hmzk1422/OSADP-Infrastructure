@@ -1,0 +1,21 @@
+[Unit]
+Description=UETS interactive monitor and crash-recovery watchdog in tmux
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=uets
+Group=uets
+WorkingDirectory=/opt/uets/uets-linux-x86_64
+Environment=UETS_HOME=/var/lib/uets
+Environment=UETS_LIVE_DB=/var/lib/uets/live_db
+Environment=UETS_BIN=/opt/uets/uets-linux-x86_64/bin/uets
+Environment=UETS_TMUX_SESSION=uets
+ExecStart=/opt/uets/uets-linux-x86_64/run_uets_tmux.sh ofmr@btcusdt
+Restart=no
+KillMode=mixed
+TimeoutStopSec=45
+
+[Install]
+WantedBy=multi-user.target
