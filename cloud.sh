@@ -1,22 +1,24 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# UETS daily-partition Glacier archiver.
+# UETS daily-partition Glacier archiver (FIFO).
 #
-# RocksDB data is stored under $UETS_LIVE_DB as daily UTC partitions:
+# RocksDB is stored under $UETS_LIVE_DB as daily UTC partitions:
 #   ${DB_ROOT}/YYYY-MM-DD/{telemetry,portfolio,trades}
 #
-# The TUI still displays per-session via current_session, but the on-disk
-# RocksDB layout is partitioned by day. When disk usage exceeds
-# DISK_THRESHOLD_PERCENT, cloud.sh acts as a FIFO queue: the oldest daily
-# partition is checkpointed, uploaded to S3 Glacier Instant Retrieval,
-# download-verified, restore-verified, then deleted from local disk. The loop
-# repeats until disk usage is back below threshold. Only completed (non-current)
-# days are ever archived, so the active trading day and the TUI are never
-# reset or blocked by a swap.
+# The writer seals a completed day by writing ${DB_ROOT}/YYYY-MM-DD/.sealed
+# after rolling over to the next day. The archiver never touches the live day
+# and never stops UETS. Sealed days are checkpointed read-only with
+# `db checkpoint`, uploaded to S3 Glacier Instant Retrieval, download-verified,
+# restore-verified, then deleted from local disk to keep usage below threshold.
+#
+# Only days where name < today's UTC date AND a .sealed marker exists are
+# eligible. If disk is above threshold and no eligible day exists, the script
+# exits non-zero without deleting anything.
 
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 DB_ROOT="${UETS_LIVE_DB:-${ROOT}/market_data/live_db}"
+UETS_TODAY="${UETS_TODAY:-$(date -u +%F)}"
 if (( $# > 1 )); then
     echo "Usage: cloud.sh [YYYY-MM-DD]" >&2
     exit 2
@@ -27,10 +29,6 @@ ARCHIVE_TMP_DIR="${ARCHIVE_TMP_DIR:-${TMPDIR:-/tmp}}"
 AWS_REGION="${AWS_REGION:-ap-southeast-2}"
 AWS_ARCHIVE_URI="${AWS_ARCHIVE_URI:-}"
 UETS_BIN="${UETS_BIN:-${ROOT}/bin/uets}"
-UETS_HOME="${UETS_HOME:-${ROOT}}"
-UETS_TMUX_SESSION="${UETS_TMUX_SESSION:-uets}"
-UETS_TMUX_PANE="${UETS_TMUX_PANE:-${UETS_TMUX_SESSION}:0.0}"
-UETS_STOP_TIMEOUT_SECONDS="${UETS_STOP_TIMEOUT_SECONDS:-60}"
 
 if [[ -n "${TARGET_DATE}" ]] && [[ ! "${TARGET_DATE}" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
     echo "Invalid date. Use YYYY-MM-DD." >&2
@@ -39,11 +37,6 @@ fi
 if [[ ! "${THRESHOLD_PERCENT}" =~ ^[0-9]+$ ]] ||
    (( THRESHOLD_PERCENT < 1 || THRESHOLD_PERCENT > 100 )); then
     echo "DISK_THRESHOLD_PERCENT must be an integer from 1 to 100." >&2
-    exit 2
-fi
-if [[ ! "${UETS_STOP_TIMEOUT_SECONDS}" =~ ^[0-9]+$ ]] ||
-   (( UETS_STOP_TIMEOUT_SECONDS < 1 )); then
-    echo "UETS_STOP_TIMEOUT_SECONDS must be a positive integer." >&2
     exit 2
 fi
 if [[ ! -d "${DB_ROOT}" ]]; then
@@ -59,7 +52,7 @@ if [[ ! "${AWS_ARCHIVE_URI}" =~ ^s3://[^/]+(/.*)?$ ]]; then
     exit 2
 fi
 
-for command_name in aws zstd tar sha256sum flock df awk tmux realpath sort head; do
+for command_name in aws zstd tar sha256sum flock df awk realpath sort head date; do
     command -v "${command_name}" >/dev/null || {
         echo "Missing dependency: ${command_name}" >&2
         exit 1
@@ -73,82 +66,81 @@ flock -n 9 || {
     exit 1
 }
 
-list_daily_partitions() {
+tmp_dir=""
+trap '[[ -n "${tmp_dir}" && -d "${tmp_dir}" ]] && rm -rf -- "${tmp_dir}"' EXIT
+
+is_archiveable() {
+    local d="$1"
+    [[ "$d" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || return 1
+    [[ "$d" < "${UETS_TODAY}" ]] || return 1
+    [[ -f "${DB_ROOT}/${d}/.sealed" ]] || return 1
+    [[ -d "${DB_ROOT}/${d}/telemetry" ]] || [[ -d "${DB_ROOT}/${d}/portfolio" ]] || [[ -d "${DB_ROOT}/${d}/trades" ]] || return 1
+    return 0
+}
+
+list_archiveable_days() {
     local entry name
+    shopt -s nullglob
     for entry in "${DB_ROOT}"/*/; do
-        [[ -d "${entry}" ]] || continue
+        shopt -u nullglob
         entry="${entry%/}"
         name="$(basename -- "${entry}")"
-        if [[ "${name}" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] &&
-           { [[ -d "${entry}/telemetry" ]] || [[ -d "${entry}/portfolio" ]] || [[ -d "${entry}/trades" ]]; }; then
-            printf '%s\n' "${name}"
-        fi
+        is_archiveable "${name}" && printf '%s\n' "${name}"
     done | sort
-}
-
-stop_uets() {
-    local pane_state deadline
-    tmux set-window-option -t "${UETS_TMUX_PANE}" remain-on-exit on >/dev/null 2>&1 || true
-    pane_state="$(tmux display-message -p -t "${UETS_TMUX_PANE}" '#{pane_dead}' 2>/dev/null || echo 1)"
-    if [[ "${pane_state}" == "0" ]]; then
-        echo "Stopping UETS cleanly for a consistent archive."
-        tmux send-keys -t "${UETS_TMUX_PANE}" Escape q
-        deadline=$((SECONDS + UETS_STOP_TIMEOUT_SECONDS))
-        while (( SECONDS < deadline )); do
-            pane_state="$(tmux display-message -p -t "${UETS_TMUX_PANE}" '#{pane_dead}')"
-            if [[ "${pane_state}" == "1" ]]; then
-                return 0
-            fi
-            sleep 1
-        done
-        echo "UETS did not stop within ${UETS_STOP_TIMEOUT_SECONDS}s; local database retained." >&2
-        return 1
-    fi
-    return 0
-}
-
-resume_uets() {
-    local pane_state
-    pane_state="$(tmux display-message -p -t "${UETS_TMUX_PANE}" '#{pane_dead}' 2>/dev/null || echo 1)"
-    if [[ "${pane_state}" == "1" ]]; then
-        tmux respawn-pane -k -t "${UETS_TMUX_PANE}"
-    elif [[ "${pane_state}" != "0" ]]; then
-        echo "Cannot restart UETS: tmux pane state is unknown." >&2
-        return 1
-    fi
-    tmux set-window-option -t "${UETS_TMUX_PANE}" remain-on-exit off >/dev/null 2>&1 || true
-    return 0
 }
 
 archive_day() {
     local day="$1"
     local day_dir="${DB_ROOT}/${day}"
-    local tmp_dir timestamp archive_name checksum
+    local timestamp archive_name checksum
     local bucket prefix object_key s3_uri uploaded_class
     local downloaded_archive downloaded_checksum
-
     timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
     archive_name="telemetry-${day}-${timestamp}.tar.zst"
     tmp_dir="$(mktemp -d "${ARCHIVE_TMP_DIR%/}/uets-archive.XXXXXX")"
 
     export UETS_LIVE_DB="${DB_ROOT}"
-    "${UETS_BIN}" db checkpoint "${day}" "${tmp_dir}/rocksdb_backup"
-    "${UETS_BIN}" db verify-checkpoint "${day}" "${tmp_dir}/rocksdb_backup"
+    "${UETS_BIN}" db checkpoint "${day}" "${tmp_dir}/rocksdb_backup" || {
+        rm -rf -- "${tmp_dir}" 2>/dev/null || true
+        tmp_dir=""
+        return 1
+    }
+    "${UETS_BIN}" db verify-checkpoint "${day}" "${tmp_dir}/rocksdb_backup" || {
+        rm -rf -- "${tmp_dir}" 2>/dev/null || true
+        tmp_dir=""
+        return 1
+    }
 
     cat >"${tmp_dir}/manifest.txt" <<EOF
 UETS telemetry RocksDB daily partition
 Date: ${day}
 Created UTC: ${timestamp}
 Original DB: ${day_dir}
-Snapshot: RocksDB MVCC daily checkpoint created while UETS was stopped
+Snapshot: RocksDB Checkpoint of sealed daily partition (live UETS untouched)
 Compression: Zstandard
 EOF
 
     tar -cf - -C "${tmp_dir}" rocksdb_backup manifest.txt |
-        zstd -T0 -6 -o "${tmp_dir}/${archive_name}"
-    zstd -t "${tmp_dir}/${archive_name}"
-    zstd -dc "${tmp_dir}/${archive_name}" | tar -tf - >/dev/null
-    checksum="$(sha256sum "${tmp_dir}/${archive_name}" | awk '{print $1}')"
+        zstd -T0 -6 -o "${tmp_dir}/${archive_name}" || {
+        rm -rf -- "${tmp_dir}" 2>/dev/null || true
+        tmp_dir=""
+        return 1
+    }
+    zstd -t "${tmp_dir}/${archive_name}" || {
+        rm -rf -- "${tmp_dir}" 2>/dev/null || true
+        tmp_dir=""
+        return 1
+    }
+    zstd -dc "${tmp_dir}/${archive_name}" | tar -tf - >/dev/null || {
+        rm -rf -- "${tmp_dir}" 2>/dev/null || true
+        tmp_dir=""
+        return 1
+    }
+    checksum="$(sha256sum "${tmp_dir}/${archive_name}" | awk '{print $1}')" || {
+        rm -rf -- "${tmp_dir}" 2>/dev/null || true
+        tmp_dir=""
+        return 1
+    }
 
     s3_location="${AWS_ARCHIVE_URI#s3://}"
     bucket="${s3_location%%/*}"
@@ -165,43 +157,71 @@ EOF
     aws s3 cp "${tmp_dir}/${archive_name}" "${s3_uri}" \
         --region "${AWS_REGION}" \
         --storage-class GLACIER_IR \
-        --metadata "sha256=${checksum},date=${day}"
+        --metadata "sha256=${checksum},date=${day}" || {
+        rm -rf -- "${tmp_dir}" 2>/dev/null || true
+        tmp_dir=""
+        return 1
+    }
 
     uploaded_class="$(aws s3api head-object \
         --bucket "${bucket}" \
         --key "${object_key}" \
         --region "${AWS_REGION}" \
         --query 'StorageClass' \
-        --output text)"
+        --output text)" || {
+        rm -rf -- "${tmp_dir}" 2>/dev/null || true
+        tmp_dir=""
+        return 1
+    }
     if [[ "${uploaded_class}" != "GLACIER_IR" ]]; then
         echo "S3 storage-class verification failed: expected GLACIER_IR, got ${uploaded_class}." >&2
-        rm -rf -- "${tmp_dir}"
+        rm -rf -- "${tmp_dir}" 2>/dev/null || true
+        tmp_dir=""
         return 1
     fi
 
     downloaded_archive="${tmp_dir}/downloaded-${archive_name}"
-    aws s3 cp "${s3_uri}" "${downloaded_archive}" --region "${AWS_REGION}" --only-show-errors
-    downloaded_checksum="$(sha256sum "${downloaded_archive}" | awk '{print $1}')"
+    aws s3 cp "${s3_uri}" "${downloaded_archive}" --region "${AWS_REGION}" --only-show-errors || {
+        rm -rf -- "${tmp_dir}" 2>/dev/null || true
+        tmp_dir=""
+        return 1
+    }
+    downloaded_checksum="$(sha256sum "${downloaded_archive}" | awk '{print $1}')" || {
+        rm -rf -- "${tmp_dir}" 2>/dev/null || true
+        tmp_dir=""
+        return 1
+    }
     if [[ "${downloaded_checksum}" != "${checksum}" ]]; then
         echo "Downloaded S3 object checksum does not match the uploaded archive." >&2
-        rm -rf -- "${tmp_dir}"
+        rm -rf -- "${tmp_dir}" 2>/dev/null || true
+        tmp_dir=""
         return 1
     fi
 
-    mkdir -p "${tmp_dir}/restore"
-    zstd -dc "${downloaded_archive}" | tar -xf - -C "${tmp_dir}/restore"
-    "${UETS_BIN}" db verify-checkpoint \
-        "${day}" "${tmp_dir}/restore/rocksdb_backup"
+    mkdir -p "${tmp_dir}/restore" || {
+        rm -rf -- "${tmp_dir}" 2>/dev/null || true
+        tmp_dir=""
+        return 1
+    }
+    zstd -dc "${downloaded_archive}" | tar -xf - -C "${tmp_dir}/restore" || {
+        rm -rf -- "${tmp_dir}" 2>/dev/null || true
+        tmp_dir=""
+        return 1
+    }
+    "${UETS_BIN}" db verify-checkpoint "${day}" "${tmp_dir}/restore/rocksdb_backup" || {
+        rm -rf -- "${tmp_dir}" 2>/dev/null || true
+        tmp_dir=""
+        return 1
+    }
 
     echo "S3 upload and restore verification passed; deleting local daily partition ${day_dir}."
-    rm -rf -- "${day_dir}"
-    if [[ -e "${day_dir}" ]]; then
-        echo "Local daily partition cleanup did not complete: ${day_dir}" >&2
-        rm -rf -- "${tmp_dir}"
+    rm -rf -- "${day_dir}" || {
+        rm -rf -- "${tmp_dir}" 2>/dev/null || true
+        tmp_dir=""
         return 1
-    fi
-
+    }
     rm -rf -- "${tmp_dir}"
+    tmp_dir=""
     echo "Daily partition ${day} archived to Glacier and removed from local disk."
     return 0
 }
@@ -217,32 +237,24 @@ while true; do
         exit 0
     fi
 
-    oldest="$(list_daily_partitions | head -n1)"
-    if [[ -z "${oldest}" ]]; then
-        echo "Disk usage ${used_percent}% is above threshold but no daily partitions to archive." >&2
-        exit 1
-    fi
-
     if [[ -n "${TARGET_DATE}" ]]; then
-        if [[ "${oldest}" != "${TARGET_DATE}" ]]; then
-            echo "Target date ${TARGET_DATE} is not the oldest partition (${oldest}). Nothing to archive." >&2
-            exit 0
+        if ! is_archiveable "${TARGET_DATE}"; then
+            echo "Target date ${TARGET_DATE} is not a sealed, archiveable day." >&2
+            exit 2
         fi
+        archive_day "${TARGET_DATE}" || exit 1
+        exit 0
     fi
 
-    if ! stop_uets; then
-        echo "Failed to stop UETS; aborting archive of ${oldest}." >&2
+    oldest=""
+    for d in $(list_archiveable_days); do
+        oldest="${d}"
+        break
+    done
+    if [[ -z "${oldest}" ]]; then
+        echo "Disk usage ${used_percent}% is above threshold but no sealed, completed days to archive." >&2
         exit 1
     fi
 
-    if ! archive_day "${oldest}"; then
-        echo "Archive of ${oldest} failed; restarting UETS." >&2
-        resume_uets || true
-        exit 1
-    fi
-
-    if ! resume_uets; then
-        echo "CRITICAL: could not restart UETS after archiving ${oldest}; start it manually in tmux session '${UETS_TMUX_SESSION}'." >&2
-        exit 1
-    fi
+    archive_day "${oldest}" || exit 1
 done

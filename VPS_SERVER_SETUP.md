@@ -279,35 +279,43 @@ queries after it exits.
 RocksDB is stored under `UETS_LIVE_DB` as daily UTC partitions:
 ```
 market_data/live_db/
-├── 2026-11-12/
+├── 2026-11-09/
 │   ├── telemetry/
 │   ├── portfolio/
 │   └── trades/
-├── 2026-11-13/
+│   └── .sealed          # writer wrote this at rollover; day is closed
+├── 2026-11-10/
 │   ├── telemetry/
 │   ├── portfolio/
 │   └── trades/
-└── current_session   # still used by the TUI for per-session display
+│   └── .sealed
+└── current_session        # still used by the TUI for per-session display
 ```
 
-The TUI continues to show data per session via `current_session`, but the
-on-disk RocksDB layout is partitioned by day (MVCC daily snapshots at UTC
-00:00). The active trading day is never touched by the archiver.
+The writer seals a completed day by writing `.sealed` after rolling over to the
+next day's partitions. `cloud.sh` never stops UETS, never sends `q` to tmux,
+and never touches the live (today's) day. It only checkpoints sealed,
+completed days read-only with `db checkpoint`.
 
 When disk usage exceeds `DISK_THRESHOLD_PERCENT`, `cloud.sh` acts as a FIFO
 queue:
 
-1. Sends `q` to the tmux TUI and waits for UETS to stop cleanly.
-2. Checkpoints the **oldest** daily partition (`db checkpoint <date>`).
+1. Lists eligible days: `name < today's UTC date` AND `.sealed` exists,
+   oldest first.
+2. Checkpoints the oldest sealed day (`db checkpoint <date>`).
 3. Compresses (`.tar.zst`) and uploads to S3 Glacier Instant Retrieval.
-4. Downloads the object back, compares SHA-256, restores, and re-verifies the
-   checkpoint.
-5. **Only after all checks pass**, deletes that daily partition from local disk.
-6. Restarts UETS in tmux with the same session.
-7. Loops: re-checks disk usage and archives the next oldest day until usage is
-   back below threshold.
+4. Downloads the object back, compares SHA-256, restores, re-verifies.
+5. **Only after all checks pass**, deletes that daily partition from disk.
+6. Loops: re-checks disk, archives the next oldest sealed day until below
+   threshold.
 
-If any step fails, the local partition is kept and UETS is restarted.
+If any step fails, the local partition is kept and the script exits non-zero.
+If disk is above threshold but no sealed day exists, it exits non-zero without
+deleting anything.
+
+This is **daily partitioning with RocksDB Checkpoint** (cross-process export
+via hard links), not in-process MVCC snapshots. The live UETS process keeps
+running; trades and portfolio are unaffected.
 
 Install AWS CLI v2 and configure AWS through the EC2 instance profile. Then
 create the archive service environment:
@@ -329,11 +337,10 @@ sudo chmod 0600 /etc/uets/archive.env
 
 The IAM role needs `s3:PutObject` and `s3:GetObject` on the chosen prefix
 (`HeadObject` is authorized by `s3:GetObject`). `cloud.sh` accepts an optional
-`YYYY-MM-DD` argument to archive a specific day; with no argument it runs the
-FIFO loop automatically.
+`YYYY-MM-DD` argument to archive a specific sealed day; with no argument it
+runs the FIFO loop automatically.
 It exits without archiving when usage is below threshold, and fails explicitly
-if stopping UETS, checkpointing, upload, download, checksum, or restore
-verification fails.
+if checkpointing, upload, download, checksum, or restore verification fails.
 It needs free temporary space for the compressed archive; configure
 `ARCHIVE_TMP_DIR` accordingly.
 
@@ -353,10 +360,9 @@ sudo systemctl enable --now uets-cloud-archive.timer
 ```
 
 Confirm `/etc/uets/archive.env` is populated before enabling the timer. Glacier
-Instant Retrieval has storage and retrieval charges. A local daily partition is
-deleted only after the S3 object is downloaded and restore-verified; portfolio
-and trade databases within that day are archived together and then removed from
-disk.
+Instant Retrieval has storage and retrieval charges. A sealed local daily
+partition (telemetry + portfolio + trades) is deleted only after the S3 object
+is downloaded and restore-verified.
 
 ### OOM restart harness
 
