@@ -19,7 +19,12 @@
 //! producers ──try_send──▶ bounded queue ──writer thread──▶ UetsDb
 //!    (strategy/reporter)    (backpressure)    (batched writes, retries)
 //! ```
+//!
+//! With [`spawn_rolling`] the writer thread also owns the daily UTC partition
+//! swap (pre-open, carry-forward, flush and close of the previous day), so a
+//! database swap never runs on a producer thread.
 
+use crate::partition::{self, RollingDb};
 use crate::schema::{PortfolioRecord, SessionSummary, TradeRecord};
 use crate::store::{DbError, UetsDb};
 use std::collections::VecDeque;
@@ -308,11 +313,83 @@ impl PersistenceWorker {
     }
 }
 
+/// Where the writer thread gets its database from.
+enum DbSource {
+    /// One database for the whole run (legacy / tests).
+    Fixed(Arc<UetsDb>),
+    /// A daily UTC partition that rolls over on this writer thread.
+    Rolling {
+        db: RollingDb<UetsDb>,
+        clock: fn() -> i64,
+    },
+}
+
+impl DbSource {
+    /// The database to write the next batch to. For a rolling source this first
+    /// advances the day. A failed roll never drops or blocks writes: the previous
+    /// day's database stays current and the roll is retried after a back-off.
+    fn current(&mut self) -> Arc<UetsDb> {
+        match self {
+            DbSource::Fixed(db) => Arc::clone(db),
+            DbSource::Rolling { db, clock } => {
+                match db.tick(clock()) {
+                    Ok(Some(rollover)) => {
+                        tracing::info!(
+                            from = %rollover.from,
+                            to = %rollover.to,
+                            previous_handle_closed = rollover.previous_handle_closed,
+                            "persistence: rolled to a new daily partition"
+                        );
+                        if let Some(error) = &rollover.flush_error {
+                            tracing::warn!(%error, "persistence: flush of the previous day failed (close will flush again)");
+                        }
+                        if !rollover.previous_handle_closed {
+                            tracing::warn!(
+                                "persistence: previous day's database is still referenced; it will not be sealed until released"
+                            );
+                        }
+                    }
+                    Ok(None) => {}
+                    Err(error) => {
+                        tracing::error!(
+                            %error,
+                            "persistence: daily rollover failed; continuing on the previous day's database (will retry)"
+                        );
+                    }
+                }
+                Arc::clone(db.current())
+            }
+        }
+    }
+}
+
 /// Spawn the asynchronous persistence writer over `db`.
 ///
 /// Returns a producer handle and a worker. The worker must eventually be
 /// [`PersistenceWorker::shutdown`] to drain and flush everything.
 pub fn spawn(db: Arc<UetsDb>, config: PersistenceConfig) -> (PersistenceHandle, PersistenceWorker) {
+    spawn_with(DbSource::Fixed(db), config)
+}
+
+/// Like [`spawn`], but over a daily-partitioned database. The writer thread
+/// advances the UTC day between batches (see [`RollingDb::tick`]).
+pub fn spawn_rolling(
+    db: RollingDb<UetsDb>,
+    config: PersistenceConfig,
+) -> (PersistenceHandle, PersistenceWorker) {
+    spawn_rolling_with_clock(db, config, partition::unix_now)
+}
+
+/// [`spawn_rolling`] with an injectable clock (unix seconds), for tests.
+pub fn spawn_rolling_with_clock(
+    db: RollingDb<UetsDb>,
+    config: PersistenceConfig,
+    clock: fn() -> i64,
+) -> (PersistenceHandle, PersistenceWorker) {
+    spawn_with(DbSource::Rolling { db, clock }, config)
+}
+
+fn spawn_with(source: DbSource, config: PersistenceConfig) -> (PersistenceHandle, PersistenceWorker) {
     let (tx, rx) = async_channel::bounded(config.queue_capacity.max(1));
     let shared = Arc::new(Shared {
         tx: Mutex::new(Some(tx)),
@@ -324,7 +401,7 @@ pub fn spawn(db: Arc<UetsDb>, config: PersistenceConfig) -> (PersistenceHandle, 
     let thread_shared = Arc::clone(&shared);
     let thread = std::thread::Builder::new()
         .name("uets-persistence".into())
-        .spawn(move || writer_loop(db, thread_shared, config.batch_max.max(1)))
+        .spawn(move || writer_loop(source, thread_shared, config.batch_max.max(1)))
         .expect("failed to spawn persistence writer thread");
 
     (
@@ -392,7 +469,7 @@ fn write_items(db: &UetsDb, items: &[PersistItem], shared: &Shared) -> Result<us
     Ok(written)
 }
 
-fn writer_loop(db: Arc<UetsDb>, shared: Arc<Shared>, batch_max: usize) {
+fn writer_loop(mut source: DbSource, shared: Arc<Shared>, batch_max: usize) {
     let mut pending: VecDeque<PersistItem> = VecDeque::new();
     let mut attempts: u32 = 0;
     let mut channel_closed = false;
@@ -447,6 +524,8 @@ fn writer_loop(db: Arc<UetsDb>, shared: Arc<Shared>, batch_max: usize) {
         }
 
         let batch: Vec<PersistItem> = pending.drain(..).collect();
+        // Advance the daily partition (if any) between batches, on this thread only.
+        let db = source.current();
         match write_items(&db, &batch, &shared) {
             Ok(_n) => {
                 attempts = 0;
@@ -477,6 +556,7 @@ fn writer_loop(db: Arc<UetsDb>, shared: Arc<Shared>, batch_max: usize) {
     }
 
     // Queue is closed and drained: final flush of quarantined items.
+    let db = source.current();
     loop {
         let next = shared.quarantine.lock().unwrap().pop_front();
         let Some(item) = next else { break };
@@ -607,6 +687,55 @@ mod tests {
 
         drop(db);
         let _ = std::fs::remove_dir_all(&path);
+    }
+
+    static TEST_CLOCK: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+
+    fn test_clock() -> i64 {
+        TEST_CLOCK.load(Ordering::SeqCst)
+    }
+
+    #[test]
+    fn rolling_persistence_splits_records_across_utc_days_without_loss() {
+        use crate::partition::{DbKind, RollingDb, db_path};
+
+        let root = std::env::temp_dir().join(format!("uets_roll_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        // 2026-11-12 23:59:00 UTC, then 2026-11-13 00:00:30 UTC.
+        let before_midnight = 1_794_527_940;
+        let after_midnight = 1_794_528_030;
+        TEST_CLOCK.store(before_midnight, Ordering::SeqCst);
+
+        let rolling =
+            RollingDb::<UetsDb>::open(&root, DbKind::Trades, "session_1", before_midnight).unwrap();
+        let (handle, worker) =
+            spawn_rolling_with_clock(rolling, PersistenceConfig::default(), test_clock);
+
+        for i in 0..10i64 {
+            handle.submit(PersistItem::Trade(sample_trade(i))).unwrap();
+        }
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while handle.stats().written < 10 && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(handle.stats().written >= 10, "day-1 records must be written first");
+
+        TEST_CLOCK.store(after_midnight, Ordering::SeqCst);
+        for i in 100..110i64 {
+            handle.submit(PersistItem::Trade(sample_trade(i))).unwrap();
+        }
+        worker.shutdown().unwrap();
+
+        let filter = QueryFilter::new().session("session_1");
+        let day_one = UetsDb::open(db_path(&root, "2026-11-12", DbKind::Trades, "session_1")).unwrap();
+        let day_two = UetsDb::open(db_path(&root, "2026-11-13", DbKind::Trades, "session_1")).unwrap();
+        assert_eq!(day_one.query_trades(&filter).unwrap().len(), 10);
+        assert_eq!(day_two.query_trades(&filter).unwrap().len(), 10);
+        // The previous day's database was closed by the swap, so a second open succeeded above.
+
+        drop(day_one);
+        drop(day_two);
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
