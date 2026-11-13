@@ -62,7 +62,7 @@ pub fn claim(_sock: &Path) -> std::io::Result<Claim> {
 #[cfg(unix)]
 fn pid_alive(pid: u32) -> bool {
     // Signal 0 performs error checking without delivering a signal.
-    unsafe { libc_kill(pid, 0) == 0 }
+    libc_kill(pid, 0) == 0
 }
 
 #[cfg(unix)]

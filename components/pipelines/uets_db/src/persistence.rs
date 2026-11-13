@@ -730,7 +730,14 @@ mod tests {
         let day_one = UetsDb::open(db_path(&root, "2026-11-12", DbKind::Trades, "session_1")).unwrap();
         let day_two = UetsDb::open(db_path(&root, "2026-11-13", DbKind::Trades, "session_1")).unwrap();
         assert_eq!(day_one.query_trades(&filter).unwrap().len(), 10);
-        assert_eq!(day_two.query_trades(&filter).unwrap().len(), 10);
+        // Day two = its own 10 trades + the newest day-one trade carried forward at the swap.
+        let day_two_trades = day_two.query_trades(&filter).unwrap();
+        assert_eq!(day_two_trades.len(), 11);
+        let carried = sample_trade(9).event_time;
+        assert!(
+            day_two_trades.iter().any(|t| t.event_time == carried),
+            "newest day-one trade must be carried into day two"
+        );
         // The previous day's database was closed by the swap, so a second open succeeded above.
 
         drop(day_one);
