@@ -23,8 +23,6 @@ chrono = { version = "0.4", features = ["serde"] }
 # UUID for session/order ids
 uuid = { version = "1", features = ["v4"] }
 
-# Async support
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
 
 # Bounded channel for backpressure
 async-channel = "1"
@@ -34,5 +32,3 @@ tracing = "0.1"
 
 # Error handling
 thiserror = "1"
-
-

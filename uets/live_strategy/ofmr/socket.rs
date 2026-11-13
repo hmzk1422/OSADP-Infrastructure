@@ -739,7 +739,7 @@ pub fn run(socket_path: &str, symbol: &str) -> Result<(), String> {
         UnixListener::bind(socket_path).map_err(|e| format!("bind {socket_path}: {e}"))?;
 
     let mut features = OfmrFeatures::new();
-    let mut strategy = OfmrStrategy::new();
+    let strategy = OfmrStrategy::new();
     let settings = Settings::load();
     let mut executor = OrderExecutor::from_env(&settings)?;
     let starting_equity = std::env::var("UETS_STARTING_EQUITY")

@@ -2544,7 +2544,7 @@ fn rocksdb_dir_locked(db_dir: &std::path::Path) -> bool {
     probe.l_start = 0;
     probe.l_len = 0;
     let status = unsafe { libc::fcntl(file.as_raw_fd(), libc::F_GETLK, &mut probe) };
-    status != 0 || probe.l_type != libc::F_UNLCK
+    status != 0 || probe.l_type != libc::F_UNLCK as _
 }
 
 #[cfg(not(unix))]
