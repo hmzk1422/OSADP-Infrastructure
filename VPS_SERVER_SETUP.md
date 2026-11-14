@@ -50,6 +50,15 @@ sudo systemctl enable --now uets-tmux
 sudo -u uets tmux attach -t uets
 ```
 
+Before a strategy's live websocket feed starts, UETS seeds its feature state
+from Binance's public USD-M Futures REST API: closed one-minute candles and
+aggregate trades for the strategy's requested lookback (two hours by default).
+This is shared by strategy feature implementations; a strategy with a longer
+window can request a longer lookback. The seed is used only for feature warm-up,
+not replayed as trades or written as live fills. The VPS needs outbound HTTPS
+access to `fapi.binance.com`; no API credentials are required. If history cannot
+be fetched, the feed reports an error instead of starting the strategy cold.
+
 The TUI is displayed inside tmux; detach with `Ctrl+B`, then `D`, and reattach
 with `sudo -u uets tmux attach -t uets`. The watchdog restarts unexpected
 failures. Pressing `q` intentionally exits UETS. Provide AWS access through an
@@ -385,3 +394,104 @@ marker, so a later watchdog launch starts a fresh session; the old RocksDB
 directories remain on disk. The live feed reseed path is separately covered by
 Rust tests. Run a real binary crash/reseed smoke only in `live-test` mode,
 never with real trading enabled.
+
+## `update-uets.sh` for pulling most recent binary compilation
+```bash
+
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+ROOT="/opt/uets"
+APP="$ROOT/uets-linux-x86_64"
+REPO="hmzk1422/OSADP-Infrastructure"
+SERVICE="uets-tmux"
+ASSET="uets-linux-x86_64-amazonlinux2023.1.zip"
+
+TMP="$(mktemp -d)"
+BACKUP=""
+
+cleanup() {
+    rm -rf "$TMP"
+}
+trap cleanup EXIT
+
+echo "=== UETS updater ==="
+
+# Get latest release asset URL from GitHub
+URL="$(python3 - "$REPO" "$ASSET" <<'PY'
+import json, sys, urllib.request
+repo, asset = sys.argv[1:]
+req = urllib.request.Request(
+    f"https://api.github.com/repos/{repo}/releases/latest",
+    headers={"Accept": "application/vnd.github+json",
+             "User-Agent": "UETS-Updater"}
+)
+with urllib.request.urlopen(req, timeout=20) as r:
+    release = json.load(r)
+for item in release.get("assets", []):
+    if item["name"] == asset:
+        print(item["browser_download_url"])
+        break
+else:
+    raise SystemExit(f"Release asset not found: {asset}")
+PY
+)"
+
+echo "Downloading: $URL"
+curl -fL --retry 3 "$URL" -o "$TMP/release.zip"
+
+mkdir "$TMP/extracted"
+unzip -q "$TMP/release.zip" -d "$TMP/extracted"
+
+ARCHIVE="$(find "$TMP/extracted" -name 'uets-linux-x86_64.tar.gz' -print -quit)"
+[[ -n "$ARCHIVE" ]] || {
+    echo "ERROR: Expected tar.gz archive not found."
+    exit 1
+}
+
+mkdir "$TMP/package"
+tar -xzf "$ARCHIVE" -C "$TMP/package"
+
+NEW_BIN="$(find "$TMP/package" -path '*/bin/uets' -type f -print -quit)"
+[[ -n "$NEW_BIN" ]] || {
+    echo "ERROR: New UETS executable not found."
+    exit 1
+}
+
+# Validate the new executable before stopping the service
+chmod 755 "$NEW_BIN"
+"$NEW_BIN" help >/dev/null
+
+# Back up existing binary
+STAMP="$(date +%Y%m%d-%H%M%S)"
+BACKUP="$APP/bin/uets.backup.$STAMP"
+sudo cp "$APP/bin/uets" "$BACKUP"
+
+echo "Stopping UETS..."
+sudo systemctl stop "$SERVICE"
+
+echo "Installing updated binary..."
+sudo install -o uets -g uets -m 755 "$NEW_BIN" "$APP/bin/uets"
+
+echo "Starting UETS..."
+sudo systemctl start "$SERVICE"
+
+sleep 3
+if ! sudo systemctl is-active --quiet "$SERVICE"; then
+    echo "ERROR: UETS did not start. Rolling back binary..."
+    sudo systemctl stop "$SERVICE" || true
+    sudo cp "$BACKUP" "$APP/bin/uets"
+    sudo systemctl start "$SERVICE"
+    exit 1
+fi
+
+echo "=== UPDATE SUCCESSFUL ==="
+echo "Backup: $BACKUP"
+sudo systemctl status "$SERVICE" --no-pager
+
+```
+Setup and run by:
+```
+sudo chmod +x /opt/uets/update-uets.sh
+sudo /opt/uets/update-uets.sh
+```

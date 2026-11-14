@@ -105,7 +105,7 @@ impl Merger {
                     needs_reseed = true;
                 } else {
                     let gaps_before = self.state.counters.gaps;
-                    self.state.apply_diff(frame);
+                    applied = self.state.apply_diff(frame);
                     needs_reseed = self.state.counters.gaps > gaps_before;
                 }
             }

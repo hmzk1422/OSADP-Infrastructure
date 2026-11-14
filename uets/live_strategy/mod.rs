@@ -16,12 +16,13 @@ pub mod example_strategy;
 pub mod live_db;
 pub mod ofmr;
 pub mod traits;
+pub mod warmup;
 
 pub mod runner;
 
 pub use live_db::LiveDb;
 pub use runner::{StrategyRunner, discover_strategy_dirs};
-pub use traits::{ComputeFeatures, LiveStrategy, StateBuilder};
+pub use traits::{ComputeFeatures, DEFAULT_WARMUP_LOOKBACK_SECS, LiveStrategy, StateBuilder};
 
 /// Strategies compiled into this binary.
 pub fn available_strategies() -> Vec<String> {
@@ -70,6 +71,17 @@ mod tests {
     }
 
     #[test]
+    fn every_strategy_has_a_valid_history_warmup_requirement() {
+        for name in available_strategies() {
+            let bundle = load_strategy(&name).expect("loads strategy");
+            assert!(
+                bundle.computer.warmup_lookback_secs() > 0,
+                "strategy {name} must request historical data before live input"
+            );
+        }
+    }
+
+    #[test]
     fn unknown_strategy_is_an_error() {
         assert!(load_strategy("typo").is_err());
     }
@@ -105,5 +117,53 @@ mod tests {
             .step("ofmr", "ETHUSDT", &row(100.0, 1_000.0))
             .unwrap();
         assert_eq!(runner.slot_count(), 3);
+    }
+
+    #[test]
+    fn runner_seeds_history_without_deciding_until_live_input() {
+        let mut runner = StrategyRunner::new();
+        let mut start = FeatureRow::new();
+        start.insert("warmup_start", 1.0);
+        assert_eq!(
+            runner.step("example_strategy", "BTCUSDT", &start).unwrap(),
+            (
+                crate::core::strategy::Decision::Hold,
+                crate::core::strategy::Position::Flat
+            )
+        );
+
+        for event_time_ms in 1..=4 {
+            let mut historical = row(10.0, event_time_ms as f64);
+            historical.insert("warmup", 1.0);
+            assert_eq!(
+                runner
+                    .step("example_strategy", "BTCUSDT", &historical)
+                    .unwrap(),
+                (
+                    crate::core::strategy::Decision::Hold,
+                    crate::core::strategy::Position::Flat
+                )
+            );
+        }
+
+        let mut end = FeatureRow::new();
+        end.insert("warmup_end", 1.0);
+        assert_eq!(
+            runner.step("example_strategy", "BTCUSDT", &end).unwrap(),
+            (
+                crate::core::strategy::Decision::Hold,
+                crate::core::strategy::Position::Flat
+            )
+        );
+
+        assert_eq!(
+            runner
+                .step("example_strategy", "BTCUSDT", &row(20.0, 5.0))
+                .unwrap(),
+            (
+                crate::core::strategy::Decision::EnterLong,
+                crate::core::strategy::Position::Long
+            )
+        );
     }
 }

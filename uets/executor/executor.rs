@@ -392,6 +392,27 @@ fn research_method(selector: &str) -> Option<&'static str> {
     }
 }
 
+fn is_research_request(identity: &str) -> bool {
+    identity
+        .split_once('@')
+        .is_some_and(|(_, selector)| research_method(selector).is_some())
+}
+
+fn validate_playback_run_requests(requested: &[String]) -> Result<(), String> {
+    if let Some(identity) = requested
+        .iter()
+        .find(|identity| !is_research_request(identity))
+    {
+        return Err(format!(
+            "execution mode is 'playback', so 'run' accepts only research selectors such as ofmr@pwf; \
+             '{identity}' is not a research selector. To start a live worker, set mode to live-test, \
+             testnet, or live-trade in uets/config/execution.yaml and use strategy@asset \
+             (for example ofmr@btcusdt)."
+        ));
+    }
+    Ok(())
+}
+
 fn run_research_batch(requested: &[String]) -> ExitCode {
     let strategies = live_strategy::available_strategies();
     let mut succeeded = 0;
@@ -491,10 +512,7 @@ fn split_run_requests(requested: &[String]) -> (Vec<String>, Vec<String>) {
     let mut research = Vec::new();
     let mut live = Vec::new();
     for identity in requested {
-        if identity
-            .split_once('@')
-            .is_some_and(|(_, selector)| research_method(selector).is_some())
-        {
+        if is_research_request(identity) {
             research.push(identity.clone());
         } else {
             live.push(identity.clone());
@@ -1225,21 +1243,28 @@ fn stop_child(child: &mut Option<std::process::Child>, label: &str) -> Result<()
     Ok(())
 }
 
+fn apply_supervisor_errors(
+    snapshot: &mut uets_gui::DashboardSnapshot,
+    errors: &std::collections::BTreeMap<String, String>,
+) {
+    for instance in &mut snapshot.instances {
+        let identity = instance.identity();
+        if let Some(error) = errors.get(&identity) {
+            instance.statistics.status = Some("error".into());
+            instance.statistics.last_error = Some(format!(
+                "{error}; inspect logs/uets/feed_{}.log and logs/uets/strategy_{}_{}.log",
+                instance.asset_id, instance.strategy_id, instance.asset_id
+            ));
+        }
+    }
+}
+
 #[cfg(unix)]
 impl uets_gui::SnapshotSource for LiveDashboard {
     fn snapshot(&mut self) -> uets_gui::DashboardSnapshot {
         let supervisor_errors = self.supervise_children();
         let mut snapshot = self.snapshots.snapshot();
-        for instance in &mut snapshot.instances {
-            let identity = instance.identity();
-            if let Some(error) = supervisor_errors.get(&identity) {
-                instance.statistics.status = Some("error".into());
-                instance.statistics.last_error = Some(format!(
-                    "{error}; inspect logs/uets/feed_{}.log and logs/uets/strategy_{}_{}.log",
-                    instance.asset_id, instance.strategy_id, instance.asset_id
-                ));
-            }
-        }
+        apply_supervisor_errors(&mut snapshot, &supervisor_errors);
         if self.last_telemetry_sample.elapsed() >= std::time::Duration::from_secs(1) {
             use uets_db::{ConnectionTelemetry, SchemaVersion, TelemetryRecord};
             let connections = snapshot
@@ -1981,8 +2006,8 @@ mod record {
         }
 
         const DIFF_OLD: &str =
-            r#"{"e":"depthUpdate","E":1751245200083,"U":1,"u":900,"b":[],"a":[]}"#;
-        const DIFF_SPANS: &str = r#"{"e":"depthUpdate","E":1751245200406,"U":901,"u":1100,"b":[["108663.2","9.141"]],"a":[["108665.6","12.556"]]}"#;
+            r#"{"e":"depthUpdate","E":1751245200083,"U":1,"u":900,"pu":0,"b":[],"a":[]}"#;
+        const DIFF_SPANS: &str = r#"{"e":"depthUpdate","E":1751245200406,"U":901,"u":1100,"pu":900,"b":[["108663.2","9.141"]],"a":[["108665.6","12.556"]]}"#;
         const TRADE_WIRE: &str = r#"{"e":"aggTrade","E":1751245200354,"a":2773899591,"p":"108665.6","q":"0.002","f":6438488841,"l":6438488841,"T":1751245200354,"m":true}"#;
 
         #[test]
@@ -2438,10 +2463,7 @@ fn cmd_db(args: &[String]) -> Result<(), String> {
     {
         return cmd_db_verify_checkpoint(&args[1..]);
     }
-    if args
-        .first()
-        .is_some_and(|argument| argument == "seal-days")
-    {
+    if args.first().is_some_and(|argument| argument == "seal-days") {
         return cmd_db_seal_days(&args[1..]);
     }
 
@@ -2532,7 +2554,11 @@ fn open_latest_db(root: &std::path::Path, kind: DbKind, sid: &str) -> Result<Uet
 fn rocksdb_dir_locked(db_dir: &std::path::Path) -> bool {
     use std::os::unix::io::AsRawFd;
     let lock = db_dir.join("LOCK");
-    let file = match std::fs::OpenOptions::new().read(true).write(true).open(&lock) {
+    let file = match std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&lock)
+    {
         Ok(file) => file,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return false,
         Err(_) => return true,
@@ -2613,7 +2639,8 @@ fn cmd_db_verify_checkpoint(args: &[String]) -> Result<(), String> {
         if !path.is_dir() {
             return Err(format!("checkpoint is missing {entry}"));
         }
-        let db = UetsDb::open(&path).map_err(|error| format!("open checkpoint {entry}: {error}"))?;
+        let db =
+            UetsDb::open(&path).map_err(|error| format!("open checkpoint {entry}: {error}"))?;
         let detail = match kind {
             DbKind::Telemetry => {
                 let records = db
@@ -2945,6 +2972,10 @@ fn main() -> ExitCode {
                     eprintln!("mode is playback but playback.playback_strategies is empty");
                     return ExitCode::FAILURE;
                 }
+                if let Err(error) = validate_playback_run_requests(&requested) {
+                    eprintln!("{error}");
+                    return ExitCode::FAILURE;
+                }
                 return run_research_batch(&requested);
             }
             let (research, live) = split_run_requests(&requested);
@@ -3100,7 +3131,10 @@ fn main() -> ExitCode {
 
 #[cfg(test)]
 mod strategy_instance_tests {
-    use super::{parse_strategy_instance, split_run_requests};
+    use super::{
+        apply_supervisor_errors, parse_strategy_instance, split_run_requests,
+        validate_playback_run_requests,
+    };
 
     #[test]
     fn parses_canonical_identity_case_insensitively() {
@@ -3134,6 +3168,55 @@ mod strategy_instance_tests {
             live,
             vec!["ofmr@btcusdt".to_string(), "ofmr@ethusdt".to_string()]
         );
+    }
+
+    #[test]
+    fn playback_mode_rejects_live_instances_with_actionable_error() {
+        let error = validate_playback_run_requests(&["ofmr@btcusdt".to_string()])
+            .expect_err("live ticker is not a playback selector");
+        assert!(error.contains("execution mode is 'playback'"));
+        assert!(error.contains("set mode to live-test"));
+        assert!(error.contains("ofmr@btcusdt"));
+    }
+
+    #[test]
+    fn playback_mode_accepts_research_selectors() {
+        assert!(
+            validate_playback_run_requests(&["ofmr@pwf".to_string(), "ofmr@cpcv".to_string()])
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn failed_worker_is_visible_in_dashboard_status_and_error() {
+        let mut snapshot = uets_gui::DashboardSnapshot {
+            instances: vec![uets_gui::InstanceSnapshot {
+                strategy_id: "ofmr".into(),
+                asset_id: "btcusdt".into(),
+                statistics: uets_gui::Statistics {
+                    status: Some("enabled".into()),
+                    ..uets_gui::Statistics::default()
+                },
+                ..uets_gui::InstanceSnapshot::default()
+            }],
+            ..uets_gui::DashboardSnapshot::default()
+        };
+        let errors = std::collections::BTreeMap::from([(
+            "ofmr@btcusdt".into(),
+            "worker exited during startup".into(),
+        )]);
+
+        apply_supervisor_errors(&mut snapshot, &errors);
+
+        let statistics = &snapshot.instances[0].statistics;
+        assert_eq!(statistics.status.as_deref(), Some("error"));
+        let message = statistics
+            .last_error
+            .as_deref()
+            .expect("error is displayed");
+        assert!(message.contains("worker exited during startup"));
+        assert!(message.contains("logs/uets/feed_btcusdt.log"));
+        assert!(message.contains("logs/uets/strategy_ofmr_btcusdt.log"));
     }
 
     #[test]

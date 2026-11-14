@@ -74,7 +74,7 @@ impl Default for ModelSettings {
     fn default() -> Self {
         Self {
             path: "uets/models/ofmr/trader.txt".into(),
-            threshold: 0.50,
+            threshold: 0.25,
             trade_direction: "long".into(),
         }
     }
@@ -278,6 +278,7 @@ mod tests {
         let settings: Settings =
             serde_yaml::from_str(include_str!("../../config/ofmr.yaml")).unwrap();
         settings.validate().unwrap();
+        assert_eq!(settings.model.threshold, 0.25);
         assert_eq!(settings.trade.max_position_usd, 10_000.0);
         assert_eq!(settings.feature.ltf_timeframe_secs, 1);
     }
@@ -287,7 +288,7 @@ mod tests {
         let yaml = r#"
 model:
   path: "uets/models/ofmr/trader.txt"
-  threshold: 0.50
+  threshold: 0.25
   trade_direction: "long"
 feature:
   htf_timeframe_secs: 300

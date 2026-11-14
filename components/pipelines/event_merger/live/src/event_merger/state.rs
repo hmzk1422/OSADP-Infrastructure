@@ -45,6 +45,9 @@ pub struct State {
     pub book: LobBook,
     /// Last `final_update_id` applied to the book, if the book is seeded.
     pub last_update_id: Option<u64>,
+    /// Whether a live diff has established the venue's sequence chain since
+    /// the last snapshot.
+    pub has_stream_sequence: bool,
     /// As-of LOB identity for the next emitted row.
     pub lob_event_time_ms: Option<i64>,
     pub lob_final_update_id: Option<i64>,
@@ -59,6 +62,7 @@ impl Default for State {
         Self {
             book: LobBook::new(),
             last_update_id: None,
+            has_stream_sequence: false,
             lob_event_time_ms: None,
             lob_final_update_id: None,
             event_sequence: 0,
@@ -101,6 +105,7 @@ impl State {
     ) {
         self.book.apply_snapshot(bids, asks);
         self.last_update_id = Some(last_update_id);
+        self.has_stream_sequence = false;
         self.health = if self.book.is_empty() {
             BookHealth::Unseeded
         } else {
@@ -111,16 +116,21 @@ impl State {
 
     /// Apply one diff frame, detecting sequence gaps.
     ///
-    /// Binance's diff stream is ordered, so continuity is
-    /// `first_update_id <= last_applied + 1`. Anything else is a gap: the book
-    /// is marked stale and the frame is *still applied* (best effort) while the
-    /// caller re-seeds. Historical replay treats the same condition as
-    /// `first_update_id > last_final_update_id + 1`.
+    /// Binance Futures' `pu` links consecutive websocket events. The first
+    /// event after a REST snapshot is bridged by its update-ID range; other
+    /// sources without `pu` use the generic update-ID continuity check.
     pub fn apply_diff(&mut self, frame: &DiffFrame) -> bool {
         self.counters.diff_frames += 1;
 
         if let Some(last) = self.last_update_id {
-            if frame.first_update_id > last.saturating_add(1) {
+            if frame.final_update_id <= last {
+                return false;
+            }
+            let sequence_gap = match frame.previous_update_id {
+                Some(previous) if self.has_stream_sequence => previous != last,
+                Some(_) | None => frame.first_update_id > last.saturating_add(1),
+            };
+            if sequence_gap {
                 self.mark_gap();
             }
         }
@@ -134,6 +144,7 @@ impl State {
         }
 
         self.last_update_id = Some(frame.final_update_id);
+        self.has_stream_sequence |= frame.previous_update_id.is_some();
         self.lob_event_time_ms = Some(frame.event_time_ms);
         self.lob_final_update_id = Some(frame.final_update_id as i64);
         self.counters.events_applied += 1;

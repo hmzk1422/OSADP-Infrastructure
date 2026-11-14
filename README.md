@@ -42,6 +42,14 @@ Master Command: `docker compose -f docker-compose.dev.yml --profile live run --r
 - Testnet/live-test/live-trade: strategy@ticker
 - Playback: strategy@method (with master command)
 
+The checked-in `uets/config/execution.yaml` defaults to `mode: live-test`, so
+the `uets-live` command starts with simulated orders and does not place real
+exchange orders. Change the mode to `testnet` or `live-trade` only when
+intentionally using those order routes; `live-trade` also requires the
+explicit `allow_live_trading: true` guard. Use the canonical `strategy@asset`
+order, for example `ofmr@btcusdt`. Set `mode: playback` when you want the
+configured playback strategies to run with `run` and no explicit selectors.
+
 ```bash
 python -m uets.playback # Run the configured offline research analysis
 docker compose -f docker-compose.dev.yml config --quiet # Validate Docker Compose configuration without starting containers
@@ -52,7 +60,7 @@ docker compose -f docker-compose.dev.yml run --rm uets-dev cargo clippy --worksp
 docker compose -f docker-compose.dev.yml run --rm uets-dev cargo run --manifest-path uets/Cargo.toml --bin dev_test -- help # Show UETS CLI help
 docker compose -f docker-compose.dev.yml run --rm uets-dev cargo run --manifest-path uets/Cargo.toml --bin dev_test -- playback # Run selected playback method from the YAML
 docker compose -f docker-compose.dev.yml run --rm uets-dev python tests/test_playback_runner.py # Verify all playback modes; prints SUCCESSFUL
-# Master command to open the TUI and start trading:
+# Master command to open the TUI and start simulated trading:
 #   - Docker (live profile):       docker compose -f docker-compose.dev.yml --profile live run --rm uets-live run ofmr@btcusdt
 #   - Docker (multiple workers):    docker compose -f docker-compose.dev.yml --profile live run --rm uets-live run ofmr@btcusdt ofmr@ethusdt
 #   - Local Rust:                   cargo run --release --manifest-path uets/Cargo.toml --bin dev_test -- run ofmr@btcusdt ofmr@ethusdt
@@ -91,6 +99,11 @@ simulated orders and no exchange order connection. `testnet` routes orders to
 the exchange test network. `live-trade` routes real orders and requires API
 credentials plus `allow_live_trading: true`. Workers run until stopped with
 `q` or Ctrl+C.
+
+OFMR's model uses 5-minute features and requires 15 completed bars to warm up.
+After a fresh start, expect `Hold (warming up)` and no entries for about 75
+minutes; `Hold` after warm-up means the model did not signal an entry, not that
+the worker failed. The live threshold is 0.25, matching the research setting.
 
 ## Pre-loaded tickers
 

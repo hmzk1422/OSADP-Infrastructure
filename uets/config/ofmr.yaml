@@ -1,6 +1,6 @@
 model:
   path: uets/models/ofmr/trader.txt
-  threshold: 0.50
+  threshold: 0.25
   trade_direction: long
 feature:
   htf_timeframe_secs: 300
@@ -25,7 +25,7 @@ trade:
   max_hold_seconds: 300
   label_horizon_seconds: 6000
   embargo_seconds: 6000
-  lockout_seconds: 1000.0
+  lockout_seconds: 10.0
   max_trades_per_hour: 300
   rsi_filter_threshold: 30.0
   min_barrier_pct: 0.00015

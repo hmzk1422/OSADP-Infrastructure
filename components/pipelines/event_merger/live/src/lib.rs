@@ -77,6 +77,7 @@ mod tests {
             event_time_ms: ts,
             first_update_id: first,
             final_update_id: last,
+            previous_update_id: None,
             updates,
         })
     }
@@ -153,6 +154,52 @@ mod tests {
         assert!(merger.needs_reseed());
         merger.merge_event(snapshot(600, &[(98.0, 1.0)], &[(102.0, 1.0)]));
         assert!(!merger.needs_reseed());
+        assert!(merger.state().book_valid());
+    }
+
+    #[test]
+    fn binance_previous_update_id_keeps_contiguous_stream_valid() {
+        let mut merger = Merger::new(DEFAULT_LEVELS);
+        merger.merge_event(snapshot(100, &[(99.0, 1.0)], &[(101.0, 1.0)]));
+
+        let mut first = match diff(1000, 98, 105, vec![]) {
+            MarketEvent::Diff(frame) => frame,
+            _ => unreachable!(),
+        };
+        first.previous_update_id = Some(90);
+        let (_, outcome) = merger.merge_event(MarketEvent::Diff(first));
+        assert!(outcome.applied, "the first diff should bridge the snapshot");
+
+        let mut next = match diff(1100, 106, 110, vec![]) {
+            MarketEvent::Diff(frame) => frame,
+            _ => unreachable!(),
+        };
+        next.previous_update_id = Some(105);
+        let (_, outcome) = merger.merge_event(MarketEvent::Diff(next));
+        assert!(outcome.applied);
+        assert!(!outcome.needs_reseed);
+        assert!(merger.state().book_valid());
+
+        let mut gap = match diff(1200, 111, 115, vec![]) {
+            MarketEvent::Diff(frame) => frame,
+            _ => unreachable!(),
+        };
+        gap.previous_update_id = Some(109);
+        let (_, outcome) = merger.merge_event(MarketEvent::Diff(gap));
+        assert!(outcome.needs_reseed, "a broken `pu` chain must reseed");
+        assert!(!merger.state().book_valid());
+    }
+
+    #[test]
+    fn diff_older_than_reseed_snapshot_does_not_regress_book_sequence() {
+        let mut merger = Merger::new(DEFAULT_LEVELS);
+        merger.merge_event(snapshot(100, &[(99.0, 1.0)], &[(101.0, 1.0)]));
+
+        let (_, outcome) = merger.merge_event(diff(1000, 95, 99, vec![]));
+
+        assert!(!outcome.applied);
+        assert!(!outcome.needs_reseed);
+        assert_eq!(merger.state().last_update_id, Some(100));
         assert!(merger.state().book_valid());
     }
 

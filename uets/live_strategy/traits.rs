@@ -7,10 +7,21 @@
 use crate::core::feature::FeatureRow;
 use crate::core::strategy::{Decision, MarketState};
 
+pub const DEFAULT_WARMUP_LOOKBACK_SECS: u64 = 2 * 60 * 60;
+
 /// YOUR computation: stream row in -> feature row out (stateful windows here).
 pub trait ComputeFeatures: Send {
     fn compute(&mut self, row: &FeatureRow) -> Result<FeatureRow, String>;
     fn output_names(&self) -> Vec<String>;
+
+    /// Historical market data loaded before live events. Strategies with longer
+    /// windows can override this; the feed uses the maximum across its workers.
+    fn warmup_lookback_secs(&self) -> u64 {
+        DEFAULT_WARMUP_LOOKBACK_SECS
+    }
+
+    /// Clear feature state before replaying a new history seed.
+    fn reset(&mut self);
 }
 
 /// YOUR rules: feature row -> Decision. Pure: no clock, no I/O.

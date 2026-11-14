@@ -184,6 +184,13 @@ impl ResearchFeatureState {
             }
         }
 
+        if let Some(close) = row.get("bar_close_price")
+            && close.is_finite()
+            && close > 0.0
+        {
+            bar.close = Some(close);
+        }
+
         Ok(self.output_for_bar(bar_index))
     }
 
@@ -574,6 +581,7 @@ fn calculate_research_features(bars: &[RawBar], settings: &FeatureSettings) -> V
 /// Per-symbol streaming feature state.
 /// One instance per (strategy x symbol).
 pub struct OfmrFeatures {
+    settings: Settings,
     research: ResearchFeatureState,
 }
 
@@ -584,6 +592,7 @@ impl OfmrFeatures {
 
     pub fn with_settings(config: Settings) -> Self {
         Self {
+            settings: config.clone(),
             research: ResearchFeatureState::new(&config),
         }
     }
@@ -613,6 +622,10 @@ impl ComputeFeatures for OfmrFeatures {
 
     fn output_names(&self) -> Vec<String> {
         output_column_names()
+    }
+
+    fn reset(&mut self) {
+        self.research = ResearchFeatureState::new(&self.settings);
     }
 }
 
@@ -646,6 +659,38 @@ mod tests {
         for index in 0..N_FEATURES {
             assert!(row.contains(&format!("Column_{index}")));
             assert!(row.get(&format!("Column_{index}")).is_none());
+        }
+    }
+
+    #[test]
+    fn historical_bars_and_trades_seed_features_before_live_input() {
+        let mut features = OfmrFeatures::with_settings(Settings::default());
+        for minute in 0..120 {
+            let close_time_ms = (minute + 1) * 60_000 - 1;
+            let mut trade = FeatureRow::new();
+            trade.insert("event_time_ms", (close_time_ms - 100) as f64);
+            trade.insert("price", 100.0 + minute as f64 * 0.01);
+            trade.insert("amount", 0.1);
+            trade.insert("is_buyer_maker", if minute % 2 == 0 { 1.0 } else { 0.0 });
+            features.compute(&trade).expect("compute historical trade");
+
+            let mut candle = FeatureRow::new();
+            candle.insert("event_time_ms", close_time_ms as f64);
+            candle.insert("bar_close_price", 100.0 + minute as f64 * 0.01);
+            features
+                .compute(&candle)
+                .expect("compute historical candle");
+        }
+
+        let live = book_tick(101.2, (120 * 60_000) as f64);
+        let output = features.compute(&live).expect("compute first live row");
+        for index in 0..N_FEATURES {
+            assert!(
+                output
+                    .get(&format!("Column_{index}"))
+                    .is_some_and(f64::is_finite),
+                "Column_{index} should be ready immediately after history seeding"
+            );
         }
     }
 
