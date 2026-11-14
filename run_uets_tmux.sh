@@ -77,3 +77,6 @@ while tmux has-session -t "${SESSION}" 2>/dev/null; do
     fi
     sleep 1
 done
+
+echo "UETS tmux session stopped unexpectedly." >&2
+exit 1
