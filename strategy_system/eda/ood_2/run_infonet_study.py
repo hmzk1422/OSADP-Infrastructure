@@ -32,7 +32,7 @@ DATA = DataConfig(
     ts_unit="ms",                    # only used if load_L2's ``timestamp`` is numeric
 )
 CHECKPOINT = "regime_forecast_mae_checkpoint_v1.pkl"
-REPORT_TXT = "regime_report.txt"
+REPORT_TXT = os.path.join(os.path.dirname(__file__), "regime_report.txt")
 COMMON = dict(
     strategy="forecast_mae", window=32, horizons=(1, 2, 3, 4, 5),
     trade_horizon=1,          # legacy RR holding slot; forecast_mae uses cfg.horizons, keep coherent with horizons

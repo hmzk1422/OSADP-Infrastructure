@@ -1,0 +1,8 @@
+[Unit]
+Description=Fetch and install the latest UETS release
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/uets/uets-linux-x86_64/deploy/install_vps.sh --update

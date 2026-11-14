@@ -1,497 +1,63 @@
-# UETS VPS Server Setup and Storage Operations
+# UETS VPS setup
 
-This guide covers running the compiled UETS binary with an interactive tmux
-TUI, a crash-recovery watchdog, and verified telemetry archives to S3 Glacier
-Instant Retrieval.
+The installer configures a supported Linux VPS (Ubuntu/Debian or Amazon Linux
+2023): packages, the `uets` service account, persistent data directories,
+systemd, tmux, and the UETS watchdog. It expects the Linux x86_64 bundle
+published by this repository's tagged GitHub releases.
 
+The first compatible release must be published from this updated workflow;
+the existing v4.1.0 release does not contain the new installer bundle assets.
+After this change is merged, push a new `v*` tag and wait for its release job
+to finish before provisioning a VPS.
 
-## Install the compiled UETS package
-
-The v4.0.0 GitHub Release asset is a ZIP containing the `.tar.gz` package. On
-the VPS, install `curl`, `unzip`, and `tar` if they are not already available:
-
-```bash
-sudo apt update
-sudo apt install -y curl unzip tmux zstd util-linux
-sudo useradd --system --create-home --shell /bin/bash uets
-sudo install -d -o uets -g uets /opt/uets /var/lib/uets/live_db /var/tmp/uets-archive
-```
-
-Download the `uets-linux-x86_64-amazonlinux2023` artifact from the successful
-GitHub Actions run for the commit containing these changes. The previously
-released v4.0.0 binary does not implement the checkpoint commands required by
-`cloud.sh`. Extract the downloaded tarball:
+On a new VPS, run:
 
 ```bash
-cd "$HOME"
-sudo tar -xzf "$HOME/Downloads/uets-linux-x86_64.tar.gz" -C /opt/uets
-sudo chown -R uets:uets /opt/uets/uets-linux-x86_64
-cd /opt/uets/uets-linux-x86_64
-ldd ./bin/uets
-./bin/uets help
+curl -fsSL https://raw.githubusercontent.com/hmzk1422/osadp-core/main/deploy/install_vps.sh -o install_vps.sh
+sudo bash install_vps.sh \
+  --strategy ofmr@btcusdt \
+  --archive-uri s3://YOUR_BUCKET/cold-sst \
+  --region ap-southeast-2
 ```
 
-Check `ldd` output for `not found` libraries. The package is built on Amazon
-Linux 2023 for Linux x86_64; verify dependencies on the target host.
-
-Configure `uets/config/execution.yaml` and `uets/config/ofmr.yaml` before
-starting a worker. `live-test` uses live public market data with simulated
-orders. `testnet` submits to the exchange test environment; `live-trade` can
-submit real orders and requires credentials and the explicit live-trading
-guard. Never put API secrets in these YAML files or in this guide.
-
-Set `uets/config/execution.yaml` to `live-test` initially. Start the interactive
-TUI in tmux at boot using the included systemd unit:
+The script downloads the latest release bundle and SHA-256 file, verifies the
+download, and installs it. No separate binary download or repository checkout
+is needed. Use an EC2 IAM instance profile; do not put AWS keys in the command.
+To update manually:
 
 ```bash
-sudo install -D -m 0644 deploy/systemd/uets-tmux.service /etc/systemd/system/uets-tmux.service
-sudo systemctl daemon-reload
-sudo systemctl enable --now uets-tmux
-sudo -u uets tmux attach -t uets
+sudo /opt/uets/uets-linux-x86_64/deploy/install_vps.sh --update
 ```
 
-Before a strategy's live websocket feed starts, UETS seeds its feature state
-from Binance's public USD-M Futures REST API: closed one-minute candles and
-aggregate trades for the strategy's requested lookback (two hours by default).
-This is shared by strategy feature implementations; a strategy with a longer
-window can request a longer lookback. The seed is used only for feature warm-up,
-not replayed as trades or written as live fills. The VPS needs outbound HTTPS
-access to `fapi.binance.com`; no API credentials are required. If history cannot
-be fetched, the feed reports an error instead of starting the strategy cold.
+The installer also checks for updates daily and applies new tagged releases.
+Release publishing is triggered by pushing a `v*` tag after the workflow
+passes. Do not reuse or move published release tags.
 
-The TUI is displayed inside tmux; detach with `Ctrl+B`, then `D`, and reattach
-with `sudo -u uets tmux attach -t uets`. The watchdog restarts unexpected
-failures. Pressing `q` intentionally exits UETS. Provide AWS access through an
-EC2 IAM instance profile rather than hard-coding AWS keys.
+The installer starts UETS in `live-test` mode by default. Review
+`/opt/uets/uets-linux-x86_64/uets/config/execution.yaml` before selecting
+`testnet` or `live-trade`; real orders require API credentials and the explicit
+`allow_live_trading: true` guard.
 
-## Where UETS stores data
-
-Unless `UETS_LIVE_DB` overrides it, the extracted deployment directory is the
-runtime home. Live RocksDB data is written below:
-
-```text
-market_data/live_db/
-├── trades/<session-id>/
-├── portfolio/<session-id>/
-└── telemetry/<session-id>/
-```
-
-The dashboard writes one system/per-worker resource and strategy-latency
-telemetry snapshot per second. RTT-enabled builds also include public Binance
-ping and exchange order-ack RTT summaries. The v4.0.0 binary predates the RTT
-telemetry changes; use a release built with those changes to see those fields.
-
-The live strategy's RocksDB records contain the tick/features passed to the
-strategy, decisions, fills, and portfolio snapshots. They do **not** store the
-top-20 bid/ask book arrays. The input may include best bid/ask fields; that is
-not the same as persisting 20 levels. Other market-monitor commands have
-separate output paths and are not the live strategy RocksDB writer.
-
-Set a different database root before launching UETS if needed:
+## Operations
 
 ```bash
-export UETS_LIVE_DB="$HOME/uets-data/live_db"
+sudo -u uets tmux attach -t uets       # Attach; Ctrl+B then D detaches
+sudo systemctl status uets-tmux
+sudo journalctl -u uets-tmux -f
+sudo systemctl restart uets-tmux
 ```
 
-The active session ID is stored in
-`$UETS_LIVE_DB/current_session`; the monitor and archive script read it
-automatically. The UETS startup output also prints
-`telemetry session=<session-id>`.
-
-## `telemetry.sh`: live host monitoring without a log file
-
-This monitor prints host memory, aggregate UETS-process RSS, CPU, and disk
-utilization. It keeps only a bounded sample window in process memory, prints
-median/p05/p95/p99 summaries, and does not create a telemetry log or database.
-The existing UETS dashboard separately records its own telemetry in RocksDB.
-
-Save the following as `telemetry.sh` in the deployment directory:
-
-```bash
-#!/usr/bin/env bash
-set -euo pipefail
-
-INTERVAL_SECONDS="${1:-1}"
-WINDOW_SAMPLES="${2:-300}"
-DB_ROOT="${UETS_LIVE_DB:-$PWD/market_data/live_db}"
-DISK_THRESHOLD_PERCENT="${DISK_THRESHOLD_PERCENT:-90}"
-SESSION_ID="${UETS_SESSION_ID:-}"
-CLOUD_SCRIPT="${CLOUD_SCRIPT:-$PWD/cloud.sh}"
-
-exec python3 - "$INTERVAL_SECONDS" "$WINDOW_SAMPLES" "$DB_ROOT" \
-  "$DISK_THRESHOLD_PERCENT" "$SESSION_ID" "$CLOUD_SCRIPT" <<'PY'
-import math
-import os
-import shutil
-import subprocess
-import sys
-import time
-from collections import deque
-from pathlib import Path
-
-interval = float(sys.argv[1])
-window_size = int(sys.argv[2])
-db_root = Path(sys.argv[3])
-disk_threshold = float(sys.argv[4])
-session_id = sys.argv[5]
-cloud_script = Path(sys.argv[6])
-
-if interval <= 0 or window_size < 1:
-    raise SystemExit("interval must be positive and window must be at least 1")
-if not 0 < disk_threshold <= 100:
-    raise SystemExit("disk threshold must be in (0, 100]")
-
-samples = deque(maxlen=window_size)
-cloud_triggered = False
-
-def cpu_counters():
-    fields = Path("/proc/stat").read_text().splitlines()[0].split()[1:]
-    values = [int(value) for value in fields]
-    idle = values[3] + (values[4] if len(values) > 4 else 0)
-    return sum(values), idle
-
-def quantile(values, probability):
-    ordered = sorted(values)
-    if not ordered:
-        return float("nan")
-    position = (len(ordered) - 1) * probability
-    lower = math.floor(position)
-    upper = math.ceil(position)
-    if lower == upper:
-        return ordered[lower]
-    return ordered[lower] + (ordered[upper] - ordered[lower]) * (position - lower)
-
-def uets_rss_mib():
-    result = subprocess.run(
-        ["ps", "-C", "uets", "-o", "rss="],
-        capture_output=True, text=True, check=False
-    )
-    if result.returncode not in (0, 1):
-        raise RuntimeError(f"ps failed: {result.stderr.strip()}")
-    return sum(int(line) for line in result.stdout.splitlines() if line.strip()) / 1024
-
-previous_total, previous_idle = cpu_counters()
-print("Monitoring in memory only; Ctrl+C stops it. Redirecting output will create a file.")
-
-try:
-    while True:
-        time.sleep(interval)
-        total, idle = cpu_counters()
-        delta_total = total - previous_total
-        delta_idle = idle - previous_idle
-        previous_total, previous_idle = total, idle
-        cpu_percent = (
-            100.0 * (delta_total - delta_idle) / delta_total
-            if delta_total > 0 else 0.0
-        )
-
-        meminfo = {}
-        for line in Path("/proc/meminfo").read_text().splitlines():
-            key, value = line.split(":", 1)
-            meminfo[key] = int(value.strip().split()[0])
-        total_mib = meminfo["MemTotal"] / 1024
-        used_mib = (meminfo["MemTotal"] - meminfo["MemAvailable"]) / 1024
-        ram_percent = 100.0 * used_mib / total_mib
-        process_rss_mib = uets_rss_mib()
-
-        disk_path = db_root if db_root.exists() else Path("/")
-        disk = shutil.disk_usage(disk_path)
-        disk_percent = 100.0 * (disk.total - disk.free) / disk.total
-        sample = {
-            "ram_mib": used_mib,
-            "ram_percent": ram_percent,
-            "cpu_percent": cpu_percent,
-            "disk_percent": disk_percent,
-        }
-        samples.append(sample)
-
-        print(
-            f"RAM={used_mib:.1f}/{total_mib:.1f} MiB ({ram_percent:.1f}%) "
-            f"UETS_RSS={process_rss_mib:.1f} MiB CPU={cpu_percent:.1f}% "
-            f"disk={disk_percent:.1f}% window={len(samples)}/{window_size}",
-            flush=True,
-        )
-        for name in ("ram_mib", "cpu_percent", "disk_percent"):
-            values = [item[name] for item in samples]
-            print(
-                f"  {name}: median={quantile(values, 0.50):.2f} "
-                f"p05={quantile(values, 0.05):.2f} "
-                f"p95={quantile(values, 0.95):.2f} "
-                f"p99={quantile(values, 0.99):.2f}",
-                flush=True,
-            )
-
-        if disk_percent >= disk_threshold and not cloud_triggered:
-            cloud_triggered = True
-            if not session_id:
-                marker = db_root / "current_session"
-                if marker.is_file():
-                    session_id = marker.read_text(encoding="utf-8").strip()
-            if session_id and os.environ.get("AWS_ARCHIVE_URI"):
-                print(
-                    f"Disk is {disk_percent:.1f}% full; starting S3 checkpoint archive.",
-                    flush=True,
-                )
-                subprocess.Popen([str(cloud_script), session_id])
-            else:
-                print(
-                    "Disk threshold reached, but S3 archival is not configured; "
-                    "no data was moved.",
-                    flush=True,
-                )
-except KeyboardInterrupt:
-    print("\nTelemetry monitor stopped.", flush=True)
-PY
-```
-
-Run it without writing output to disk:
-
-```bash
-chmod +x telemetry.sh
-chmod +x cloud.sh
-./telemetry.sh                 # sample every second; retain at most 300 samples in RAM
-./telemetry.sh 2 900           # sample every 2 seconds; retain at most 900 samples
-```
-
-Do not append `> telemetry.log` if the intent is to avoid writing telemetry
-data to disk. The bounded window is only for the running monitor process and is
-lost when it exits. Its quantiles describe host resource samples, not the
-RocksDB telemetry table.
-
-### Querying saved RocksDB telemetry
-
-The current UETS inspector reads the session's telemetry store and prints the
-record count and up to the latest five snapshots:
-
-```bash
-./bin/uets db "$UETS_SESSION_ID"
-```
-
-The current inspector does **not** calculate median/p05/p95/p99 across the
-entire RocksDB table. Add a dedicated UETS export/summary command before
-relying on a database-backed percentile report. Its intended interface should
-be documented here once implemented, for example:
-
-```text
-./bin/uets telemetry summary --session <session-id> \
-  --metrics total_ram_mb,total_cpu_percent,public_ping_rtt_ms,order_ack_rtt_ms \
-  --quantiles 0.05,0.50,0.95,0.99
-```
-
-That is a **proposed interface, not a command available in the current
-release**. Keep the existing one-second RocksDB snapshots if historical
-quantiles are required; the no-storage monitor above cannot answer historical
-queries after it exits.
-
-## `cloud.sh`: S3 daily-partition FIFO archive
-
-RocksDB is stored under `UETS_LIVE_DB` as daily UTC partitions:
-```
-market_data/live_db/
-├── 2026-11-09/
-│   ├── telemetry/
-│   ├── portfolio/
-│   └── trades/
-│   └── .sealed          # writer wrote this at rollover; day is closed
-├── 2026-11-10/
-│   ├── telemetry/
-│   ├── portfolio/
-│   └── trades/
-│   └── .sealed
-└── current_session        # still used by the TUI for per-session display
-```
-
-The writer seals a completed day by writing `.sealed` after rolling over to the
-next day's partitions. `cloud.sh` never stops UETS, never sends `q` to tmux,
-and never touches the live (today's) day. It only checkpoints sealed,
-completed days read-only with `db checkpoint`.
-
-When disk usage exceeds `DISK_THRESHOLD_PERCENT`, `cloud.sh` acts as a FIFO
-queue:
-
-1. Lists eligible days: `name < today's UTC date` AND `.sealed` exists,
-   oldest first.
-2. Checkpoints the oldest sealed day (`db checkpoint <date>`).
-3. Compresses (`.tar.zst`) and uploads to S3 Glacier Instant Retrieval.
-4. Downloads the object back, compares SHA-256, restores, re-verifies.
-5. **Only after all checks pass**, deletes that daily partition from disk.
-6. Loops: re-checks disk, archives the next oldest sealed day until below
-   threshold.
-
-If any step fails, the local partition is kept and the script exits non-zero.
-If disk is above threshold but no sealed day exists, it exits non-zero without
-deleting anything.
-
-This is **daily partitioning with RocksDB Checkpoint** (cross-process export
-via hard links), not in-process MVCC snapshots. The live UETS process keeps
-running; trades and portfolio are unaffected.
-
-Install AWS CLI v2 and configure AWS through the EC2 instance profile. Then
-create the archive service environment:
-
-```bash
-sudo install -d -o root -g root -m 0755 /etc/uets
-sudo tee /etc/uets/archive.env >/dev/null <<'EOF'
-AWS_ARCHIVE_URI=s3://YOUR_BUCKET/cold-sst
-AWS_REGION=ap-southeast-2
-DISK_THRESHOLD_PERCENT=90
-ARCHIVE_TMP_DIR=/var/tmp/uets-archive
-UETS_HOME=/var/lib/uets
-UETS_LIVE_DB=/var/lib/uets/live_db
-UETS_BIN=/opt/uets/uets-linux-x86_64/bin/uets
-UETS_TMUX_SESSION=uets
-EOF
-sudo chmod 0600 /etc/uets/archive.env
-```
-
-The IAM role needs `s3:PutObject` and `s3:GetObject` on the chosen prefix
-(`HeadObject` is authorized by `s3:GetObject`). `cloud.sh` accepts an optional
-`YYYY-MM-DD` argument to archive a specific sealed day; with no argument it
-runs the FIFO loop automatically.
-It exits without archiving when usage is below threshold, and fails explicitly
-if checkpointing, upload, download, checksum, or restore verification fails.
-It needs free temporary space for the compressed archive; configure
-`ARCHIVE_TMP_DIR` accordingly.
-
-The archive service must run as the same Linux user as the tmux session (`uets`
-in the example); set its `User` and `Group` accordingly. Do not enable
-`PrivateTmp`, since tmux uses a socket under `/tmp`. The included
-[systemd service](./deploy/systemd/uets-cloud-archive.service)
-and [timer](./deploy/systemd/uets-cloud-archive.timer) run that threshold
-check daily at 00:00 UTC. Create `/etc/uets/archive.env` with the environment
-above before enabling it:
-
-```bash
-sudo install -D -m 0644 deploy/systemd/uets-cloud-archive.service /etc/systemd/system/uets-cloud-archive.service
-sudo install -D -m 0644 deploy/systemd/uets-cloud-archive.timer /etc/systemd/system/uets-cloud-archive.timer
-sudo systemctl daemon-reload
-sudo systemctl enable --now uets-cloud-archive.timer
-```
-
-Confirm `/etc/uets/archive.env` is populated before enabling the timer. Glacier
-Instant Retrieval has storage and retrieval charges. A sealed local daily
-partition (telemetry + portfolio + trades) is deleted only after the S3 object
-is downloaded and restore-verified.
-
-### OOM restart harness
-
-Run the Docker harness on a Linux host to confirm the watchdog detects an OOM
-exit, passes `--reuse-rocksdb`, and recovers the prior session marker:
-
-```bash
-bash unit-tests/production_check/crash_recovery_test.sh
-```
-
-This is a deterministic supervisor/flag recovery test using a fixture; it is
-not a multi-day AWS run and does not claim to validate exchange connectivity.
-OFMR now persists its account state after fills and its latest market mark so
-the restarted worker restores cash, open quantity, realized/unrealized PnL,
-and active barriers. Missing recovery state alongside old portfolio/trade
-records causes a fail-closed startup. Pre-recovery sessions lack open-position
-details and cannot be safely migrated; do not reuse one if preserving its
-account is required. Pressing `q` exits cleanly and retires the current-session
-marker, so a later watchdog launch starts a fresh session; the old RocksDB
-directories remain on disk. The live feed reseed path is separately covered by
-Rust tests. Run a real binary crash/reseed smoke only in `live-test` mode,
-never with real trading enabled.
-
-## `update-uets.sh` for pulling most recent binary compilation
-```bash
-
-#!/usr/bin/env bash
-set -Eeuo pipefail
-
-ROOT="/opt/uets"
-APP="$ROOT/uets-linux-x86_64"
-REPO="hmzk1422/OSADP-Infrastructure"
-SERVICE="uets-tmux"
-ASSET="uets-linux-x86_64-amazonlinux2023.1.zip"
-
-TMP="$(mktemp -d)"
-BACKUP=""
-
-cleanup() {
-    rm -rf "$TMP"
-}
-trap cleanup EXIT
-
-echo "=== UETS updater ==="
-
-# Get latest release asset URL from GitHub
-URL="$(python3 - "$REPO" "$ASSET" <<'PY'
-import json, sys, urllib.request
-repo, asset = sys.argv[1:]
-req = urllib.request.Request(
-    f"https://api.github.com/repos/{repo}/releases/latest",
-    headers={"Accept": "application/vnd.github+json",
-             "User-Agent": "UETS-Updater"}
-)
-with urllib.request.urlopen(req, timeout=20) as r:
-    release = json.load(r)
-for item in release.get("assets", []):
-    if item["name"] == asset:
-        print(item["browser_download_url"])
-        break
-else:
-    raise SystemExit(f"Release asset not found: {asset}")
-PY
-)"
-
-echo "Downloading: $URL"
-curl -fL --retry 3 "$URL" -o "$TMP/release.zip"
-
-mkdir "$TMP/extracted"
-unzip -q "$TMP/release.zip" -d "$TMP/extracted"
-
-ARCHIVE="$(find "$TMP/extracted" -name 'uets-linux-x86_64.tar.gz' -print -quit)"
-[[ -n "$ARCHIVE" ]] || {
-    echo "ERROR: Expected tar.gz archive not found."
-    exit 1
-}
-
-mkdir "$TMP/package"
-tar -xzf "$ARCHIVE" -C "$TMP/package"
-
-NEW_BIN="$(find "$TMP/package" -path '*/bin/uets' -type f -print -quit)"
-[[ -n "$NEW_BIN" ]] || {
-    echo "ERROR: New UETS executable not found."
-    exit 1
-}
-
-# Validate the new executable before stopping the service
-chmod 755 "$NEW_BIN"
-"$NEW_BIN" help >/dev/null
-
-# Back up existing binary
-STAMP="$(date +%Y%m%d-%H%M%S)"
-BACKUP="$APP/bin/uets.backup.$STAMP"
-sudo cp "$APP/bin/uets" "$BACKUP"
-
-echo "Stopping UETS..."
-sudo systemctl stop "$SERVICE"
-
-echo "Installing updated binary..."
-sudo install -o uets -g uets -m 755 "$NEW_BIN" "$APP/bin/uets"
-
-echo "Starting UETS..."
-sudo systemctl start "$SERVICE"
-
-sleep 3
-if ! sudo systemctl is-active --quiet "$SERVICE"; then
-    echo "ERROR: UETS did not start. Rolling back binary..."
-    sudo systemctl stop "$SERVICE" || true
-    sudo cp "$BACKUP" "$APP/bin/uets"
-    sudo systemctl start "$SERVICE"
-    exit 1
-fi
-
-echo "=== UPDATE SUCCESSFUL ==="
-echo "Backup: $BACKUP"
-sudo systemctl status "$SERVICE" --no-pager
-
-```
-Setup and run by:
-```
-sudo chmod +x /opt/uets/update-uets.sh
-sudo /opt/uets/update-uets.sh
-```
+Unexpected UETS exits are retried by `restart_uets.sh` with
+`--reuse-rocksdb`, preserving the current session on disk. If the watchdog or
+tmux supervisor itself fails (including an OOM kill), systemd restarts it.
+Intentional `q` exits are not restarted. Retries are bounded to avoid an
+uncontrolled crash loop. Runtime databases and watchdog logs live under
+`/var/lib/uets` and are separate from the application bundle.
+
+When configured, the `uets-cloud-archive.timer` checks the disk threshold daily.
+Archives use RocksDB checkpoints and are removed locally only after upload,
+download, checksum, restore, and verification succeed. The IAM role needs
+`s3:PutObject` and `s3:GetObject` on the selected prefix. Set
+`DISK_THRESHOLD_PERCENT` and `ARCHIVE_TMP_DIR` in
+`/etc/uets/archive.env` to change the defaults; then run
+`sudo systemctl restart uets-cloud-archive.timer`.
