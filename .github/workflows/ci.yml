@@ -160,12 +160,20 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           cd dist
-          sha256sum uets-linux-x86_64.tar.gz > uets-linux-x86_64.tar.gz.sha256
+          python3 - <<'PY'
+          from zipfile import ZIP_STORED, ZipFile
+
+          with ZipFile("uets-linux-x86_64-amazonlinux2023.1.zip", "w", ZIP_STORED) as archive:
+              archive.write("uets-linux-x86_64.tar.gz")
+              archive.write("install_vps.sh")
+          PY
+          sha256sum uets-linux-x86_64-amazonlinux2023.1.zip \
+            > uets-linux-x86_64-amazonlinux2023.1.zip.sha256
           gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || \
             gh release create "$GITHUB_REF_NAME" --generate-notes
           gh release upload "$GITHUB_REF_NAME" \
-            uets-linux-x86_64.tar.gz \
-            uets-linux-x86_64.tar.gz.sha256 \
+            uets-linux-x86_64-amazonlinux2023.1.zip \
+            uets-linux-x86_64-amazonlinux2023.1.zip.sha256 \
             install_vps.sh \
             --clobber
 
