@@ -1,4 +1,4 @@
-mode: playback # playback | live-test | testnet | live-trade
+mode: live-test # playback | live-test | testnet | live-trade
 allow_live_trading: false
 tickers: [] # pre-loaded strategy@asset tickers, e.g. ofmr@btcusdt, ofmr@ethusdt
 

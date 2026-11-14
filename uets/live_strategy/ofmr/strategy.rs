@@ -679,6 +679,20 @@ mod tests {
     }
 
     #[test]
+    fn checked_constructor_rejects_a_missing_model_instead_of_silent_holds() {
+        let mut settings = crate::live_strategy::ofmr::settings::Settings::default();
+        settings.model.path = std::env::temp_dir()
+            .join(format!("uets-missing-ofmr-model-{}", std::process::id()))
+            .display()
+            .to_string();
+
+        let error = OfmrStrategy::try_with_settings(settings)
+            .err()
+            .expect("live startup must fail when the configured model is unavailable");
+        assert!(error.contains("failed to read model file"));
+    }
+
+    #[test]
     fn barriers_match_research_timeframe_volatility_and_ten_to_one_rr() {
         let (stop, target) = barrier_fractions(Some(0.002));
         let expected_stop = 0.002 * 0.3;

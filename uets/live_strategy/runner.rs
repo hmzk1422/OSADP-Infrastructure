@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 
 use crate::core::feature::FeatureRow;
 use crate::core::strategy::{Decision, MarketState, Position};
-use crate::live_strategy::{LiveStrategy, load_strategy};
+use crate::live_strategy::{LiveStrategy, load_strategy, warmup::HistorySeedGate};
 
 /// Folders under `uets/live_strategy/` holding a strategy bundle.
 pub fn discover_strategy_dirs() -> Vec<String> {
@@ -41,6 +41,7 @@ struct Slot {
     computer: Box<dyn crate::live_strategy::ComputeFeatures>,
     builder: Box<dyn crate::live_strategy::StateBuilder>,
     state: MarketState,
+    history_seed_gate: HistorySeedGate,
 }
 
 /// Per-(strategy x symbol) live state; windows/positions never leak.
@@ -65,6 +66,7 @@ impl StrategyRunner {
                     computer: bundle.computer,
                     builder: bundle.builder,
                     state: MarketState::new(FeatureRow::new(), 0),
+                    history_seed_gate: HistorySeedGate::default(),
                 },
             );
         }
@@ -81,6 +83,12 @@ impl StrategyRunner {
         row: &FeatureRow,
     ) -> Result<(Decision, Position), String> {
         let slot = self.ensure_slot(strategy, symbol)?;
+        if !slot
+            .history_seed_gate
+            .consume(row, slot.computer.as_mut())?
+        {
+            return Ok((Decision::Hold, slot.state.position));
+        }
         let computed = slot.computer.compute(row)?;
         slot.state.features = computed;
         slot.state.sequence += 1;

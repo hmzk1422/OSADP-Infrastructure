@@ -57,6 +57,8 @@ pub struct DiffFrame {
     pub first_update_id: u64,
     /// Id of the last update applied by this frame.
     pub final_update_id: u64,
+    /// Binance Futures' previous event final update ID (`pu`).
+    pub previous_update_id: Option<u64>,
     pub updates: Vec<BookUpdate>,
 }
 

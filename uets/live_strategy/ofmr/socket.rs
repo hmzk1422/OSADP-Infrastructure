@@ -49,6 +49,8 @@ use crate::live_strategy::ofmr::settings::Settings;
 use crate::live_strategy::ofmr::strategy::OfmrStrategy;
 #[cfg(unix)]
 use crate::live_strategy::ofmr::{ComputeFeatures, StateBuilder};
+#[cfg(unix)]
+use crate::live_strategy::warmup::HistorySeedGate;
 #[cfg(any(unix, test))]
 use serde::{Deserialize, Serialize};
 #[cfg(unix)]
@@ -62,7 +64,7 @@ const MAX_FRAME: usize = 1_048_576;
 /// Decode one IPC frame into a `FeatureRow`. Frame body is expected to be a
 /// simple `name:value` line protocol, one feature per line.
 #[cfg(any(unix, test))]
-fn decode_frame(payload: &[u8]) -> Result<FeatureRow, String> {
+pub(crate) fn decode_frame(payload: &[u8]) -> Result<FeatureRow, String> {
     let text =
         std::str::from_utf8(payload).map_err(|e| format!("frame payload is not UTF-8: {e}"))?;
     let mut row = FeatureRow::new();
@@ -737,10 +739,14 @@ pub fn run(socket_path: &str, symbol: &str) -> Result<(), String> {
 
     let listener =
         UnixListener::bind(socket_path).map_err(|e| format!("bind {socket_path}: {e}"))?;
+    listener
+        .set_nonblocking(true)
+        .map_err(|error| format!("set strategy listener nonblocking: {error}"))?;
 
-    let mut features = OfmrFeatures::new();
-    let strategy = OfmrStrategy::new();
-    let settings = Settings::load();
+    let settings = Settings::try_load()?;
+    let mut features = OfmrFeatures::with_settings(settings.clone());
+    let strategy = OfmrStrategy::try_with_settings(settings.clone())
+        .map_err(|error| format!("load OFMR model: {error}"))?;
     let mut executor = OrderExecutor::from_env(&settings)?;
     let starting_equity = std::env::var("UETS_STARTING_EQUITY")
         .ok()
@@ -806,8 +812,13 @@ pub fn run(socket_path: &str, symbol: &str) -> Result<(), String> {
     };
     let mut telemetry = StrategyTelemetry::new(symbol, &account, ping_url)?;
 
-    for stream in listener.incoming() {
-        let mut stream = stream.map_err(|e| format!("accept: {e}"))?;
+    let mut history_seed_gate = HistorySeedGate::default();
+    let mut last_warmup_heartbeat = Instant::now();
+    loop {
+        let mut stream = accept_with_heartbeat(&listener, || telemetry.heartbeat(&account))?;
+        stream
+            .set_nonblocking(false)
+            .map_err(|error| format!("set strategy stream blocking: {error}"))?;
         stream
             .set_read_timeout(Some(Duration::from_secs(1)))
             .map_err(|error| format!("set strategy socket read timeout: {error}"))?;
@@ -871,10 +882,24 @@ pub fn run(socket_path: &str, symbol: &str) -> Result<(), String> {
             // Decode -> compute -> decide -> execute.
             let started = Instant::now();
             let row = decode_frame(&payload)?;
+            if row.get("warmup") == Some(1.0)
+                && last_warmup_heartbeat.elapsed() >= Duration::from_millis(500)
+            {
+                telemetry.heartbeat(&account);
+                last_warmup_heartbeat = Instant::now();
+            }
+            if !history_seed_gate.consume(&row, &mut features)? {
+                continue;
+            }
             telemetry.observe_row(&row);
             let computed = features
                 .compute(&row)
                 .map_err(|e| format!("compute: {e}"))?;
+            let model_inputs_ready = (0..15).all(|index| {
+                computed
+                    .get(&format!("Column_{index}"))
+                    .is_some_and(f64::is_finite)
+            });
             let volatility_1m = computed.get("bar_volatility_1m");
             let state = crate::core::strategy::MarketState {
                 features: computed,
@@ -897,6 +922,11 @@ pub fn run(socket_path: &str, symbol: &str) -> Result<(), String> {
             } else {
                 model_decision
             };
+            let decision_label = if decision == Decision::Hold && !model_inputs_ready {
+                "Hold (warming up)".to_string()
+            } else {
+                format!("{decision:?}")
+            };
             if decision != Decision::Hold && (!price.is_finite() || price <= 0.0) {
                 return Err(format!(
                     "refusing {decision:?} for {symbol}: invalid market price {price}"
@@ -912,7 +942,7 @@ pub fn run(socket_path: &str, symbol: &str) -> Result<(), String> {
                 Ok(fills) => fills,
                 Err(error) => {
                     telemetry.publish(
-                        Some(format!("{decision:?}")),
+                        Some(decision_label.clone()),
                         Some(started.elapsed().as_nanos().min(u64::MAX as u128) as u64),
                         executor.last_decision_to_order_ms,
                         executor.last_order_to_fill_ms,
@@ -988,7 +1018,7 @@ pub fn run(socket_path: &str, symbol: &str) -> Result<(), String> {
             telemetry.persistence_errors = Some(live_db.error_count());
             let processing_ns = started.elapsed().as_nanos().min(u64::MAX as u128) as u64;
             telemetry.publish(
-                Some(format!("{decision:?}")),
+                Some(decision_label),
                 Some(processing_ns),
                 executor.last_decision_to_order_ms,
                 executor.last_order_to_fill_ms,
@@ -996,8 +1026,23 @@ pub fn run(socket_path: &str, symbol: &str) -> Result<(), String> {
             );
         }
     }
+}
 
-    Ok(())
+#[cfg(unix)]
+fn accept_with_heartbeat(
+    listener: &std::os::unix::net::UnixListener,
+    mut heartbeat: impl FnMut(),
+) -> Result<std::os::unix::net::UnixStream, String> {
+    loop {
+        match listener.accept() {
+            Ok((stream, _)) => return Ok(stream),
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                heartbeat();
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            Err(error) => return Err(format!("accept: {error}")),
+        }
+    }
 }
 
 #[cfg(unix)]
@@ -1655,6 +1700,63 @@ pub fn run(_socket_path: &str, _symbol: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn waiting_for_feed_connection_keeps_worker_telemetry_alive() {
+        use std::os::unix::net::{UnixListener, UnixStream};
+        use std::time::Duration;
+
+        let directory = tempfile::tempdir().unwrap();
+        let socket_path = directory.path().join("strategy.sock");
+        let listener = UnixListener::bind(&socket_path).unwrap();
+        listener.set_nonblocking(true).unwrap();
+
+        let client_path = socket_path.clone();
+        let client = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(250));
+            UnixStream::connect(client_path).unwrap()
+        });
+
+        let mut heartbeats = 0;
+        let _stream = accept_with_heartbeat(&listener, || heartbeats += 1).unwrap();
+        let _client = client.join().unwrap();
+        assert!(heartbeats >= 2, "only sent {heartbeats} heartbeat(s)");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn live_test_mode_executes_entry_as_a_simulated_fill() {
+        let mut executor = OrderExecutor {
+            connector: None,
+            mode: "live-test".to_string(),
+            max_position_usd: 10_000.0,
+            min_order_size: 0.001,
+            quantity: 0.0,
+            sequence: 0,
+            last_decision_to_order_ms: None,
+            last_order_to_fill_ms: None,
+            last_order_ack_rtt_ms: None,
+        };
+        let mut position = Position::Flat;
+
+        let fills = executor
+            .act(
+                "BTCUSDT",
+                Decision::EnterLong,
+                &mut position,
+                100.0,
+                Some(99.9),
+                Some(100.1),
+            )
+            .unwrap();
+
+        assert_eq!(fills.len(), 1);
+        assert_eq!(fills[0].side, Side::Buy);
+        assert_eq!(position, Position::Long);
+        assert_eq!(executor.quantity, fills[0].qty);
+        assert!(fills[0].qty > 0.0);
+    }
 
     #[test]
     fn account_state_and_mark_survive_a_database_reopen() {

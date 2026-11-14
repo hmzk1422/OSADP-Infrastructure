@@ -206,6 +206,7 @@ mod tests {
             event_time_ms: ts,
             first_update_id: last_id,
             final_update_id: last_id,
+            previous_update_id: None,
             updates: Vec::new(),
         })
     }

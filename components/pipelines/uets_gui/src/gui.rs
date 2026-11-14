@@ -109,6 +109,31 @@ pub fn aggregate_instances(
     aggregate_starting_equity: &mut f64,
 ) -> Statistics {
     let mut aggregate = Statistics::default();
+    // Resource samples are independent of account/equity initialization.
+    let ram_samples = instances
+        .iter()
+        .filter_map(|i| i.statistics.memory_mb)
+        .filter(|v| v.is_finite())
+        .collect::<Vec<_>>();
+    let cpu_samples = instances
+        .iter()
+        .filter_map(|i| i.statistics.cpu_percent)
+        .filter(|v| v.is_finite())
+        .collect::<Vec<_>>();
+    aggregate.memory_mb = (!ram_samples.is_empty()).then(|| ram_samples.iter().sum());
+    aggregate.cpu_percent = (!cpu_samples.is_empty()).then(|| cpu_samples.iter().sum());
+    let resource_workers = instances
+        .iter()
+        .filter(|i| {
+            i.statistics.memory_mb.is_some_and(f64::is_finite)
+                && i.statistics.cpu_percent.is_some_and(f64::is_finite)
+        })
+        .count();
+    aggregate.resource_worker_count = (resource_workers > 0).then_some(resource_workers);
+    aggregate.ram_100_workers_mb = (!ram_samples.is_empty())
+        .then(|| ram_samples.iter().sum::<f64>() / ram_samples.len() as f64 * 100.0);
+    aggregate.cpu_100_workers_percent = (!cpu_samples.is_empty())
+        .then(|| cpu_samples.iter().sum::<f64>() / cpu_samples.len() as f64 * 100.0);
     if instances.is_empty() {
         equity_history.clear();
         *aggregate_starting_equity = 0.0;
@@ -266,32 +291,6 @@ pub fn aggregate_instances(
         .iter()
         .filter_map(|instance| instance.statistics.clock_skew_max_ms)
         .reduce(f64::max);
-    // RAM and CPU are process-level measurements: aggregate totals must sum
-    // workers. Keep a clearly labeled linear projection for capacity planning.
-    let ram_samples = instances
-        .iter()
-        .filter_map(|i| i.statistics.memory_mb)
-        .filter(|v| v.is_finite())
-        .collect::<Vec<_>>();
-    let cpu_samples = instances
-        .iter()
-        .filter_map(|i| i.statistics.cpu_percent)
-        .filter(|v| v.is_finite())
-        .collect::<Vec<_>>();
-    aggregate.memory_mb = (!ram_samples.is_empty()).then(|| ram_samples.iter().sum());
-    aggregate.cpu_percent = (!cpu_samples.is_empty()).then(|| cpu_samples.iter().sum());
-    let resource_workers = instances
-        .iter()
-        .filter(|i| {
-            i.statistics.memory_mb.is_some_and(f64::is_finite)
-                && i.statistics.cpu_percent.is_some_and(f64::is_finite)
-        })
-        .count();
-    aggregate.resource_worker_count = (resource_workers > 0).then_some(resource_workers);
-    aggregate.ram_100_workers_mb = (!ram_samples.is_empty())
-        .then(|| ram_samples.iter().sum::<f64>() / ram_samples.len() as f64 * 100.0);
-    aggregate.cpu_100_workers_percent = (!cpu_samples.is_empty())
-        .then(|| cpu_samples.iter().sum::<f64>() / cpu_samples.len() as f64 * 100.0);
     aggregate.tick_to_trade_ms = mean(|s| s.tick_to_trade_ms);
     aggregate.persistence_write_ms = mean(|s| s.persistence_write_ms);
     aggregate.persistence_queue = eligible
@@ -758,11 +757,21 @@ fn render_statistics(
         ),
         metric(
             "RAM @100 workers MB",
-            telemetry_number(stats.ram_100_workers_mb),
+            telemetry_number(stats.ram_100_workers_mb.or_else(|| {
+                stats
+                    .memory_mb
+                    .filter(|value| value.is_finite())
+                    .map(|value| value * 100.0)
+            })),
         ),
         metric(
             "CPU @100 workers %",
-            telemetry_number(stats.cpu_100_workers_percent),
+            telemetry_number(stats.cpu_100_workers_percent.or_else(|| {
+                stats
+                    .cpu_percent
+                    .filter(|value| value.is_finite())
+                    .map(|value| value * 100.0)
+            })),
         ),
         metric("Error", stats.last_error.clone()),
         metric(
@@ -1015,6 +1024,23 @@ mod aggregation_tests {
     }
 
     #[test]
+    fn aggregate_resource_projections_do_not_depend_on_equity_samples() {
+        let mut item = InstanceSnapshot::default();
+        item.statistics.memory_mb = Some(18.0);
+        item.statistics.cpu_percent = Some(1.25);
+        let mut history = Vec::new();
+        let mut starting_equity = 0.0;
+
+        let stats = aggregate_instances(&[item], &mut history, &mut starting_equity);
+
+        assert_eq!(stats.memory_mb, Some(18.0));
+        assert_eq!(stats.cpu_percent, Some(1.25));
+        assert_eq!(stats.resource_worker_count, Some(1));
+        assert_eq!(stats.ram_100_workers_mb, Some(1_800.0));
+        assert_eq!(stats.cpu_100_workers_percent, Some(125.0));
+    }
+
+    #[test]
     fn aggregate_preserves_worker_operational_telemetry() {
         let mut item = instance("btcusdt", 100.0, 101.0, 0, 0.0, 0.0, 0);
         item.statistics.latest_market_data = Some("1792249435161".into());
@@ -1162,6 +1188,38 @@ mod aggregation_tests {
         assert!(
             screen.contains("2.50%"),
             "missing price vs entry:\n{screen}"
+        );
+    }
+
+    #[test]
+    fn selected_worker_projects_its_ram_and_cpu_to_100_workers() {
+        let mut item = instance("btcusdt", 10_000.0, 10_000.0, 0, 0.0, 0.0, 0);
+        item.statistics.memory_mb = Some(18.0);
+        item.statistics.cpu_percent = Some(1.25);
+        let snapshot = DashboardSnapshot {
+            instances: vec![item],
+            ..DashboardSnapshot::default()
+        };
+        let backend = ratatui::backend::TestBackend::new(160, 44);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| render(frame, &snapshot, Some(0), None, None))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let mut screen = String::new();
+        for y in 0..buffer.area.height {
+            for x in 0..buffer.area.width {
+                screen.push_str(buffer[(x, y)].symbol());
+            }
+        }
+
+        assert!(
+            screen.contains("RAM @100 workers MB: 1800.000"),
+            "missing RAM projection:\n{screen}"
+        );
+        assert!(
+            screen.contains("CPU @100 workers %: 125.000"),
+            "missing CPU projection:\n{screen}"
         );
     }
 

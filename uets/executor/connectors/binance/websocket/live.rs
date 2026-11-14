@@ -348,14 +348,20 @@ fn start_strategy_fanout(
                 "invalid strategy instance '{instance}'; expected strategy@asset"
             ));
         };
-        if !strategy.eq_ignore_ascii_case("ofmr") || !asset.eq_ignore_ascii_case(symbol) {
+        if !asset.eq_ignore_ascii_case(symbol) {
             return Err(format!(
-                "feed for {symbol} only supports ofmr@{symbol}, got '{instance}'"
+                "feed for {symbol} cannot route strategy instance '{instance}'"
             ));
         }
-        paths.push(PathBuf::from(format!(
-            "sockets/strategies/ofmr_{symbol}.sock"
-        )));
+        crate::live_strategy::load_strategy(strategy)?;
+        let path = PathBuf::from(format!(
+            "sockets/strategies/{}_{}.sock",
+            strategy.to_ascii_lowercase(),
+            symbol
+        ));
+        if !paths.contains(&path) {
+            paths.push(path);
+        }
     }
     if paths.is_empty() {
         return Err("strategy fan-out requires at least one configured instance".into());
@@ -373,17 +379,16 @@ fn start_strategy_fanout(
                         match UnixStream::connect(path) {
                             Ok(connection) => *stream = Some(connection),
                             Err(error) => {
-                                eprintln!("[fanout] connect {} failed: {error}", path.display());
-                                failed.store(true, Ordering::Release);
-                                return;
+                                eprintln!("[fanout] connect {} failed: {error}; will retry on next frame", path.display());
+                                *stream = None;
+                                continue;
                             }
                         }
                     }
                     if let Some(connection) = stream {
                         if let Err(error) = connection.write_all(&frame) {
                             eprintln!("[fanout] write {} failed: {error}", path.display());
-                            failed.store(true, Ordering::Release);
-                            return;
+                            *stream = None; continue;
                         }
                     }
                 }
@@ -391,6 +396,95 @@ fn start_strategy_fanout(
         })
         .map_err(|error| format!("start strategy fan-out: {error}"))?;
     Ok(sender)
+}
+
+fn warmup_lookback_for_instances(instances: &[String], symbol: &str) -> Result<u64, String> {
+    let mut lookback = 0;
+    for instance in instances {
+        let Some((strategy, asset)) = instance.split_once('@') else {
+            return Err(format!(
+                "invalid strategy instance '{instance}'; expected strategy@asset"
+            ));
+        };
+        if !asset.eq_ignore_ascii_case(symbol) {
+            return Err(format!(
+                "feed for {symbol} cannot warm strategy instance '{instance}'"
+            ));
+        }
+        let bundle = crate::live_strategy::load_strategy(strategy)?;
+        lookback = lookback.max(bundle.computer.warmup_lookback_secs());
+    }
+    if lookback == 0 && !instances.is_empty() {
+        return Err("strategy warm-up lookback must be greater than zero".into());
+    }
+    Ok(lookback)
+}
+
+fn send_history_frame(
+    sender: &std::sync::mpsc::SyncSender<Vec<u8>>,
+    frame: Vec<u8>,
+    queue_depth: &AtomicUsize,
+    failed: &AtomicBool,
+) -> Result<(), String> {
+    queue_depth.fetch_add(1, Ordering::Relaxed);
+    if let Err(error) = sender.send(frame) {
+        queue_depth.fetch_sub(1, Ordering::Relaxed);
+        failed.store(true, Ordering::Release);
+        return Err(format!("send strategy warm-up frame: {error}"));
+    }
+    Ok(())
+}
+
+fn seed_strategies_from_rest(
+    capture: &Arc<Mutex<Capture>>,
+    instances: &[String],
+    symbol: &str,
+) -> Result<(), String> {
+    if instances.is_empty() {
+        return Ok(());
+    }
+    let lookback_secs = warmup_lookback_for_instances(instances, symbol)?;
+    let history = crate::live_strategy::warmup::fetch_market_history(symbol, lookback_secs)?;
+    let (sender, queue_depth, failed) = {
+        let guard = capture
+            .lock()
+            .map_err(|error| format!("lock capture for strategy warm-up: {error}"))?;
+        (
+            guard
+                .fanout
+                .as_ref()
+                .ok_or_else(|| "strategy warm-up has no fan-out sender".to_string())?
+                .clone(),
+            Arc::clone(&guard.fanout_queue_depth),
+            Arc::clone(&guard.fanout_failed),
+        )
+    };
+
+    send_history_frame(
+        &sender,
+        crate::live_strategy::warmup::encode_history_frame(None, "warmup_start")?,
+        &queue_depth,
+        &failed,
+    )?;
+    for row in &history {
+        send_history_frame(
+            &sender,
+            crate::live_strategy::warmup::encode_history_frame(Some(row), "")?,
+            &queue_depth,
+            &failed,
+        )?;
+    }
+    send_history_frame(
+        &sender,
+        crate::live_strategy::warmup::encode_history_frame(None, "warmup_end")?,
+        &queue_depth,
+        &failed,
+    )?;
+    eprintln!(
+        "[warmup] seeded {} strategy instance(s) before live streams started",
+        instances.len()
+    );
+    Ok(())
 }
 
 #[cfg(not(unix))]
@@ -519,6 +613,17 @@ fn set_read_timeout(
     }
 }
 
+fn is_idle_read_timeout(error: &tungstenite::Error) -> bool {
+    matches!(
+        error,
+        tungstenite::Error::Io(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+            )
+    )
+}
+
 fn mark_market_stream_disconnected(capture: &mut Capture, source: MarketSource) {
     if capture.active_source == source {
         capture.merger.mark_stale();
@@ -569,6 +674,7 @@ fn spawn_stream(
                                     );
                                     break;
                                 }
+                                Err(error) if is_idle_read_timeout(&error) => (),
                                 Err(error) => {
                                     eprintln!("[capture] socket error: {error} ({url})");
                                     break;
@@ -674,8 +780,9 @@ pub fn parse_diff(text: &str) -> Option<MarketEvent> {
     }
     Some(MarketEvent::Diff(DiffFrame {
         event_time_ms: num(v.get("E"))? as i64,
-        first_update_id: u64_of(v.get("U")).unwrap_or(0),
+        first_update_id: u64_of(v.get("U"))?,
         final_update_id: u64_of(v.get("u"))?,
+        previous_update_id: Some(u64_of(v.get("pu"))?),
         updates,
     }))
 }
@@ -717,6 +824,7 @@ pub fn parse_bybit_diff(text: &str) -> Option<MarketEvent> {
         event_time_ms: i64::try_from(u64_of(envelope.get("ts"))?).ok()?,
         first_update_id: update_id,
         final_update_id: update_id,
+        previous_update_id: None,
         updates,
     }))
 }
@@ -840,6 +948,8 @@ pub fn run_capture(config: CaptureConfig) -> Result<(), String> {
             guard.source_reseed_failed[MarketSource::Binance.index()] = true;
         }
     }
+
+    seed_strategies_from_rest(&capture, &config.fanout_instances, &config.symbol)?;
 
     let max_rows = config.max_rows;
     spawn_stream(
@@ -1198,6 +1308,28 @@ mod tests {
     use super::*;
 
     #[test]
+    fn warmup_lookback_is_selected_from_any_loaded_strategy() {
+        let instances = vec!["example_strategy@btcusdt".to_string()];
+        assert_eq!(
+            warmup_lookback_for_instances(&instances, "BTCUSDT").unwrap(),
+            crate::live_strategy::DEFAULT_WARMUP_LOOKBACK_SECS
+        );
+    }
+
+    #[test]
+    fn websocket_idle_read_timeout_does_not_disconnect_stream() {
+        assert!(is_idle_read_timeout(&tungstenite::Error::Io(
+            std::io::Error::from(std::io::ErrorKind::WouldBlock)
+        )));
+        assert!(is_idle_read_timeout(&tungstenite::Error::Io(
+            std::io::Error::from(std::io::ErrorKind::TimedOut)
+        )));
+        assert!(!is_idle_read_timeout(&tungstenite::Error::Io(
+            std::io::Error::from(std::io::ErrorKind::ConnectionReset)
+        )));
+    }
+
+    #[test]
     fn parses_a_combined_stream_agg_trade() {
         let text = r#"{"stream":"btcusdt@aggTrade","data":{"e":"aggTrade","E":1751245200354,"a":2773899591,"p":"108665.6","q":"0.002","f":6438488841,"l":6438488841,"T":1751245200354,"m":true}}"#;
         match parse_trade(text).expect("parsed") {
@@ -1226,11 +1358,12 @@ mod tests {
 
     #[test]
     fn parses_a_diff_frame_with_both_sides() {
-        let text = r#"{"e":"depthUpdate","E":1751245200406,"U":1,"u":10,"b":[["108665.5","9.141"]],"a":[["108665.6","12.556"]]}"#;
+        let text = r#"{"e":"depthUpdate","E":1751245200406,"U":1,"u":10,"pu":0,"b":[["108665.5","9.141"]],"a":[["108665.6","12.556"]]}"#;
         match parse_diff(text).expect("parsed") {
             MarketEvent::Diff(f) => {
                 assert_eq!(f.first_update_id, 1);
                 assert_eq!(f.final_update_id, 10);
+                assert_eq!(f.previous_update_id, Some(0));
                 assert_eq!(f.updates.len(), 2);
                 assert!(f.updates[0].is_bid, "bids come first");
                 assert_eq!(f.updates[0].price, 108665.5);
@@ -1243,7 +1376,7 @@ mod tests {
     #[test]
     fn diff_keeps_zero_quantity_so_levels_can_be_removed() {
         // A zero qty removes a level; dropping it would leave a phantom level.
-        let text = r#"{"e":"depthUpdate","E":1,"U":1,"u":2,"b":[["100.0","0"]],"a":[]}"#;
+        let text = r#"{"e":"depthUpdate","E":1,"U":1,"u":2,"pu":0,"b":[["100.0","0"]],"a":[]}"#;
         match parse_diff(text).expect("parsed") {
             MarketEvent::Diff(f) => {
                 assert_eq!(f.updates.len(), 1);
@@ -1255,7 +1388,7 @@ mod tests {
 
     #[test]
     fn malformed_levels_are_skipped_not_fatal() {
-        let text = r#"{"e":"depthUpdate","E":1,"U":1,"u":2,"b":[["bad","1"],["2.0"],"3",["4.0","5.0"]],"a":[]}"#;
+        let text = r#"{"e":"depthUpdate","E":1,"U":1,"u":2,"pu":0,"b":[["bad","1"],["2.0"],"3",["4.0","5.0"]],"a":[]}"#;
         match parse_diff(text).expect("parsed") {
             MarketEvent::Diff(f) => assert_eq!(f.updates.len(), 1),
             other => panic!("expected a diff, got {other:?}"),
@@ -1266,7 +1399,7 @@ mod tests {
     fn rejects_a_frame_missing_its_final_update_id() {
         // Without `u` the sequence cannot advance, so the frame is refused
         // rather than silently resetting continuity.
-        let text = r#"{"e":"depthUpdate","E":1,"U":1,"b":[],"a":[]}"#;
+        let text = r#"{"e":"depthUpdate","E":1,"U":1,"u":2,"b":[],"a":[]}"#;
         assert!(parse_diff(text).is_none());
     }
 
@@ -1350,15 +1483,15 @@ mod end_to_end {
         // set the watermark far into the future and make every real event
         // look late, dropping all of them.
         capture.merger.apply_seed(&BookSnapshot {
-            last_update_id: 7_911_048_639_390,
+            last_update_id: 1,
             bids: vec![(108_663.2, 0.095), (108_662.9, 0.553), (108_653.8, 0.025)],
             asks: vec![(108_666.0, 0.004), (108_668.8, 0.002), (108_668.9, 0.562)],
         });
 
         for text in [
-            r#"{"e":"depthUpdate","E":1751245200083,"U":1,"u":2,"b":[["108663.2","9.141"]],"a":[["108665.6","12.556"]]}"#,
+            r#"{"e":"depthUpdate","E":1751245200083,"U":2,"u":3,"pu":1,"b":[["108663.2","9.141"]],"a":[["108665.6","12.556"]]}"#,
             r#"{"e":"aggTrade","E":1751245200354,"a":2773899591,"p":"108665.6","q":"0.002","f":6438488841,"l":6438488841,"T":1751245200354,"m":true}"#,
-            r#"{"e":"depthUpdate","E":1751245200406,"U":3,"u":4,"b":[["108653.8","0.025"]],"a":[["108666.0","0.004"]]}"#,
+            r#"{"e":"depthUpdate","E":1751245200406,"U":4,"u":5,"pu":3,"b":[["108653.8","0.025"]],"a":[["108666.0","0.004"]]}"#,
             r#"{"e":"aggTrade","E":1751245200441,"a":2773899592,"p":"108665.5","q":"0.303","f":6438488842,"l":6438488842,"T":1751245200441,"m":false}"#,
         ] {
             let event = parse_diff(text)
@@ -1510,6 +1643,261 @@ mod end_to_end {
 #[cfg(test)]
 mod strategy_fanout_tests {
     use super::*;
+
+    #[test]
+    fn websocket_stream_reaches_every_registered_strategy_without_errors() {
+        use crate::core::strategy::{Decision, MarketState, Position};
+        use crate::live_strategy::ofmr::{
+            features::OfmrFeatures, settings::Settings, socket::decode_frame,
+            strategy::OfmrStrategy,
+        };
+        use crate::live_strategy::{LiveStrategy, available_strategies, load_strategy};
+        use std::net::TcpListener;
+        use std::path::Path;
+        use tungstenite::{Message, accept};
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind local websocket test server");
+        let address = listener.local_addr().expect("get local websocket address");
+        let (shutdown_server, server_shutdown) = std::sync::mpsc::channel();
+        let server = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().expect("accept websocket client");
+            let mut socket = accept(stream).expect("perform websocket handshake");
+            let first_event_time = 1_700_000_000_000_i64;
+            for bar in 0..50_u64 {
+                let price = 100.0 + bar as f64 * 0.1;
+                let event_time = first_event_time + bar as i64 * 300_000;
+                let depth = serde_json::json!({
+                    "stream": "btcusdt@depth@100ms",
+                    "data": {
+                        "e": "depthUpdate",
+                        "E": event_time,
+                        "U": bar + 2,
+                        "u": bar + 2,
+                        "pu": bar + 1,
+                        "b": [[format!("{:.1}", price - 0.1), "2.0"]],
+                        "a": [[format!("{:.1}", price + 0.1), "3.0"]]
+                    }
+                });
+                let trade = serde_json::json!({
+                    "stream": "btcusdt@aggTrade",
+                    "data": {
+                        "e": "aggTrade",
+                        "E": event_time + 1,
+                        "T": event_time + 1,
+                        "a": bar + 10,
+                        "f": bar + 10,
+                        "l": bar + 10,
+                        "p": format!("{price:.1}"),
+                        "q": format!("{:.3}", 0.1 + (bar % 5) as f64 * 0.01),
+                        "m": bar % 2 == 0
+                    }
+                });
+                socket
+                    .send(Message::Text(depth.to_string()))
+                    .expect("send depth event");
+                socket
+                    .send(Message::Text(trade.to_string()))
+                    .expect("send trade event");
+            }
+            server_shutdown
+                .recv_timeout(Duration::from_secs(5))
+                .expect("test should finish reading strategy frames");
+            socket.close(None).expect("close websocket cleanly");
+        });
+
+        let directory = tempfile::tempdir().expect("create test output directory");
+        let output = directory.path().join("capture.csv");
+        let (fanout, strategy_frames) = std::sync::mpsc::sync_channel(256);
+        let mut merger = Merger::new(DEFAULT_LEVELS);
+        merger.apply_seed(&BookSnapshot {
+            last_update_id: 1,
+            bids: vec![(99.0, 2.0)],
+            asks: vec![(101.0, 3.0)],
+        });
+        let capture = Arc::new(Mutex::new(Capture {
+            merger,
+            reorder: ReorderBuffer::new(0, 8),
+            csv: CsvRecorder::create(&output).expect("create capture CSV"),
+            rows_written: 0,
+            reseeds_pending: false,
+            fanout_skipped_invalid_book: 0,
+            fanout: Some(fanout),
+            fanout_failed: Arc::new(AtomicBool::new(false)),
+            fanout_queue_depth: Arc::new(AtomicUsize::new(0)),
+            received_times: BTreeMap::new(),
+            last_persistence_write_ms: 0.0,
+            persistence_errors: 0,
+            active_source: MarketSource::Binance,
+            last_source_event: [None, None],
+            source_reseed_failed: [false, false],
+            last_source_evaluation: Instant::now(),
+        }));
+        let keep_running = Arc::new(AtomicBool::new(true));
+        let rows_seen = Arc::new(AtomicU64::new(0));
+        spawn_stream(
+            format!("ws://{address}"),
+            None,
+            {
+                let capture = Arc::clone(&capture);
+                let keep_running = Arc::clone(&keep_running);
+                let rows_seen = Arc::clone(&rows_seen);
+                move |text| {
+                    if let Some(event) = parse_diff(text).or_else(|| parse_trade(text)) {
+                        push(
+                            &capture,
+                            &rows_seen,
+                            &keep_running,
+                            None,
+                            event,
+                            wall_time_ms(),
+                            MarketSource::Binance,
+                        );
+                    }
+                }
+            },
+            || {},
+            Arc::clone(&keep_running),
+        );
+
+        let strategy_names = available_strategies();
+        assert!(
+            !strategy_names.is_empty(),
+            "at least one live strategy must be registered"
+        );
+        let mut strategies: Vec<LiveStrategy> = strategy_names
+            .iter()
+            .map(|name| {
+                if name == "ofmr" {
+                    let mut settings = Settings::default();
+                    settings.model.path = Path::new(env!("CARGO_MANIFEST_DIR"))
+                        .join("models/ofmr/trader.txt")
+                        .display()
+                        .to_string();
+                    settings.model.threshold = 0.25;
+                    let builder = OfmrStrategy::try_with_settings(settings.clone())
+                        .expect("the OFMR model should load");
+                    LiveStrategy {
+                        name: name.clone(),
+                        computer: Box::new(OfmrFeatures::with_settings(settings)),
+                        builder: Box::new(builder),
+                    }
+                } else {
+                    load_strategy(name)
+                        .unwrap_or_else(|error| panic!("load registered strategy {name}: {error}"))
+                }
+            })
+            .collect();
+        let feature_names: Vec<Vec<String>> = strategies
+            .iter()
+            .map(|strategy| strategy.computer.output_names())
+            .collect();
+        for (strategy, names) in strategies.iter().zip(&feature_names) {
+            assert!(
+                !names.is_empty(),
+                "registered strategy {} must declare output features",
+                strategy.name
+            );
+        }
+        let mut ready_inputs = vec![0; strategies.len()];
+        let mut price_rows_seen = vec![0; strategies.len()];
+        let mut decisions_made = vec![0; strategies.len()];
+        let mut ofmr_entries = 0;
+        for event_index in 0..100 {
+            let frame = strategy_frames
+                .recv_timeout(Duration::from_secs(5))
+                .expect("websocket event should be forwarded to every strategy");
+            let payload_length =
+                u32::from_le_bytes(frame[..4].try_into().expect("read frame length")) as usize;
+            assert_eq!(payload_length, frame.len() - 4);
+            let row = decode_frame(&frame[4..]).expect("strategies should decode the market frame");
+            assert!(row.get("event_time_ms").is_some());
+            assert!(row.get("bid_price").is_some());
+            assert!(row.get("ask_price").is_some());
+            assert_eq!(
+                row.get("price").is_some(),
+                event_index % 2 == 1,
+                "depth and aggregate-trade rows should retain their event type"
+            );
+            for (index, strategy) in strategies.iter_mut().enumerate() {
+                let computed = strategy.computer.compute(&row).unwrap_or_else(|error| {
+                    panic!(
+                        "strategy {} feature computation failed: {error}",
+                        strategy.name
+                    )
+                });
+                for name in &feature_names[index] {
+                    assert!(
+                        computed.contains(name),
+                        "strategy {} omitted declared feature {name}",
+                        strategy.name
+                    );
+                }
+                if row.get("price").is_some() {
+                    price_rows_seen[index] += 1;
+                }
+                if feature_names[index]
+                    .iter()
+                    .all(|name| computed.get(name).is_some())
+                {
+                    ready_inputs[index] += 1;
+                }
+                let decision = strategy.builder.decide(&MarketState {
+                    features: computed,
+                    position: Position::Flat,
+                    sequence: event_index,
+                });
+                assert!(
+                    matches!(
+                        decision,
+                        Decision::Hold
+                            | Decision::EnterLong
+                            | Decision::EnterShort
+                            | Decision::Exit
+                    ),
+                    "strategy {} must return a valid decision",
+                    strategy.name
+                );
+                if strategy.name == "ofmr"
+                    && matches!(decision, Decision::EnterLong | Decision::EnterShort)
+                {
+                    ofmr_entries += 1;
+                }
+                decisions_made[index] += 1;
+            }
+        }
+
+        keep_running.store(false, Ordering::Release);
+        shutdown_server
+            .send(())
+            .expect("signal the websocket server to close");
+        server.join().expect("local websocket server should finish");
+        assert_eq!(rows_seen.load(Ordering::Acquire), 100);
+        for (index, name) in strategy_names.iter().enumerate() {
+            assert_eq!(
+                price_rows_seen[index], 50,
+                "strategy {name} must receive every aggregate-trade price row"
+            );
+            assert_eq!(
+                decisions_made[index], 100,
+                "strategy {name} must produce a decision for every websocket event"
+            );
+            assert!(
+                ready_inputs[index] > 0,
+                "websocket events should populate all declared inputs for strategy {name}"
+            );
+        }
+        assert!(
+            ofmr_entries > 0,
+            "the loaded OFMR model should emit at least one entry on the deterministic, warmed market sequence"
+        );
+        assert!(
+            !capture
+                .lock()
+                .expect("capture mutex")
+                .fanout_failed
+                .load(Ordering::Acquire)
+        );
+    }
 
     #[test]
     fn depth_disconnect_marks_book_stale_until_rest_reseed() {
@@ -1712,6 +2100,7 @@ mod strategy_fanout_tests {
                     event_time_ms: 200,
                     first_update_id: 1,
                     final_update_id: 2,
+                    previous_update_id: None,
                     updates: vec![],
                 }),
                 200,
@@ -1762,6 +2151,7 @@ mod strategy_fanout_tests {
                     event_time_ms: 200,
                     first_update_id: 1,
                     final_update_id: 2,
+                    previous_update_id: None,
                     updates: vec![],
                 }),
                 200,
@@ -1777,3 +2167,4 @@ mod strategy_fanout_tests {
         let _ = std::fs::remove_file(path);
     }
 }
+

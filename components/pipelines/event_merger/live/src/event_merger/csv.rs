@@ -267,6 +267,7 @@ mod tests {
             event_time_ms: ts,
             first_update_id: first,
             final_update_id: last,
+            previous_update_id: None,
             updates: vec![BookUpdate {
                 is_bid: true,
                 price: 99.5,

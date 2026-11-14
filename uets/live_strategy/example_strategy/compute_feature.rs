@@ -48,6 +48,10 @@ impl ComputeFeatures for ExampleFeatures {
     fn output_names(&self) -> Vec<String> {
         vec!["dz".to_string()]
     }
+
+    fn reset(&mut self) {
+        self.window.clear();
+    }
 }
 
 #[cfg(test)]

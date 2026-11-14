@@ -14,10 +14,14 @@ use super::{LiveStrategy, traits};
 
 /// Fresh bundle with independent state (called per runner slot).
 pub fn load() -> Result<LiveStrategy, String> {
+    let settings = settings::Settings::try_load()?;
+    let computer = features::OfmrFeatures::with_settings(settings.clone());
+    let builder = strategy::OfmrStrategy::try_with_settings(settings)
+        .map_err(|error| format!("load OFMR model: {error}"))?;
     Ok(LiveStrategy {
         name: "ofmr".to_string(),
-        computer: Box::new(features::OfmrFeatures::new()),
-        builder: Box::new(strategy::OfmrStrategy::new()),
+        computer: Box::new(computer),
+        builder: Box::new(builder),
     })
 }
 
