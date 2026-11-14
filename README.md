@@ -21,19 +21,20 @@ Once finished, continue to Run UETS to compile binary files
 
 ## Set up a UETS VPS
 
-Run this on the VPS to fetch the installer and provision the machine:
+On Ubuntu/Debian, run these commands on the VPS to install UETS and enable
+verified S3 archival:
 
 ```bash
+sudo apt update
+sudo apt install -y ca-certificates curl
 curl -fsSL https://raw.githubusercontent.com/hmzk1422/osadp-core/main/deploy/install_vps.sh -o install_vps.sh
-sudo bash install_vps.sh --archive-uri s3://YOUR_BUCKET/cold-sst --region ap-southeast-2
+sudo bash install_vps.sh --strategy ofmr@btcusdt --archive-uri s3://YOUR_BUCKET/cold-sst --region ap-southeast-2
 ```
 
-The installer fetches the latest published UETS bundle, verifies its checksum,
-installs packages, tmux, the `uets` account, persistent storage, systemd
-startup, crash recovery, and optional S3 archival. It checks for newer releases
-daily and installs them while preserving runtime data and local YAML
-configuration. Use an EC2 IAM instance profile for S3 access. See
-[VPS operations](./VPS_SERVER_SETUP.md) for commands and details.
+The installer creates the `uets` user and configures packages, tmux, systemd,
+crash recovery, and daily release updates. Use an EC2 IAM instance profile for
+S3 access. See [VPS setup and operations](./VPS_SERVER_SETUP.md) for update,
+status, tmux, and service commands.
 
 ## Run UETS
 

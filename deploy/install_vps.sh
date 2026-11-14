@@ -7,13 +7,15 @@ readonly APP_DIR="${APP_ROOT}/${APP_NAME}"
 readonly CONFIG_DIR="/etc/uets"
 readonly STATE_DIR="/var/lib/uets"
 readonly SERVICE_NAME="uets-tmux"
-readonly RELEASE_BUNDLE_URL="https://github.com/hmzk1422/osadp-core/releases/latest/download/uets-linux-x86_64.tar.gz"
+readonly RELEASE_ARCHIVE_NAME="uets-linux-x86_64-amazonlinux2023.1.zip"
+readonly RELEASE_BUNDLE_URL="https://github.com/hmzk1422/osadp-core/releases/latest/download/${RELEASE_ARCHIVE_NAME}"
 
 bundle=""
 strategy="ofmr@btcusdt"
 archive_uri=""
 aws_region="ap-southeast-2"
 update_only=0
+release_download=0
 
 usage() {
     cat <<'USAGE'
@@ -82,6 +84,14 @@ fi
 command -v systemctl >/dev/null 2>&1 || die "systemd is required"
 [[ -r /etc/os-release ]] || die "cannot identify the Linux distribution"
 
+if [[ -z "${bundle}" ]]; then
+    command -v curl >/dev/null 2>&1 || die "curl is required to download the release bundle"
+    if ! curl --proto '=https' --tlsv1.2 --fail --silent --show-error \
+        --location --head --output /dev/null "${RELEASE_BUNDLE_URL}"; then
+        die "the latest GitHub release does not contain ${RELEASE_ARCHIVE_NAME}. Publish a release with the CI/CD bundle attached, then rerun this command."
+    fi
+fi
+
 # shellcheck disable=SC1091
 source /etc/os-release
 case "${ID:-}" in
@@ -89,7 +99,7 @@ case "${ID:-}" in
         if ((!update_only)); then
             export DEBIAN_FRONTEND=noninteractive
             apt-get update
-            packages=(ca-certificates curl tar tmux util-linux zstd)
+            packages=(ca-certificates curl tar tmux unzip util-linux zstd)
             if [[ -n "${archive_uri}" || -f "${CONFIG_DIR}/archive.env" ]]; then
                 packages+=(awscli)
             fi
@@ -98,7 +108,7 @@ case "${ID:-}" in
         ;;
     amzn)
         if ((!update_only)); then
-            packages=(ca-certificates curl tar tmux util-linux zstd)
+            packages=(ca-certificates curl tar tmux unzip util-linux zstd)
             if [[ -n "${archive_uri}" || -f "${CONFIG_DIR}/archive.env" ]]; then
                 packages+=(awscli-2)
             fi
@@ -122,20 +132,40 @@ cleanup() {
 }
 trap cleanup EXIT
 
-if [[ -z "${bundle}" || "${bundle}" == https://* ]]; then
+if [[ -z "${bundle}" ]]; then
+    bundle="${RELEASE_BUNDLE_URL}"
+    release_download=1
+fi
+
+if [[ "${bundle}" == https://* ]]; then
     command -v curl >/dev/null 2>&1 || die "curl is required to download the bundle"
-    if [[ -z "${bundle}" ]]; then
-        bundle="${RELEASE_BUNDLE_URL}"
+    download_name="${APP_NAME}.tar.gz"
+    if ((release_download)) || [[ "${bundle%%\?*}" == *.zip ]]; then
+        download_name="${RELEASE_ARCHIVE_NAME}"
     fi
     curl --proto '=https' --tlsv1.2 --fail --location --retry 3 \
-        "${bundle}" --output "${stage}/${APP_NAME}.tar.gz"
-    if [[ "${bundle}" == "${RELEASE_BUNDLE_URL}" ]]; then
-        curl --proto '=https' --tlsv1.2 --fail --location --retry 3 \
-            "${RELEASE_BUNDLE_URL}.sha256" --output "${stage}/${APP_NAME}.tar.gz.sha256"
-        (cd "${stage}" && sha256sum --check "${APP_NAME}.tar.gz.sha256") ||
-            die "release bundle SHA-256 verification failed"
+        "${bundle}" --output "${stage}/${download_name}"
+    bundle="${stage}/${download_name}"
+fi
+
+if [[ "${bundle}" == *.zip ]]; then
+    command -v unzip >/dev/null 2>&1 || die "unzip is required to read the release bundle"
+    unzip -tq "${bundle}" >/dev/null || die "release bundle is not a valid ZIP archive"
+    if ((release_download)); then
+        checksum_file="${stage}/${RELEASE_ARCHIVE_NAME}.sha256"
+        if curl --proto '=https' --tlsv1.2 --fail --silent --show-error \
+            --location "${RELEASE_BUNDLE_URL}.sha256" --output "${checksum_file}" 2>/dev/null; then
+            (cd "${stage}" && sha256sum --check "${RELEASE_ARCHIVE_NAME}.sha256") ||
+                die "release bundle SHA-256 verification failed"
+        else
+            echo "WARNING: release has no SHA-256 sidecar; relying on HTTPS and ZIP integrity." >&2
+        fi
     fi
-    bundle="${stage}/${APP_NAME}.tar.gz"
+    tarball="${stage}/${APP_NAME}.tar.gz"
+    unzip -p "${bundle}" "${APP_NAME}.tar.gz" >"${tarball}" ||
+        die "release ZIP does not contain ${APP_NAME}.tar.gz"
+    [[ -s "${tarball}" ]] || die "release ZIP contains an empty UETS tarball"
+    bundle="${tarball}"
 fi
 
 tar -tzf "${bundle}" >/dev/null || die "bundle is not a valid .tar.gz archive"
@@ -152,6 +182,8 @@ for required in restart_uets.sh run_uets_tmux.sh cloud.sh \
     [[ -f "${new_app}/${required}" ]] || die "bundle is missing ${required}"
 done
 chmod 0755 "${new_app}/restart_uets.sh" "${new_app}/run_uets_tmux.sh" "${new_app}/cloud.sh"
+installer_source="$(readlink -f -- "${BASH_SOURCE[0]}")"
+install -o root -g root -m 0755 "${installer_source}" "${new_app}/deploy/install_vps.sh"
 "${new_app}/bin/uets" help >/dev/null || die "UETS binary failed its help check"
 new_version="$(<"${new_app}/VERSION")"
 [[ "${new_version}" =~ ^[A-Za-z0-9._-]+$ ]] || die "invalid bundle version '${new_version}'"
@@ -207,6 +239,8 @@ if ! mv -- "${new_app}" "${APP_DIR}"; then
     die "could not install the UETS bundle"
 fi
 chown -R uets:uets "${APP_DIR}"
+chown root:root "${APP_DIR}/deploy/install_vps.sh"
+chmod 0755 "${APP_DIR}/deploy/install_vps.sh"
 
 if ((!update_only)); then
     printf 'UETS_STRATEGY=%s\n' "${strategy}" >"${CONFIG_DIR}/uets.env"
